@@ -108,8 +108,8 @@ async fn handle_client(
             send_response(&mut writer, &Response::SessionList { sessions }).await?;
         }
 
-        Request::Launch { prompt, working_dir } => {
-            let result = manager.lock().await.launch(prompt, working_dir);
+        Request::Launch { prompt, working_dir, cmd } => {
+            let result = manager.lock().await.launch(prompt, working_dir, cmd);
             match result {
                 Ok(id) => send_response(&mut writer, &Response::Launched { id }).await?,
                 Err(e) => {

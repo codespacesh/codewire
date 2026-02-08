@@ -57,12 +57,13 @@ pub async fn list(data_dir: &Path, json: bool) -> Result<()> {
     Ok(())
 }
 
-pub async fn launch(data_dir: &Path, prompt: String, working_dir: String) -> Result<()> {
+pub async fn launch(data_dir: &Path, prompt: String, working_dir: String, cmd: String) -> Result<()> {
     let resp = request_response(
         data_dir,
         &Request::Launch {
             prompt: prompt.clone(),
             working_dir,
+            cmd,
         },
     )
     .await?;
@@ -95,7 +96,7 @@ pub async fn attach(data_dir: &Path, id: u32) -> Result<()> {
 
     match resp {
         Response::Attached { id } => {
-            eprintln!("[codewire] attached to session {id} (Ctrl+B d to detach)");
+            eprintln!("[cw] attached to session {id} (Ctrl+B d to detach)");
         }
         Response::Error { message } => bail!("{message}"),
         _ => bail!("unexpected response"),
@@ -131,12 +132,12 @@ pub async fn attach(data_dir: &Path, id: u32) -> Result<()> {
                         match resp {
                             Response::Detached => {
                                 drop(_guard);
-                                eprintln!("\r\n[codewire] detached from session {id}");
+                                eprintln!("\r\n[cw] detached from session {id}");
                                 return Ok(());
                             }
                             Response::Error { message } => {
                                 drop(_guard);
-                                eprintln!("\r\n[codewire] session ended: {message}");
+                                eprintln!("\r\n[cw] session ended: {message}");
                                 return Ok(());
                             }
                             _ => {}
@@ -145,7 +146,7 @@ pub async fn attach(data_dir: &Path, id: u32) -> Result<()> {
                     None => {
                         // Daemon disconnected
                         drop(_guard);
-                        eprintln!("\r\n[codewire] connection lost");
+                        eprintln!("\r\n[cw] connection lost");
                         return Ok(());
                     }
                 }

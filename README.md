@@ -1,8 +1,10 @@
 # Codewire
 
-Persistent process server for Claude Code sessions. Like tmux, but purpose-built for LLM processes — with native terminal scrolling, copy/paste, and no weird key chords to remember.
+Persistent process server for AI coding agents. Like tmux, but purpose-built for long-running LLM processes — with native terminal scrolling, copy/paste, and no weird key chords.
 
-Codewire runs as a daemon inside your development environment (e.g., a Coder workspace). You launch Claude Code sessions with a prompt, and they keep running even if you disconnect. Reconnect anytime to pick up where you left off.
+Codewire runs as a daemon inside your development environment (e.g., a Coder workspace). You launch AI agent sessions with a prompt, and they keep running even if you disconnect. Reconnect anytime to pick up where you left off.
+
+Works with any CLI-based AI agent: Claude Code, Aider, Goose, Codex, or anything else.
 
 ## Install
 
@@ -10,88 +12,111 @@ Codewire runs as a daemon inside your development environment (e.g., a Coder wor
 cargo install --path .
 ```
 
+This installs the `cw` binary.
+
 ## Quick Start
 
 ```bash
 # Launch a Claude Code session (daemon auto-starts)
-codewire launch "fix the auth bug in login.ts"
+cw launch "fix the auth bug in login.ts"
+
+# Use a different AI agent
+cw launch --cmd aider "fix the auth bug in login.ts"
+cw launch --cmd goose "refactor the database layer"
 
 # List running sessions
-codewire list
+cw list
 
 # Attach to a session
-codewire attach 1
+cw attach 1
 
 # Detach: Ctrl+B then d
 
-# View what Claude did while you were away
-codewire logs 1
+# View what the agent did while you were away
+cw logs 1
 ```
 
 ## Commands
 
-### `codewire launch <prompt>`
+### `cw launch <prompt>`
 
-Start a new Claude Code session with the given prompt.
+Start a new session with the given prompt.
 
 ```bash
-codewire launch "refactor the database layer"
-codewire launch "add unit tests for auth" --dir /home/coder/project
+cw launch "refactor the database layer"
+cw launch "add unit tests for auth" --dir /home/coder/project
+cw launch --cmd aider "fix the login bug"
 ```
 
-### `codewire list`
+Options:
+- `--dir`, `-d` — Working directory (defaults to current dir)
+- `--cmd` — Command to run (defaults to `claude`)
+
+### `cw list`
 
 Show all sessions with their status, age, and prompt.
 
 ```bash
-codewire list
-codewire list --json   # machine-readable output
+cw list
+cw list --json   # machine-readable output
 ```
 
-### `codewire attach <id>`
+### `cw attach <id>`
 
 Take over your terminal and connect to a running session. You get full terminal I/O — native scrolling, native copy/paste, everything your terminal emulator supports.
 
 Detach with **Ctrl+B d** (press Ctrl+B, release, then press d). The session keeps running.
 
-### `codewire logs <id>`
+### `cw logs <id>`
 
 View captured output from a session without attaching.
 
 ```bash
-codewire logs 1              # full output
-codewire logs 1 --follow     # tail -f style, streams new output
-codewire logs 1 --tail 100   # last 100 lines
+cw logs 1              # full output
+cw logs 1 --follow     # tail -f style, streams new output
+cw logs 1 --tail 100   # last 100 lines
 ```
 
-Works on completed sessions too — review what Claude did after it finished.
+Works on completed sessions too — review what the agent did after it finished.
 
-### `codewire kill <id>`
+### `cw kill <id>`
 
 Terminate a session.
 
 ```bash
-codewire kill 3
-codewire kill --all
+cw kill 3
+cw kill --all
 ```
 
-### `codewire daemon`
+### `cw daemon`
 
 Start the daemon manually. Usually you don't need this — the daemon auto-starts on first CLI invocation.
 
 ## How It Works
 
-Codewire is a single binary that acts as both daemon and CLI client.
+Codewire is a single Rust binary (`cw`) that acts as both daemon and CLI client.
 
-**Daemon** (`codewire daemon`): Listens on a Unix socket at `~/.codewire/server.sock`. Manages PTY sessions — each Claude Code process runs in its own pseudoterminal. The daemon owns the master side of each PTY and keeps processes alive regardless of client connections.
+**Daemon** (`cw daemon`): Listens on a Unix socket at `~/.codewire/server.sock`. Manages PTY sessions — each AI agent runs in its own pseudoterminal. The daemon owns the master side of each PTY and keeps processes alive regardless of client connections.
 
-**Client** (`codewire launch`, `attach`, etc.): Connects to the daemon's Unix socket. When you attach, the client puts your terminal in raw mode and bridges your stdin/stdout directly to the PTY. Your terminal emulator handles all rendering — that's why scrolling and copy/paste work natively.
+**Client** (`cw launch`, `attach`, etc.): Connects to the daemon's Unix socket. When you attach, the client puts your terminal in raw mode and bridges your stdin/stdout directly to the PTY. Your terminal emulator handles all rendering — that's why scrolling and copy/paste work natively.
 
 **Logs**: All PTY output is teed to `~/.codewire/sessions/<id>/output.log` so you can review what happened while disconnected.
 
+### Using Different AI Agents
+
+By default, `cw launch` runs `claude --dangerously-skip-permissions -p "<prompt>"`. Use `--cmd` to run a different tool:
+
+```bash
+cw launch --cmd aider "fix the bug"     # runs: aider "fix the bug"
+cw launch --cmd goose "add tests"       # runs: goose "add tests"
+cw launch --cmd codex "refactor auth"   # runs: codex "refactor auth"
+```
+
+When using `--cmd`, the prompt is passed as the first argument to the specified command.
+
 ### Wire Protocol
 
-Communication between client and daemon uses a simple frame-based binary protocol over the Unix socket:
+Communication between client and daemon uses a frame-based binary protocol over the Unix socket:
 
 - Frame format: `[type: u8][length: u32 BE][payload]`
 - Type `0x00`: Control messages (JSON) — launch, list, attach, detach, kill, resize
@@ -121,7 +146,7 @@ cargo build
 cargo test
 
 # Run with logging
-RUST_LOG=codewire=debug codewire daemon
+RUST_LOG=codewire=debug cw daemon
 ```
 
 ## License

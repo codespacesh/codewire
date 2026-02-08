@@ -20,7 +20,7 @@ fn dirs_path() -> Option<PathBuf> {
 }
 
 #[derive(Parser)]
-#[command(name = "codewire", about = "Persistent process server for Claude Code")]
+#[command(name = "cw", about = "Persistent process server for AI coding agents")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -31,14 +31,18 @@ enum Commands {
     /// Start the daemon (usually auto-started)
     Daemon,
 
-    /// Launch a new Claude Code session
+    /// Launch a new session
     Launch {
-        /// The prompt to send to Claude
+        /// The prompt to send to the AI agent
         prompt: String,
 
         /// Working directory (defaults to current dir)
         #[arg(long, short)]
         dir: Option<String>,
+
+        /// Command to run (defaults to "claude")
+        #[arg(long, default_value = "claude")]
+        cmd: String,
     },
 
     /// List all sessions
@@ -95,14 +99,14 @@ async fn main() -> Result<()> {
             daemon.run().await
         }
 
-        Commands::Launch { prompt, dir: work_dir } => {
+        Commands::Launch { prompt, dir: work_dir, cmd } => {
             ensure_daemon(&dir).await?;
             let work_dir = work_dir.unwrap_or_else(|| {
                 std::env::current_dir()
                     .map(|p| p.display().to_string())
                     .unwrap_or_else(|_| ".".to_string())
             });
-            client::launch(&dir, prompt, work_dir).await
+            client::launch(&dir, prompt, work_dir, cmd).await
         }
 
         Commands::List { json } => {
@@ -160,7 +164,7 @@ async fn ensure_daemon(data_dir: &PathBuf) -> Result<()> {
         .spawn()
         .context("spawning daemon")?;
 
-    eprintln!("[codewire] daemon started (pid {})", child.id());
+    eprintln!("[cw] daemon started (pid {})", child.id());
 
     // Wait for socket to appear
     for _ in 0..50 {

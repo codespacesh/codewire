@@ -67,6 +67,7 @@ async fn test_launch_and_list() {
     let resp = request_response(
         &sock,
         &Request::Launch {
+            cmd: "bash".to_string(),
             prompt: "echo hello-from-codewire && sleep 5".to_string(),
             working_dir: "/tmp".to_string(),
         },
@@ -105,6 +106,7 @@ async fn test_kill_session() {
     let resp = request_response(
         &sock,
         &Request::Launch {
+            cmd: "bash".to_string(),
             prompt: "sleep 60".to_string(),
             working_dir: "/tmp".to_string(),
         },
@@ -152,6 +154,7 @@ async fn test_kill_all() {
     request_response(
         &sock,
         &Request::Launch {
+            cmd: "bash".to_string(),
             prompt: "sleep 60".to_string(),
             working_dir: "/tmp".to_string(),
         },
@@ -160,6 +163,7 @@ async fn test_kill_all() {
     request_response(
         &sock,
         &Request::Launch {
+            cmd: "bash".to_string(),
             prompt: "sleep 60".to_string(),
             working_dir: "/tmp".to_string(),
         },
@@ -184,6 +188,7 @@ async fn test_session_completes_naturally() {
     let resp = request_response(
         &sock,
         &Request::Launch {
+            cmd: "bash".to_string(),
             prompt: "echo done".to_string(),
             working_dir: "/tmp".to_string(),
         },
@@ -220,6 +225,7 @@ async fn test_logs() {
     let resp = request_response(
         &sock,
         &Request::Launch {
+            cmd: "bash".to_string(),
             prompt: "echo LOG_TEST_OUTPUT_12345".to_string(),
             working_dir: "/tmp".to_string(),
         },
@@ -265,6 +271,7 @@ async fn test_attach_and_receive_output() {
     let resp = request_response(
         &sock,
         &Request::Launch {
+            cmd: "bash".to_string(),
             prompt: "for i in 1 2 3; do echo ATTACH_TEST_$i; sleep 1; done".to_string(),
             working_dir: "/tmp".to_string(),
         },
@@ -349,6 +356,7 @@ async fn test_attach_send_input() {
     let resp = request_response(
         &sock,
         &Request::Launch {
+            cmd: "bash".to_string(),
             prompt: "cat".to_string(),
             working_dir: "/tmp".to_string(),
         },
@@ -425,6 +433,7 @@ async fn test_detach_from_attach() {
     let resp = request_response(
         &sock,
         &Request::Launch {
+            cmd: "bash".to_string(),
             prompt: "sleep 30".to_string(),
             working_dir: "/tmp".to_string(),
         },
@@ -505,6 +514,7 @@ async fn test_resize_during_attach() {
     let resp = request_response(
         &sock,
         &Request::Launch {
+            cmd: "bash".to_string(),
             prompt: "sleep 10".to_string(),
             working_dir: "/tmp".to_string(),
         },
