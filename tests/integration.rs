@@ -34,12 +34,9 @@ async fn request_response(sock_path: &PathBuf, req: &Request) -> Response {
     }
 }
 
-/// Start a daemon in a background task, configured to use bash instead of claude.
+/// Start a daemon in a background task.
 async fn start_test_daemon(data_dir: &PathBuf) -> PathBuf {
     let daemon = Daemon::new(data_dir).unwrap();
-    daemon
-        .set_command("bash".to_string(), vec!["-c".to_string()])
-        .await;
 
     let sock_path = data_dir.join("server.sock");
     tokio::spawn(async move {
@@ -67,8 +64,7 @@ async fn test_launch_and_list() {
     let resp = request_response(
         &sock,
         &Request::Launch {
-            cmd: "bash".to_string(),
-            prompt: "echo hello-from-codewire && sleep 5".to_string(),
+            command: vec!["bash".into(), "-c".into(), "echo hello-from-codewire && sleep 5".into()],
             working_dir: "/tmp".to_string(),
         },
     )
@@ -91,7 +87,7 @@ async fn test_launch_and_list() {
             assert!(found.is_some(), "launched session should appear in list");
             let s = found.unwrap();
             assert_eq!(s.status, "running");
-            assert!(s.prompt.contains("hello-from-codewire"));
+            assert!(s.prompt.contains("hello-from-codewire"), "prompt should contain the command, got: {}", s.prompt);
         }
         other => panic!("expected SessionList, got: {other:?}"),
     }
@@ -106,8 +102,7 @@ async fn test_kill_session() {
     let resp = request_response(
         &sock,
         &Request::Launch {
-            cmd: "bash".to_string(),
-            prompt: "sleep 60".to_string(),
+            command: vec!["bash".into(), "-c".into(), "sleep 60".into()],
             working_dir: "/tmp".to_string(),
         },
     )
@@ -154,8 +149,7 @@ async fn test_kill_all() {
     request_response(
         &sock,
         &Request::Launch {
-            cmd: "bash".to_string(),
-            prompt: "sleep 60".to_string(),
+            command: vec!["bash".into(), "-c".into(), "sleep 60".into()],
             working_dir: "/tmp".to_string(),
         },
     )
@@ -163,8 +157,7 @@ async fn test_kill_all() {
     request_response(
         &sock,
         &Request::Launch {
-            cmd: "bash".to_string(),
-            prompt: "sleep 60".to_string(),
+            command: vec!["bash".into(), "-c".into(), "sleep 60".into()],
             working_dir: "/tmp".to_string(),
         },
     )
@@ -188,8 +181,7 @@ async fn test_session_completes_naturally() {
     let resp = request_response(
         &sock,
         &Request::Launch {
-            cmd: "bash".to_string(),
-            prompt: "echo done".to_string(),
+            command: vec!["bash".into(), "-c".into(), "echo done".into()],
             working_dir: "/tmp".to_string(),
         },
     )
@@ -225,8 +217,7 @@ async fn test_logs() {
     let resp = request_response(
         &sock,
         &Request::Launch {
-            cmd: "bash".to_string(),
-            prompt: "echo LOG_TEST_OUTPUT_12345".to_string(),
+            command: vec!["bash".into(), "-c".into(), "echo LOG_TEST_OUTPUT_12345".into()],
             working_dir: "/tmp".to_string(),
         },
     )
@@ -271,8 +262,7 @@ async fn test_attach_and_receive_output() {
     let resp = request_response(
         &sock,
         &Request::Launch {
-            cmd: "bash".to_string(),
-            prompt: "for i in 1 2 3; do echo ATTACH_TEST_$i; sleep 1; done".to_string(),
+            command: vec!["bash".into(), "-c".into(), "for i in 1 2 3; do echo ATTACH_TEST_$i; sleep 1; done".into()],
             working_dir: "/tmp".to_string(),
         },
     )
@@ -356,8 +346,7 @@ async fn test_attach_send_input() {
     let resp = request_response(
         &sock,
         &Request::Launch {
-            cmd: "bash".to_string(),
-            prompt: "cat".to_string(),
+            command: vec!["bash".into(), "-c".into(), "cat".into()],
             working_dir: "/tmp".to_string(),
         },
     )
@@ -433,8 +422,7 @@ async fn test_detach_from_attach() {
     let resp = request_response(
         &sock,
         &Request::Launch {
-            cmd: "bash".to_string(),
-            prompt: "sleep 30".to_string(),
+            command: vec!["bash".into(), "-c".into(), "sleep 30".into()],
             working_dir: "/tmp".to_string(),
         },
     )
@@ -514,8 +502,7 @@ async fn test_resize_during_attach() {
     let resp = request_response(
         &sock,
         &Request::Launch {
-            cmd: "bash".to_string(),
-            prompt: "sleep 10".to_string(),
+            command: vec!["bash".into(), "-c".into(), "sleep 10".into()],
             working_dir: "/tmp".to_string(),
         },
     )

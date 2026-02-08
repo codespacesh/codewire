@@ -2,10 +2,6 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-fn default_cmd() -> String {
-    "claude".to_string()
-}
-
 /// Frame types on the wire.
 const FRAME_CONTROL: u8 = 0x00;
 const FRAME_DATA: u8 = 0x01;
@@ -22,10 +18,8 @@ const MAX_PAYLOAD: u32 = 16 * 1024 * 1024;
 pub enum Request {
     ListSessions,
     Launch {
-        prompt: String,
+        command: Vec<String>,
         working_dir: String,
-        #[serde(default = "default_cmd")]
-        cmd: String,
     },
     Attach {
         id: u32,

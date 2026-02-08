@@ -27,11 +27,6 @@ impl Daemon {
         })
     }
 
-    /// Override the command that sessions run (for testing).
-    pub async fn set_command(&self, command: String, args: Vec<String>) {
-        self.manager.lock().await.set_command(command, args);
-    }
-
     pub async fn run(&self) -> Result<()> {
         // Write PID file
         std::fs::write(&self.pid_path, std::process::id().to_string())?;
@@ -108,8 +103,8 @@ async fn handle_client(
             send_response(&mut writer, &Response::SessionList { sessions }).await?;
         }
 
-        Request::Launch { prompt, working_dir, cmd } => {
-            let result = manager.lock().await.launch(prompt, working_dir, cmd);
+        Request::Launch { command, working_dir } => {
+            let result = manager.lock().await.launch(command, working_dir);
             match result {
                 Ok(id) => send_response(&mut writer, &Response::Launched { id }).await?,
                 Err(e) => {
