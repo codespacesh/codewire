@@ -68,10 +68,6 @@ static NEXT_ID: AtomicU32 = AtomicU32::new(1);
 pub struct SessionManager {
     sessions: HashMap<u32, Session>,
     data_dir: PathBuf,
-    /// Command to run. Defaults to "claude".
-    command: String,
-    /// Extra args prepended before the prompt. Defaults to ["--dangerously-skip-permissions", "-p"].
-    command_args: Vec<String>,
 }
 
 impl SessionManager {
@@ -90,22 +86,14 @@ impl SessionManager {
         Ok(Self {
             sessions: HashMap::new(),
             data_dir,
-            command: "claude".to_string(),
-            command_args: vec![
-                "--dangerously-skip-permissions".to_string(),
-                "-p".to_string(),
-            ],
         })
     }
 
-    /// Override the command and args (for testing).
-    pub fn set_command(&mut self, command: String, args: Vec<String>) {
-        self.command = command;
-        self.command_args = args;
-    }
-
-    /// Launch a new session with the given prompt.
-    pub fn launch(&mut self, prompt: String, working_dir: String, cmd: String) -> Result<u32> {
+    /// Launch a new session with the given command.
+    pub fn launch(&mut self, command: Vec<String>, working_dir: String) -> Result<u32> {
+        if command.is_empty() {
+            bail!("command must not be empty");
+        }
         let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
         let work_dir = PathBuf::from(&working_dir);
 
@@ -125,25 +113,17 @@ impl SessionManager {
             })
             .context("opening PTY")?;
 
-        // Determine command and args based on the requested cmd
-        let (run_cmd, run_args) = if cmd == self.command {
-            (self.command.clone(), self.command_args.clone())
-        } else {
-            // For non-default commands, pass prompt as a direct argument
-            // (different tools have different CLI conventions)
-            (cmd, vec![])
-        };
+        let display_command = command.join(" ");
 
-        let mut command = CommandBuilder::new(&run_cmd);
-        for arg in &run_args {
-            command.arg(arg);
+        let mut cmd = CommandBuilder::new(&command[0]);
+        for arg in &command[1..] {
+            cmd.arg(arg);
         }
-        command.arg(&prompt);
         if work_dir.exists() {
-            command.cwd(&work_dir);
+            cmd.cwd(&work_dir);
         }
 
-        let mut child = pair.slave.spawn_command(command).context("spawning process")?;
+        let mut child = pair.slave.spawn_command(cmd).context("spawning process")?;
         let pid = child.process_id();
         drop(pair.slave);
 
@@ -164,7 +144,7 @@ impl SessionManager {
 
         let meta = SessionMeta {
             id,
-            prompt,
+            prompt: display_command,
             working_dir: work_dir,
             created_at: Utc::now(),
             status: SessionStatus::Running,

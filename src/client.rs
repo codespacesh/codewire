@@ -57,20 +57,20 @@ pub async fn list(data_dir: &Path, json: bool) -> Result<()> {
     Ok(())
 }
 
-pub async fn launch(data_dir: &Path, prompt: String, working_dir: String, cmd: String) -> Result<()> {
+pub async fn launch(data_dir: &Path, command: Vec<String>, working_dir: String) -> Result<()> {
+    let display = command.join(" ");
     let resp = request_response(
         data_dir,
         &Request::Launch {
-            prompt: prompt.clone(),
+            command,
             working_dir,
-            cmd,
         },
     )
     .await?;
 
     match resp {
         Response::Launched { id } => {
-            println!("Session {id} launched: {prompt}");
+            println!("Session {id} launched: {display}");
         }
         Response::Error { message } => bail!("{message}"),
         _ => bail!("unexpected response"),

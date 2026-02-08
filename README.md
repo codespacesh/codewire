@@ -18,11 +18,14 @@ This installs the `cw` binary.
 
 ```bash
 # Launch a Claude Code session (daemon auto-starts)
-cw launch "fix the auth bug in login.ts"
+cw launch -- claude -p "fix the auth bug in login.ts"
 
 # Use a different AI agent
-cw launch --cmd aider "fix the auth bug in login.ts"
-cw launch --cmd goose "refactor the database layer"
+cw launch -- aider --message "fix the auth bug"
+cw launch -- goose run
+
+# Specify a working directory
+cw launch --dir /home/coder/project -- claude -p "add tests"
 
 # List running sessions
 cw list
@@ -38,19 +41,19 @@ cw logs 1
 
 ## Commands
 
-### `cw launch <prompt>`
+### `cw launch [--dir <dir>] -- <command> [args...]`
 
-Start a new session with the given prompt.
+Start a new session running the given command in a persistent PTY. Everything after `--` is the command and its arguments.
 
 ```bash
-cw launch "refactor the database layer"
-cw launch "add unit tests for auth" --dir /home/coder/project
-cw launch --cmd aider "fix the login bug"
+cw launch -- claude -p "refactor the database layer"
+cw launch --dir /home/coder/project -- claude -p "add unit tests for auth"
+cw launch -- aider --message "fix the login bug"
+cw launch -- bash -c "npm test && npm run lint"
 ```
 
 Options:
 - `--dir`, `-d` — Working directory (defaults to current dir)
-- `--cmd` — Command to run (defaults to `claude`)
 
 ### `cw list`
 
@@ -104,15 +107,14 @@ Codewire is a single Rust binary (`cw`) that acts as both daemon and CLI client.
 
 ### Using Different AI Agents
 
-By default, `cw launch` runs `claude --dangerously-skip-permissions -p "<prompt>"`. Use `--cmd` to run a different tool:
+Pass the exact command you want to run after `--`. No magic — what you type is what runs:
 
 ```bash
-cw launch --cmd aider "fix the bug"     # runs: aider "fix the bug"
-cw launch --cmd goose "add tests"       # runs: goose "add tests"
-cw launch --cmd codex "refactor auth"   # runs: codex "refactor auth"
+cw launch -- claude -p "fix the bug"              # Claude Code
+cw launch -- aider --message "fix the bug"         # Aider
+cw launch -- goose run                             # Goose
+cw launch -- codex "refactor auth"                 # Codex
 ```
-
-When using `--cmd`, the prompt is passed as the first argument to the specified command.
 
 ### Wire Protocol
 

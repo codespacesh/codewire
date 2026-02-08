@@ -31,18 +31,15 @@ enum Commands {
     /// Start the daemon (usually auto-started)
     Daemon,
 
-    /// Launch a new session
+    /// Launch a new session: cw launch [--dir <dir>] -- <command> [args...]
     Launch {
-        /// The prompt to send to the AI agent
-        prompt: String,
-
         /// Working directory (defaults to current dir)
         #[arg(long, short)]
         dir: Option<String>,
 
-        /// Command to run (defaults to "claude")
-        #[arg(long, default_value = "claude")]
-        cmd: String,
+        /// Command and arguments to run (everything after --)
+        #[arg(trailing_var_arg = true, num_args = 1..)]
+        command: Vec<String>,
     },
 
     /// List all sessions
@@ -99,14 +96,14 @@ async fn main() -> Result<()> {
             daemon.run().await
         }
 
-        Commands::Launch { prompt, dir: work_dir, cmd } => {
+        Commands::Launch { dir: work_dir, command } => {
             ensure_daemon(&dir).await?;
             let work_dir = work_dir.unwrap_or_else(|| {
                 std::env::current_dir()
                     .map(|p| p.display().to_string())
                     .unwrap_or_else(|_| ".".to_string())
             });
-            client::launch(&dir, prompt, work_dir, cmd).await
+            client::launch(&dir, command, work_dir).await
         }
 
         Commands::List { json } => {
