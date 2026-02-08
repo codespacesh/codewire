@@ -2,6 +2,10 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
+fn default_cmd() -> String {
+    "claude".to_string()
+}
+
 /// Frame types on the wire.
 const FRAME_CONTROL: u8 = 0x00;
 const FRAME_DATA: u8 = 0x01;
@@ -20,6 +24,8 @@ pub enum Request {
     Launch {
         prompt: String,
         working_dir: String,
+        #[serde(default = "default_cmd")]
+        cmd: String,
     },
     Attach {
         id: u32,

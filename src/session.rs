@@ -104,8 +104,8 @@ impl SessionManager {
         self.command_args = args;
     }
 
-    /// Launch a new session running `claude` with the given prompt.
-    pub fn launch(&mut self, prompt: String, working_dir: String) -> Result<u32> {
+    /// Launch a new session with the given prompt.
+    pub fn launch(&mut self, prompt: String, working_dir: String, cmd: String) -> Result<u32> {
         let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
         let work_dir = PathBuf::from(&working_dir);
 
@@ -125,17 +125,25 @@ impl SessionManager {
             })
             .context("opening PTY")?;
 
-        // Spawn process
-        let mut cmd = CommandBuilder::new(&self.command);
-        for arg in &self.command_args {
-            cmd.arg(arg);
+        // Determine command and args based on the requested cmd
+        let (run_cmd, run_args) = if cmd == self.command {
+            (self.command.clone(), self.command_args.clone())
+        } else {
+            // For non-default commands, pass prompt as a direct argument
+            // (different tools have different CLI conventions)
+            (cmd, vec![])
+        };
+
+        let mut command = CommandBuilder::new(&run_cmd);
+        for arg in &run_args {
+            command.arg(arg);
         }
-        cmd.arg(&prompt);
+        command.arg(&prompt);
         if work_dir.exists() {
-            cmd.cwd(&work_dir);
+            command.cwd(&work_dir);
         }
 
-        let mut child = pair.slave.spawn_command(cmd).context("spawning claude")?;
+        let mut child = pair.slave.spawn_command(command).context("spawning process")?;
         let pid = child.process_id();
         drop(pair.slave);
 
