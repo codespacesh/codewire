@@ -9,10 +9,49 @@ Works with any CLI-based AI agent: Claude Code, Aider, Goose, Codex, or anything
 ## Install
 
 ```bash
-cargo install --path .
+curl -fsSL https://raw.githubusercontent.com/codespacesh/codewire/main/install.sh | bash
 ```
 
-This installs the `cw` binary.
+This downloads the latest binary, verifies its SHA256 checksum (and GPG signature if `gpg` is installed), and installs `cw` to `/usr/local/bin`.
+
+Options:
+
+```bash
+# Install a specific version
+curl -fsSL .../install.sh | bash -s -- --version v0.1.0
+
+# Install to a custom prefix
+curl -fsSL .../install.sh | bash -s -- --prefix ~/.local
+```
+
+### Manual install with verification
+
+```bash
+# Download binary, checksums, and signature
+VERSION=v0.1.0
+TARGET=aarch64-apple-darwin  # or x86_64-apple-darwin, x86_64-unknown-linux-musl, aarch64-unknown-linux-gnu
+curl -fsSL -O "https://github.com/codespacesh/codewire/releases/download/${VERSION}/cw-${VERSION}-${TARGET}"
+curl -fsSL -O "https://github.com/codespacesh/codewire/releases/download/${VERSION}/SHA256SUMS"
+curl -fsSL -O "https://github.com/codespacesh/codewire/releases/download/${VERSION}/SHA256SUMS.asc"
+
+# Verify GPG signature
+curl -fsSL https://raw.githubusercontent.com/codespacesh/codewire/main/GPG_PUBLIC_KEY.asc | gpg --import
+gpg --verify SHA256SUMS.asc SHA256SUMS
+
+# Verify checksum
+sha256sum --check --ignore-missing SHA256SUMS  # Linux
+shasum -a 256 --check --ignore-missing SHA256SUMS  # macOS
+
+# Install
+chmod +x "cw-${VERSION}-${TARGET}"
+sudo mv "cw-${VERSION}-${TARGET}" /usr/local/bin/cw
+```
+
+### Build from source
+
+```bash
+cargo install --path .
+```
 
 ## Quick Start
 
@@ -149,6 +188,23 @@ cargo test
 
 # Run with logging
 RUST_LOG=codewire=debug cw daemon
+```
+
+## Security
+
+Release binaries are signed with GPG. The public key is committed to this repository at [`GPG_PUBLIC_KEY.asc`](GPG_PUBLIC_KEY.asc).
+
+To verify a release:
+
+```bash
+# Import the public key
+curl -fsSL https://raw.githubusercontent.com/codespacesh/codewire/main/GPG_PUBLIC_KEY.asc | gpg --import
+
+# Verify checksums signature
+gpg --verify SHA256SUMS.asc SHA256SUMS
+
+# Verify binary checksum
+sha256sum --check --ignore-missing SHA256SUMS
 ```
 
 ## License
