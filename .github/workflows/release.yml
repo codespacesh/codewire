@@ -103,8 +103,8 @@ jobs:
         run: |
           echo "$GPG_PRIVATE_KEY" | gpg --batch --import
           cd artifacts
-          echo "$GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback \
-            --passphrase-fd 0 --armor --detach-sign SHA256SUMS
+          gpg --batch --yes --pinentry-mode loopback \
+            --passphrase "$GPG_PASSPHRASE" --armor --detach-sign SHA256SUMS
 
       - name: Create GitHub Release
         env:
