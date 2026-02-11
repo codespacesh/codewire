@@ -184,9 +184,21 @@ cw mcp-server
 
 See [MCP Integration](#mcp-integration) section below for details.
 
-### `cw daemon`
+### `cw start` / `cw daemon`
 
 Start the daemon manually. Usually you don't need this — the daemon auto-starts on first CLI invocation.
+
+```bash
+cw start
+```
+
+### `cw stop`
+
+Stop the running daemon gracefully.
+
+```bash
+cw stop
+```
 
 ## How It Works
 

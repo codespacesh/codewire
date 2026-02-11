@@ -40,6 +40,12 @@ enum Commands {
     /// Start the daemon (usually auto-started)
     Daemon,
 
+    /// Start the daemon (alias for daemon)
+    Start,
+
+    /// Stop the daemon
+    Stop,
+
     /// Launch a new session: cw launch [--dir <dir>] -- <command> [args...]
     Launch {
         /// Working directory (defaults to current dir)
@@ -149,13 +155,47 @@ async fn main() -> Result<()> {
     let dir = data_dir();
 
     match cli.command {
-        Commands::Daemon => {
+        Commands::Daemon | Commands::Start => {
             tracing_subscriber::fmt()
                 .with_env_filter(EnvFilter::from_default_env().add_directive("codewire=info".parse()?))
                 .init();
 
             let daemon = daemon::Daemon::new(&dir)?;
             daemon.run().await
+        }
+
+        Commands::Stop => {
+            let pid_file = dir.join("daemon.pid");
+            if !pid_file.exists() {
+                eprintln!("Daemon is not running (no PID file found)");
+                return Ok(());
+            }
+
+            let pid_str = std::fs::read_to_string(&pid_file)
+                .context("reading daemon PID file")?;
+            let pid: i32 = pid_str.trim().parse()
+                .context("parsing daemon PID")?;
+
+            // Send SIGTERM to daemon
+            use nix::sys::signal::{kill, Signal};
+            use nix::unistd::Pid;
+
+            match kill(Pid::from_raw(pid), Signal::SIGTERM) {
+                Ok(()) => {
+                    eprintln!("Daemon stopped (PID {})", pid);
+                    // Clean up PID file
+                    let _ = std::fs::remove_file(&pid_file);
+                    Ok(())
+                }
+                Err(nix::errno::Errno::ESRCH) => {
+                    eprintln!("Daemon is not running (stale PID file)");
+                    let _ = std::fs::remove_file(&pid_file);
+                    Ok(())
+                }
+                Err(e) => {
+                    bail!("Failed to stop daemon: {}", e)
+                }
+            }
         }
 
         Commands::Launch { dir: work_dir, command } => {
