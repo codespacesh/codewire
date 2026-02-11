@@ -66,8 +66,8 @@ enum Commands {
 
     /// Attach to a running session
     Attach {
-        /// Session ID
-        id: u32,
+        /// Session ID (omit to auto-select oldest unattached session)
+        id: Option<u32>,
     },
 
     /// Kill a session

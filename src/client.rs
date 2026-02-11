@@ -94,7 +94,38 @@ pub async fn launch(data_dir: &Path, command: Vec<String>, working_dir: String) 
     Ok(())
 }
 
-pub async fn attach(data_dir: &Path, id: u32) -> Result<()> {
+pub async fn attach(data_dir: &Path, id: Option<u32>) -> Result<()> {
+    // Auto-select session if ID not provided
+    let (id, auto_selected) = if let Some(id) = id {
+        (id, false)
+    } else {
+        // List all sessions
+        let resp = request_response(data_dir, &Request::ListSessions).await?;
+        match resp {
+            Response::SessionList { sessions } => {
+                // Filter for running unattached sessions
+                let mut candidates: Vec<_> = sessions
+                    .into_iter()
+                    .filter(|s| s.status == "running" && !s.attached)
+                    .collect();
+
+                if candidates.is_empty() {
+                    bail!(
+                        "No unattached running sessions available.\n\n\
+                        Use 'cw list' to see all sessions or 'cw launch' to start a new one"
+                    );
+                }
+
+                // Sort by created_at (oldest first)
+                candidates.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+
+                (candidates[0].id, true)
+            }
+            Response::Error { message } => bail!("{}", format_error(&message)),
+            _ => bail!("unexpected response from ListSessions"),
+        }
+    };
+
     let stream = connect(data_dir).await?;
     let (mut reader, mut writer) = stream.into_split();
 
@@ -112,7 +143,11 @@ pub async fn attach(data_dir: &Path, id: u32) -> Result<()> {
 
     match resp {
         Response::Attached { id } => {
-            eprintln!("[cw] attached to session {id} (Ctrl+B d to detach)");
+            if auto_selected {
+                eprintln!("[cw] attached to session {id} (auto-selected) (Ctrl+B d to detach)");
+            } else {
+                eprintln!("[cw] attached to session {id} (Ctrl+B d to detach)");
+            }
         }
         Response::Error { message } => bail!("{}", format_error(&message)),
         _ => bail!("unexpected response"),
