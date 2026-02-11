@@ -8,6 +8,15 @@ Works with any CLI-based AI agent: Claude Code, Aider, Goose, Codex, or anything
 
 ## Install
 
+### Homebrew (macOS/Linux)
+
+```bash
+brew tap codespacesh/tap
+brew install codewire
+```
+
+### Install Script
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/codespacesh/codewire/main/install.sh | bash
 ```
@@ -130,6 +139,51 @@ cw kill 3
 cw kill --all
 ```
 
+### `cw send <id> [input]`
+
+Send input to a session without attaching. Useful for multi-agent coordination.
+
+```bash
+cw send 1 "Status update?"                    # Send text with newline
+cw send 1 "test" --no-newline                 # No newline
+echo "command" | cw send 1 --stdin            # From stdin
+cw send 1 --file commands.txt                 # From file
+```
+
+### `cw watch <id>`
+
+Monitor a session in real-time without attaching. Perfect for observing another agent's progress.
+
+```bash
+cw watch 1                      # Watch with recent history
+cw watch 1 --tail 50            # Start from last 50 lines
+cw watch 1 --no-history         # Only new output
+cw watch 1 --timeout 60         # Auto-exit after 60 seconds
+```
+
+### `cw status <id>`
+
+Get detailed session status including PID, output size, and recent output.
+
+```bash
+cw status 1                     # Human-readable format
+cw status 1 --json              # JSON output
+```
+
+### `cw mcp-server`
+
+Start an MCP (Model Context Protocol) server for programmatic access. Compile with `--features mcp` flag.
+
+```bash
+# Build with MCP support
+cargo build --release --features mcp
+
+# Start MCP server
+cw mcp-server
+```
+
+See [MCP Integration](#mcp-integration) section below for details.
+
 ### `cw daemon`
 
 Start the daemon manually. Usually you don't need this — the daemon auto-starts on first CLI invocation.
@@ -175,6 +229,145 @@ Communication between client and daemon uses a frame-based binary protocol over 
     │   └── output.log    # Captured PTY output
     └── 2/
         └── output.log
+```
+
+## Multi-Agent Patterns
+
+CodeWire supports full cross-session communication, enabling multi-agent collaboration:
+
+### Multiple Attachments
+
+Multiple clients can attach to the same session simultaneously. Perfect for pair programming or monitoring.
+
+```bash
+# Terminal 1: Attach to session
+cw attach 1
+
+# Terminal 2: Also attach to same session (both see output)
+cw attach 1
+```
+
+### Supervisor Pattern
+
+One orchestrator LLM coordinates multiple worker sessions:
+
+```bash
+# Launch worker agents
+cw launch -- claude -p "implement feature X"  # Session 1
+cw launch -- claude -p "write tests"          # Session 2
+
+# From supervisor agent (via MCP or CLI):
+cw status 1                                   # Check progress
+cw watch 1 --timeout 30                       # Monitor for 30s
+cw send 1 "Status update?\n"                  # Request update
+```
+
+### Agent Swarms
+
+Multiple agents working in parallel on different tasks:
+
+```bash
+# Launch parallel agents
+cw launch -- claude -p "optimize backend"     # Session 1
+cw launch -- claude -p "optimize frontend"    # Session 2
+cw launch -- claude -p "coordinate both"      # Session 3 (coordinator)
+
+# Coordinator uses MCP or CLI to:
+# - Monitor progress: cw watch 1
+# - Send updates: cw send 1 "Frontend ready for integration"
+# - Check completion: cw status 1
+```
+
+### Debugging & Monitoring
+
+Watch another agent from a separate terminal:
+
+```bash
+# Launch agent
+cw launch -- claude -p "fix auth bug"
+
+# From another terminal, monitor progress
+cw watch 1 --tail 100
+
+# Send test input
+cw send 1 "/help"
+
+# Check detailed status
+cw status 1
+```
+
+## MCP Integration
+
+CodeWire provides an MCP (Model Context Protocol) server for programmatic access from AI agents like Claude Code.
+
+### Building with MCP Support
+
+```bash
+cargo build --release --features mcp
+```
+
+### Available MCP Tools
+
+The MCP server exposes these tools:
+
+| Tool | Description | Key Parameters |
+|------|-------------|----------------|
+| `codewire_list_sessions` | Discover sessions | `status_filter: "all"\|"running"\|"completed"` |
+| `codewire_read_session_output` | Read output snapshot | `session_id, tail?, max_chars?` |
+| `codewire_send_input` | Send input to session | `session_id, input, auto_newline?` |
+| `codewire_watch_session` | Monitor session (time-bounded) | `session_id, include_history?, history_lines?, max_duration_seconds?` |
+| `codewire_get_session_status` | Get detailed status | `session_id` |
+| `codewire_launch_session` | Launch new session | `command, working_dir?` |
+| `codewire_kill_session` | Terminate session | `session_id` |
+
+### Using from Claude Code
+
+Add CodeWire MCP server to your Claude Code configuration:
+
+```json
+{
+  "mcpServers": {
+    "codewire": {
+      "command": "/path/to/cw",
+      "args": ["mcp-server"]
+    }
+  }
+}
+```
+
+Then use the tools in your prompts:
+
+```
+Use codewire_list_sessions to see what agents are running.
+Use codewire_watch_session(session_id=1) to monitor progress.
+Use codewire_send_input(session_id=1, input="Status update?\n") to communicate.
+```
+
+### Example: Multi-Agent Workflow
+
+```python
+# Supervisor agent workflow via MCP
+
+# 1. Launch worker sessions
+codewire_launch_session(command=["claude", "-p", "implement feature X"])
+# Returns: session_id=1
+
+codewire_launch_session(command=["claude", "-p", "write tests"])
+# Returns: session_id=2
+
+# 2. Monitor progress
+codewire_watch_session(session_id=1, max_duration_seconds=30)
+# Returns: output stream for 30 seconds
+
+# 3. Check status
+codewire_get_session_status(session_id=1)
+# Returns: detailed status, PID, output size
+
+# 4. Send coordination messages
+codewire_send_input(session_id=1, input="Tests ready, please integrate\n")
+
+# 5. Read results
+codewire_read_session_output(session_id=1, tail=100)
 ```
 
 ## Development
