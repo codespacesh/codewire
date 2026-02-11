@@ -31,6 +31,12 @@ jobs:
           - target: aarch64-apple-darwin
             runner: macos-latest
             cross: false
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+            cross: false
+          - target: aarch64-pc-windows-msvc
+            runner: windows-latest
+            cross: false
 
     steps:
       - uses: actions/checkout@v4
@@ -67,15 +73,20 @@ jobs:
           fi
 
       - name: Rename binary
+        shell: bash
         run: |
           VERSION=${GITHUB_REF_NAME}
-          cp target/${{ matrix.target }}/release/cw cw-${VERSION}-${{ matrix.target }}
+          if [[ "${{ matrix.target }}" == *"windows"* ]]; then
+            cp target/${{ matrix.target }}/release/cw.exe cw-${VERSION}-${{ matrix.target }}.exe
+          else
+            cp target/${{ matrix.target }}/release/cw cw-${VERSION}-${{ matrix.target }}
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: cw-${{ matrix.target }}
-          path: cw-${{ github.ref_name }}-${{ matrix.target }}
+          path: cw-${{ github.ref_name }}-${{ matrix.target }}*
 
   release:
     name: Create Release
