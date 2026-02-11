@@ -1046,3 +1046,371 @@ async fn test_corrupt_sessions_json_recovery() {
 
     assert!(matches!(resp, Response::Launched { .. }));
 }
+
+// ---------------------------------------------------------------------------
+// Auto-attach tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_auto_attach_single_session() {
+    let dir = temp_dir("auto-attach-single");
+    let sock = start_test_daemon(&dir).await;
+
+    // Launch a single session
+    let resp = request_response(
+        &sock,
+        &Request::Launch {
+            command: vec!["bash".into(), "-c".into(), "sleep 10".into()],
+            working_dir: "/tmp".to_string(),
+        },
+    )
+    .await;
+    let id = match resp {
+        Response::Launched { id } => id,
+        other => panic!("expected Launched, got: {other:?}"),
+    };
+
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // Auto-attach (no ID specified - simulated by using ListSessions + Attach in client)
+    // This tests the protocol flow that client::attach uses
+    let list_resp = request_response(&sock, &Request::ListSessions).await;
+    let auto_id = match list_resp {
+        Response::SessionList { sessions } => {
+            let mut candidates: Vec<_> = sessions
+                .into_iter()
+                .filter(|s| s.status == "running" && !s.attached)
+                .collect();
+            candidates.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+            candidates[0].id
+        }
+        other => panic!("expected SessionList, got: {other:?}"),
+    };
+
+    assert_eq!(auto_id, id, "should auto-select the single running session");
+
+    // Attach to the auto-selected session
+    let resp = request_response(&sock, &Request::Attach { id: auto_id }).await;
+    match resp {
+        Response::Attached { id: attached_id } => assert_eq!(attached_id, id),
+        other => panic!("expected Attached, got: {other:?}"),
+    }
+
+    // Clean up
+    request_response(&sock, &Request::Kill { id }).await;
+}
+
+#[tokio::test]
+async fn test_auto_attach_oldest_session() {
+    let dir = temp_dir("auto-attach-oldest");
+    let sock = start_test_daemon(&dir).await;
+
+    // Launch three sessions with delays to ensure different timestamps
+    let resp1 = request_response(
+        &sock,
+        &Request::Launch {
+            command: vec!["bash".into(), "-c".into(), "sleep 30".into()],
+            working_dir: "/tmp".to_string(),
+        },
+    )
+    .await;
+    let id1 = match resp1 {
+        Response::Launched { id } => id,
+        other => panic!("expected Launched, got: {other:?}"),
+    };
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let resp2 = request_response(
+        &sock,
+        &Request::Launch {
+            command: vec!["bash".into(), "-c".into(), "sleep 30".into()],
+            working_dir: "/tmp".to_string(),
+        },
+    )
+    .await;
+    let id2 = match resp2 {
+        Response::Launched { id } => id,
+        other => panic!("expected Launched, got: {other:?}"),
+    };
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let resp3 = request_response(
+        &sock,
+        &Request::Launch {
+            command: vec!["bash".into(), "-c".into(), "sleep 30".into()],
+            working_dir: "/tmp".to_string(),
+        },
+    )
+    .await;
+    let id3 = match resp3 {
+        Response::Launched { id } => id,
+        other => panic!("expected Launched, got: {other:?}"),
+    };
+
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // Auto-select should pick the oldest (first) session
+    let list_resp = request_response(&sock, &Request::ListSessions).await;
+    let auto_id = match list_resp {
+        Response::SessionList { sessions } => {
+            let mut candidates: Vec<_> = sessions
+                .into_iter()
+                .filter(|s| s.status == "running" && !s.attached)
+                .collect();
+            candidates.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+            candidates[0].id
+        }
+        other => panic!("expected SessionList, got: {other:?}"),
+    };
+
+    assert_eq!(auto_id, id1, "should auto-select the oldest session (id1)");
+    assert_ne!(auto_id, id2, "should not select id2");
+    assert_ne!(auto_id, id3, "should not select id3");
+
+    // Clean up
+    request_response(&sock, &Request::Kill { id: id1 }).await;
+    request_response(&sock, &Request::Kill { id: id2 }).await;
+    request_response(&sock, &Request::Kill { id: id3 }).await;
+}
+
+#[tokio::test]
+async fn test_auto_attach_skips_attached() {
+    let dir = temp_dir("auto-skip-att");
+    let sock = start_test_daemon(&dir).await;
+
+    // Launch two sessions
+    let resp1 = request_response(
+        &sock,
+        &Request::Launch {
+            command: vec!["bash".into(), "-c".into(), "sleep 30".into()],
+            working_dir: "/tmp".to_string(),
+        },
+    )
+    .await;
+    let id1 = match resp1 {
+        Response::Launched { id } => id,
+        other => panic!("expected Launched, got: {other:?}"),
+    };
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let resp2 = request_response(
+        &sock,
+        &Request::Launch {
+            command: vec!["bash".into(), "-c".into(), "sleep 30".into()],
+            working_dir: "/tmp".to_string(),
+        },
+    )
+    .await;
+    let id2 = match resp2 {
+        Response::Launched { id } => id,
+        other => panic!("expected Launched, got: {other:?}"),
+    };
+
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // Attach to first session (keep connection alive)
+    let stream1 = UnixStream::connect(&sock).await.unwrap();
+    let (mut reader1, mut writer1) = stream1.into_split();
+    send_request(&mut writer1, &Request::Attach { id: id1 }).await.unwrap();
+    let _ = read_frame(&mut reader1).await.unwrap(); // Attached response
+
+    // Small delay to ensure attach state is updated
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    // Auto-select should skip the attached session and pick id2
+    let list_resp = request_response(&sock, &Request::ListSessions).await;
+    let auto_id = match list_resp {
+        Response::SessionList { sessions } => {
+            let mut candidates: Vec<_> = sessions
+                .into_iter()
+                .filter(|s| s.status == "running" && !s.attached)
+                .collect();
+            assert!(!candidates.is_empty(), "should have at least one unattached session");
+            candidates.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+            candidates[0].id
+        }
+        other => panic!("expected SessionList, got: {other:?}"),
+    };
+
+    assert_eq!(auto_id, id2, "should skip attached session and select id2");
+
+    // Clean up (detach first)
+    send_request(&mut writer1, &Request::Detach).await.unwrap();
+    let _ = read_frame(&mut reader1).await.unwrap();
+    request_response(&sock, &Request::Kill { id: id1 }).await;
+    request_response(&sock, &Request::Kill { id: id2 }).await;
+}
+
+#[tokio::test]
+async fn test_auto_attach_skips_completed() {
+    let dir = temp_dir("auto-skip-done");
+    let sock = start_test_daemon(&dir).await;
+
+    // Launch a session that completes quickly
+    let resp1 = request_response(
+        &sock,
+        &Request::Launch {
+            command: vec!["bash".into(), "-c".into(), "echo done".into()],
+            working_dir: "/tmp".to_string(),
+        },
+    )
+    .await;
+    let id1 = match resp1 {
+        Response::Launched { id } => id,
+        other => panic!("expected Launched, got: {other:?}"),
+    };
+
+    // Wait for it to complete
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    // Launch a running session
+    let resp2 = request_response(
+        &sock,
+        &Request::Launch {
+            command: vec!["bash".into(), "-c".into(), "sleep 30".into()],
+            working_dir: "/tmp".to_string(),
+        },
+    )
+    .await;
+    let id2 = match resp2 {
+        Response::Launched { id } => id,
+        other => panic!("expected Launched, got: {other:?}"),
+    };
+
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // Auto-select should skip completed session
+    let list_resp = request_response(&sock, &Request::ListSessions).await;
+    let auto_id = match list_resp {
+        Response::SessionList { sessions } => {
+            let mut candidates: Vec<_> = sessions
+                .into_iter()
+                .filter(|s| s.status == "running" && !s.attached)
+                .collect();
+            assert!(!candidates.is_empty(), "should have at least one running session");
+            candidates.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+            candidates[0].id
+        }
+        other => panic!("expected SessionList, got: {other:?}"),
+    };
+
+    assert_eq!(auto_id, id2, "should skip completed session and select running id2");
+    assert_ne!(auto_id, id1, "should not select completed session");
+
+    // Clean up
+    request_response(&sock, &Request::Kill { id: id2 }).await;
+}
+
+#[tokio::test]
+async fn test_auto_attach_no_candidates() {
+    let dir = temp_dir("auto-no-cand");
+    let sock = start_test_daemon(&dir).await;
+
+    // No sessions at all - test the error case
+    let list_resp = request_response(&sock, &Request::ListSessions).await;
+    match list_resp {
+        Response::SessionList { sessions } => {
+            let candidates: Vec<_> = sessions
+                .into_iter()
+                .filter(|s| s.status == "running" && !s.attached)
+                .collect();
+            assert!(candidates.is_empty(), "should have no candidates when no sessions exist");
+        }
+        other => panic!("expected SessionList, got: {other:?}"),
+    }
+
+    // Launch a session and attach to it
+    let resp = request_response(
+        &sock,
+        &Request::Launch {
+            command: vec!["bash".into(), "-c".into(), "sleep 30".into()],
+            working_dir: "/tmp".to_string(),
+        },
+    )
+    .await;
+    let id = match resp {
+        Response::Launched { id } => id,
+        other => panic!("expected Launched, got: {other:?}"),
+    };
+
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // Attach to it
+    let stream = UnixStream::connect(&sock).await.unwrap();
+    let (mut reader, mut writer) = stream.into_split();
+    send_request(&mut writer, &Request::Attach { id }).await.unwrap();
+    let _ = read_frame(&mut reader).await.unwrap();
+
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    // Now no unattached sessions available
+    let list_resp = request_response(&sock, &Request::ListSessions).await;
+    match list_resp {
+        Response::SessionList { sessions } => {
+            let candidates: Vec<_> = sessions
+                .into_iter()
+                .filter(|s| s.status == "running" && !s.attached)
+                .collect();
+            assert!(candidates.is_empty(), "should have no unattached sessions");
+        }
+        other => panic!("expected SessionList, got: {other:?}"),
+    }
+
+    // Clean up
+    send_request(&mut writer, &Request::Detach).await.unwrap();
+    let _ = read_frame(&mut reader).await.unwrap();
+    request_response(&sock, &Request::Kill { id }).await;
+}
+
+#[tokio::test]
+async fn test_explicit_attach_still_works() {
+    let dir = temp_dir("explicit-attach");
+    let sock = start_test_daemon(&dir).await;
+
+    // Launch two sessions
+    let resp1 = request_response(
+        &sock,
+        &Request::Launch {
+            command: vec!["bash".into(), "-c".into(), "sleep 30".into()],
+            working_dir: "/tmp".to_string(),
+        },
+    )
+    .await;
+    let id1 = match resp1 {
+        Response::Launched { id } => id,
+        other => panic!("expected Launched, got: {other:?}"),
+    };
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let resp2 = request_response(
+        &sock,
+        &Request::Launch {
+            command: vec!["bash".into(), "-c".into(), "sleep 30".into()],
+            working_dir: "/tmp".to_string(),
+        },
+    )
+    .await;
+    let id2 = match resp2 {
+        Response::Launched { id } => id,
+        other => panic!("expected Launched, got: {other:?}"),
+    };
+
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // Explicitly attach to second session (not the oldest)
+    let resp = request_response(&sock, &Request::Attach { id: id2 }).await;
+    match resp {
+        Response::Attached { id: attached_id } => {
+            assert_eq!(attached_id, id2, "should attach to explicitly specified session");
+        }
+        other => panic!("expected Attached, got: {other:?}"),
+    }
+
+    // Clean up
+    request_response(&sock, &Request::Kill { id: id1 }).await;
+    request_response(&sock, &Request::Kill { id: id2 }).await;
+}
