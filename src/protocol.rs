@@ -127,10 +127,6 @@ impl Frame {
         let json = serde_json::to_vec(msg)?;
         Ok(Frame::Control(json))
     }
-
-    pub fn data(bytes: Vec<u8>) -> Self {
-        Frame::Data(bytes)
-    }
 }
 
 // ---------------------------------------------------------------------------
