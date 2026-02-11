@@ -4,6 +4,9 @@ mod protocol;
 mod session;
 mod terminal;
 
+#[cfg(feature = "mcp")]
+mod mcp_server;
+
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
@@ -11,7 +14,13 @@ use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
 fn data_dir() -> PathBuf {
-    dirs_path().unwrap_or_else(|| PathBuf::from("/tmp/.codewire"))
+    dirs_path().unwrap_or_else(|| {
+        eprintln!("[cw] ERROR: $HOME environment variable is not set");
+        eprintln!("[cw] WARNING: Using insecure fallback directory /tmp/.codewire");
+        eprintln!("[cw] WARNING: This directory is world-readable and may be cleared on reboot");
+        tracing::error!("HOME environment variable not set, using insecure /tmp fallback");
+        PathBuf::from("/tmp/.codewire")
+    })
 }
 
 fn dirs_path() -> Option<PathBuf> {
@@ -78,6 +87,59 @@ enum Commands {
         #[arg(long, short)]
         tail: Option<usize>,
     },
+
+    /// Send input to a session without attaching
+    Send {
+        /// Session ID
+        id: u32,
+
+        /// Input text to send
+        input: Option<String>,
+
+        /// Read input from stdin
+        #[arg(long)]
+        stdin: bool,
+
+        /// Read input from file
+        #[arg(long, short)]
+        file: Option<PathBuf>,
+
+        /// Don't add newline at end
+        #[arg(long, short)]
+        no_newline: bool,
+    },
+
+    /// Watch a session in real-time (monitor without attaching)
+    Watch {
+        /// Session ID
+        id: u32,
+
+        /// Show last N lines of history
+        #[arg(long, short)]
+        tail: Option<usize>,
+
+        /// Don't show history, only new output
+        #[arg(long)]
+        no_history: bool,
+
+        /// Auto-exit after N seconds
+        #[arg(long)]
+        timeout: Option<u64>,
+    },
+
+    /// Get detailed session status
+    Status {
+        /// Session ID
+        id: u32,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Start MCP (Model Context Protocol) server
+    #[cfg(feature = "mcp")]
+    McpServer,
 }
 
 #[tokio::main]
@@ -123,13 +185,45 @@ async fn main() -> Result<()> {
             } else if let Some(id) = id {
                 client::kill(&dir, id).await
             } else {
-                bail!("specify a session ID or --all")
+                bail!("Must specify either a session ID or --all to kill all sessions.\nUsage: cw kill <ID> or cw kill --all")
             }
         }
 
         Commands::Logs { id, follow, tail } => {
             ensure_daemon(&dir).await?;
             client::logs(&dir, id, follow, tail).await
+        }
+
+        Commands::Send {
+            id,
+            input,
+            stdin,
+            file,
+            no_newline,
+        } => {
+            ensure_daemon(&dir).await?;
+            client::send_input(&dir, id, input, stdin, file, no_newline).await
+        }
+
+        Commands::Watch {
+            id,
+            tail,
+            no_history,
+            timeout,
+        } => {
+            ensure_daemon(&dir).await?;
+            client::watch_session(&dir, id, tail, no_history, timeout).await
+        }
+
+        Commands::Status { id, json } => {
+            ensure_daemon(&dir).await?;
+            client::get_status(&dir, id, json).await
+        }
+
+        #[cfg(feature = "mcp")]
+        Commands::McpServer => {
+            ensure_daemon(&dir).await?;
+            mcp_server::run_mcp_server(dir).await
         }
     }
 }

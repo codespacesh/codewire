@@ -3,7 +3,8 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::Mutex;
+use tokio::sync::mpsc;
+use tokio::time::{Duration, sleep};
 use tracing::{error, info, warn};
 
 use crate::protocol::{
@@ -12,16 +13,24 @@ use crate::protocol::{
 use crate::session::{SessionManager, SessionStatus};
 
 pub struct Daemon {
-    manager: Arc<Mutex<SessionManager>>,
+    manager: Arc<SessionManager>,
     socket_path: PathBuf,
     pid_path: PathBuf,
 }
 
 impl Daemon {
     pub fn new(data_dir: &Path) -> Result<Self> {
-        let manager = SessionManager::new(data_dir.to_path_buf())?;
+        let (manager, persist_rx) = SessionManager::new(data_dir.to_path_buf())?;
+        let manager = Arc::new(manager);
+
+        // Spawn persistence manager task
+        let manager_persist = manager.clone();
+        tokio::spawn(async move {
+            persistence_manager(manager_persist, persist_rx).await;
+        });
+
         Ok(Self {
-            manager: Arc::new(Mutex::new(manager)),
+            manager,
             socket_path: data_dir.join("server.sock"),
             pid_path: data_dir.join("daemon.pid"),
         })
@@ -41,13 +50,13 @@ impl Daemon {
 
         info!(path = %self.socket_path.display(), "daemon listening");
 
-        // Periodic status refresh
+        // Periodic status refresh (still needed to update from watch channels)
         let manager_refresh = self.manager.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
             loop {
                 interval.tick().await;
-                manager_refresh.lock().await.refresh_statuses();
+                manager_refresh.refresh_statuses();
             }
         });
 
@@ -78,7 +87,7 @@ impl Drop for Daemon {
 
 async fn handle_client(
     stream: UnixStream,
-    manager: Arc<Mutex<SessionManager>>,
+    manager: Arc<SessionManager>,
 ) -> Result<()> {
     let (mut reader, mut writer) = stream.into_split();
 
@@ -99,12 +108,12 @@ async fn handle_client(
 
     match request {
         Request::ListSessions => {
-            let sessions = manager.lock().await.list();
+            let sessions = manager.list();
             send_response(&mut writer, &Response::SessionList { sessions }).await?;
         }
 
         Request::Launch { command, working_dir } => {
-            let result = manager.lock().await.launch(command, working_dir);
+            let result = manager.launch(command, working_dir);
             match result {
                 Ok(id) => send_response(&mut writer, &Response::Launched { id }).await?,
                 Err(e) => {
@@ -120,7 +129,7 @@ async fn handle_client(
         }
 
         Request::Attach { id } => {
-            let attach_result = manager.lock().await.attach(id);
+            let attach_result = manager.attach(id);
             match attach_result {
                 Ok((mut broadcast_rx, pty_input_tx, mut status_rx)) => {
                     send_response(&mut writer, &Response::Attached { id }).await?;
@@ -138,7 +147,9 @@ async fn handle_client(
                     .await;
 
                     // Always detach on exit
-                    manager.lock().await.detach(id).ok();
+                    if let Err(e) = manager.detach(id) {
+                        warn!(id, ?e, "Failed to detach session on client disconnect");
+                    }
 
                     if let Err(e) = detached {
                         warn!(id, ?e, "attach session ended with error");
@@ -157,7 +168,7 @@ async fn handle_client(
         }
 
         Request::Kill { id } => {
-            let result = manager.lock().await.kill(id);
+            let result = manager.kill(id);
             match result {
                 Ok(()) => send_response(&mut writer, &Response::Killed { id }).await?,
                 Err(e) => {
@@ -173,7 +184,7 @@ async fn handle_client(
         }
 
         Request::KillAll => {
-            let count = manager.lock().await.kill_all();
+            let count = manager.kill_all();
             send_response(&mut writer, &Response::KilledAll { count }).await?;
         }
 
@@ -187,7 +198,7 @@ async fn handle_client(
         }
 
         Request::Logs { id, follow, tail } => {
-            let log_path = manager.lock().await.log_path(id);
+            let log_path = manager.log_path(id);
             match log_path {
                 Ok(path) => {
                     handle_logs(&mut writer, &path, follow, tail).await?;
@@ -203,6 +214,59 @@ async fn handle_client(
                 }
             }
         }
+
+        Request::SendInput { id, data } => {
+            let result = manager.send_input(id, data);
+            match result {
+                Ok(bytes) => {
+                    send_response(&mut writer, &Response::InputSent { id, bytes }).await?
+                }
+                Err(e) => {
+                    send_response(
+                        &mut writer,
+                        &Response::Error {
+                            message: e.to_string(),
+                        },
+                    )
+                    .await?
+                }
+            }
+        }
+
+        Request::GetStatus { id } => {
+            let result = manager.get_status(id);
+            match result {
+                Ok((info, output_size)) => {
+                    send_response(&mut writer, &Response::SessionStatus { info, output_size })
+                        .await?
+                }
+                Err(e) => {
+                    send_response(
+                        &mut writer,
+                        &Response::Error {
+                            message: e.to_string(),
+                        },
+                    )
+                    .await?
+                }
+            }
+        }
+
+        Request::WatchSession {
+            id,
+            include_history,
+            history_lines,
+        } => {
+            handle_watch_session(
+                &mut reader,
+                &mut writer,
+                &manager,
+                id,
+                include_history,
+                history_lines,
+            )
+            .await?;
+        }
     }
 
     Ok(())
@@ -216,7 +280,7 @@ async fn handle_attach_session(
     pty_input_tx: &tokio::sync::mpsc::Sender<Vec<u8>>,
     status_rx: &mut tokio::sync::watch::Receiver<SessionStatus>,
     session_id: u32,
-    manager: &Arc<Mutex<SessionManager>>,
+    manager: &Arc<SessionManager>,
 ) -> Result<()> {
     loop {
         tokio::select! {
@@ -240,7 +304,9 @@ async fn handle_attach_session(
             frame = read_frame(reader) => {
                 match frame? {
                     Some(Frame::Data(bytes)) => {
-                        pty_input_tx.send(bytes).await.ok();
+                        if let Err(e) = pty_input_tx.send(bytes).await {
+                            error!(session_id, ?e, "Failed to send client input to PTY - data loss");
+                        }
                     }
                     Some(Frame::Control(payload)) => {
                         let req: Request = protocol::parse_request(&payload)?;
@@ -250,7 +316,9 @@ async fn handle_attach_session(
                                 break;
                             }
                             Request::Resize { cols, rows } => {
-                                manager.lock().await.resize(session_id, cols, rows).ok();
+                                if let Err(e) = manager.resize(session_id, cols, rows) {
+                                    warn!(session_id, ?e, "Failed to resize PTY");
+                                }
                             }
                             _ => {}
                         }
@@ -269,14 +337,112 @@ async fn handle_attach_session(
                 if status != SessionStatus::Running {
                     info!(session_id, %status, "session ended while attached");
                     // Send remaining output then notify
-                    send_response(writer, &Response::Error {
+                    if let Err(e) = send_response(writer, &Response::Error {
                         message: format!("session {status}"),
-                    }).await.ok();
+                    }).await {
+                        warn!(session_id, ?e, "Failed to send session end notification");
+                    }
                     break;
                 }
             }
         }
     }
+    Ok(())
+}
+
+/// Watch a session in real-time, streaming output and status updates
+async fn handle_watch_session(
+    _reader: &mut tokio::net::unix::OwnedReadHalf,
+    writer: &mut tokio::net::unix::OwnedWriteHalf,
+    manager: &Arc<SessionManager>,
+    id: u32,
+    include_history: bool,
+    history_lines: Option<usize>,
+) -> Result<()> {
+    // Subscribe to output and status
+    let mut broadcast_rx = manager.subscribe_output(id)?;
+    let mut status_rx = manager.subscribe_status(id)?;
+
+    // Send historical output if requested
+    if include_history {
+        let log_path = manager.log_path(id)?;
+        if log_path.exists() {
+            let content = std::fs::read_to_string(&log_path).unwrap_or_default();
+            let output = if let Some(n) = history_lines {
+                let lines: Vec<&str> = content.lines().collect();
+                let start = lines.len().saturating_sub(n);
+                lines[start..].join("\n")
+            } else {
+                content
+            };
+
+            if !output.is_empty() {
+                send_response(
+                    writer,
+                    &Response::WatchUpdate {
+                        id,
+                        status: "running".to_string(),
+                        output: Some(output),
+                        done: false,
+                    },
+                )
+                .await?;
+            }
+        }
+    }
+
+    // Stream new output and status changes
+    loop {
+        tokio::select! {
+            data = broadcast_rx.recv() => {
+                match data {
+                    Ok(bytes) => {
+                        let output = String::from_utf8_lossy(&bytes).to_string();
+                        send_response(
+                            writer,
+                            &Response::WatchUpdate {
+                                id,
+                                status: "running".to_string(),
+                                output: Some(output),
+                                done: false,
+                            },
+                        )
+                        .await?;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                        // Skip lagged messages
+                        continue;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        // Broadcast closed, session likely ended
+                        break;
+                    }
+                }
+            }
+
+            _ = status_rx.changed() => {
+                let status = status_rx.borrow().clone();
+                let status_str = status.to_string();
+                let done = status != crate::session::SessionStatus::Running;
+
+                send_response(
+                    writer,
+                    &Response::WatchUpdate {
+                        id,
+                        status: status_str,
+                        output: None,
+                        done,
+                    },
+                )
+                .await?;
+
+                if done {
+                    break;
+                }
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -334,4 +500,34 @@ async fn handle_logs(
     }
 
     Ok(())
+}
+
+/// Event-driven persistence manager with debouncing.
+/// Only writes sessions.json when state changes, debounced to avoid thrashing.
+async fn persistence_manager(
+    manager: Arc<SessionManager>,
+    mut persist_rx: mpsc::UnboundedReceiver<()>,
+) {
+    let mut pending = false;
+
+    loop {
+        tokio::select! {
+            // Receive persistence event
+            event = persist_rx.recv() => {
+                if event.is_none() {
+                    // Channel closed, exit
+                    break;
+                }
+                pending = true;
+            }
+
+            // Debounce timer - wait 500ms after last event
+            _ = sleep(Duration::from_millis(500)), if pending => {
+                pending = false;
+                manager.persist_meta();
+            }
+        }
+    }
+
+    info!("persistence manager exited");
 }

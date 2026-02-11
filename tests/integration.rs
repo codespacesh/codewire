@@ -542,3 +542,507 @@ async fn test_resize_during_attach() {
 
     request_response(&sock, &Request::Kill { id }).await;
 }
+
+#[tokio::test]
+async fn test_multiple_attachments() {
+    let dir = temp_dir("multi-attach");
+    let sock = start_test_daemon(&dir).await;
+
+    // Launch a session that outputs periodically
+    let resp = request_response(
+        &sock,
+        &Request::Launch {
+            command: vec!["bash".into(), "-c".into(), "for i in 1 2 3 4 5; do echo MULTI_$i; sleep 1; done".into()],
+            working_dir: "/tmp".to_string(),
+        },
+    )
+    .await;
+    let id = match resp {
+        Response::Launched { id } => id,
+        other => panic!("expected Launched, got: {other:?}"),
+    };
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Attach first client
+    let stream1 = UnixStream::connect(&sock).await.unwrap();
+    let (mut reader1, mut writer1) = stream1.into_split();
+    send_request(&mut writer1, &Request::Attach { id }).await.unwrap();
+    let _ = read_frame(&mut reader1).await.unwrap(); // Attached response
+
+    // Attach second client (should succeed with new multi-attach support)
+    let stream2 = UnixStream::connect(&sock).await.unwrap();
+    let (mut reader2, mut writer2) = stream2.into_split();
+    send_request(&mut writer2, &Request::Attach { id }).await.unwrap();
+    let frame = read_frame(&mut reader2).await.unwrap().unwrap();
+    match frame {
+        Frame::Control(payload) => {
+            let resp = protocol::parse_response(&payload).unwrap();
+            assert!(matches!(resp, Response::Attached { .. }), "second attach should succeed");
+        }
+        _ => panic!("expected control frame"),
+    }
+
+    // Both clients should receive output
+    let timeout = tokio::time::sleep(Duration::from_secs(3));
+    tokio::pin!(timeout);
+
+    let mut output1 = Vec::new();
+    let mut output2 = Vec::new();
+
+    loop {
+        tokio::select! {
+            frame = read_frame(&mut reader1) => {
+                if let Ok(Some(Frame::Data(bytes))) = frame {
+                    output1.extend_from_slice(&bytes);
+                }
+            }
+            frame = read_frame(&mut reader2) => {
+                if let Ok(Some(Frame::Data(bytes))) = frame {
+                    output2.extend_from_slice(&bytes);
+                }
+            }
+            _ = &mut timeout => break,
+        }
+    }
+
+    let text1 = String::from_utf8_lossy(&output1);
+    let text2 = String::from_utf8_lossy(&output2);
+
+    assert!(text1.contains("MULTI_"), "first client should receive output: {text1}");
+    assert!(text2.contains("MULTI_"), "second client should receive output: {text2}");
+
+    // Clean up
+    request_response(&sock, &Request::Kill { id }).await;
+}
+
+#[tokio::test]
+async fn test_send_input_cross_session() {
+    let dir = temp_dir("cross-input");
+    let sock = start_test_daemon(&dir).await;
+
+    // Launch an interactive session (cat echoes input)
+    let resp = request_response(
+        &sock,
+        &Request::Launch {
+            command: vec!["bash".into(), "-c".into(), "cat".into()],
+            working_dir: "/tmp".to_string(),
+        },
+    )
+    .await;
+    let id = match resp {
+        Response::Launched { id } => id,
+        other => panic!("expected Launched, got: {other:?}"),
+    };
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Send input without attaching
+    let test_input = b"CROSS_SESSION_TEST\n".to_vec();
+    let resp = request_response(
+        &sock,
+        &Request::SendInput {
+            id,
+            data: test_input.clone(),
+        },
+    )
+    .await;
+
+    match resp {
+        Response::InputSent { id: sent_id, bytes } => {
+            assert_eq!(sent_id, id);
+            assert_eq!(bytes, test_input.len());
+        }
+        other => panic!("expected InputSent, got: {other:?}"),
+    }
+
+    // Wait for processing
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    // Verify output was captured in logs
+    let resp = request_response(
+        &sock,
+        &Request::Logs {
+            id,
+            follow: false,
+            tail: None,
+        },
+    )
+    .await;
+
+    match resp {
+        Response::LogData { data, .. } => {
+            assert!(
+                data.contains("CROSS_SESSION_TEST"),
+                "output should contain our input: {data}"
+            );
+        }
+        other => panic!("expected LogData, got: {other:?}"),
+    }
+
+    // Clean up
+    request_response(&sock, &Request::Kill { id }).await;
+}
+
+#[tokio::test]
+async fn test_get_session_status() {
+    let dir = temp_dir("status");
+    let sock = start_test_daemon(&dir).await;
+
+    // Launch a session
+    let resp = request_response(
+        &sock,
+        &Request::Launch {
+            command: vec!["bash".into(), "-c".into(), "echo STATUS_TEST && sleep 2".into()],
+            working_dir: "/tmp".to_string(),
+        },
+    )
+    .await;
+    let id = match resp {
+        Response::Launched { id } => id,
+        other => panic!("expected Launched, got: {other:?}"),
+    };
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Get status
+    let resp = request_response(&sock, &Request::GetStatus { id }).await;
+
+    match resp {
+        Response::SessionStatus { info, output_size } => {
+            assert_eq!(info.id, id);
+            assert_eq!(info.status, "running");
+            assert!(info.pid.is_some(), "PID should be present");
+            assert!(output_size > 0, "should have captured some output");
+            assert!(
+                info.output_size_bytes.is_some(),
+                "output_size_bytes should be present"
+            );
+        }
+        other => panic!("expected SessionStatus, got: {other:?}"),
+    }
+
+    // Clean up
+    request_response(&sock, &Request::Kill { id }).await;
+}
+
+#[tokio::test]
+async fn test_watch_session() {
+    let dir = temp_dir("watch");
+    let sock = start_test_daemon(&dir).await;
+
+    // Launch a session that outputs periodically
+    let resp = request_response(
+        &sock,
+        &Request::Launch {
+            command: vec!["bash".into(), "-c".into(), "for i in 1 2 3; do echo WATCH_$i; sleep 1; done".into()],
+            working_dir: "/tmp".to_string(),
+        },
+    )
+    .await;
+    let id = match resp {
+        Response::Launched { id } => id,
+        other => panic!("expected Launched, got: {other:?}"),
+    };
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Watch the session
+    let stream = UnixStream::connect(&sock).await.unwrap();
+    let (mut reader, mut writer) = stream.into_split();
+
+    send_request(
+        &mut writer,
+        &Request::WatchSession {
+            id,
+            include_history: true,
+            history_lines: Some(10),
+        },
+    )
+    .await
+    .unwrap();
+
+    let mut collected_output = String::new();
+    let mut done = false;
+    let timeout = tokio::time::sleep(Duration::from_secs(5));
+    tokio::pin!(timeout);
+
+    loop {
+        tokio::select! {
+            frame = read_frame(&mut reader) => {
+                match frame.unwrap() {
+                    Some(Frame::Control(payload)) => {
+                        let resp = protocol::parse_response(&payload).unwrap();
+                        match resp {
+                            Response::WatchUpdate { output, done: is_done, .. } => {
+                                if let Some(text) = output {
+                                    collected_output.push_str(&text);
+                                }
+                                if is_done {
+                                    done = true;
+                                    break;
+                                }
+                            }
+                            other => panic!("unexpected response: {other:?}"),
+                        }
+                    }
+                    None => break,
+                    _ => {}
+                }
+            }
+            _ = &mut timeout => break,
+        }
+    }
+
+    assert!(
+        collected_output.contains("WATCH_"),
+        "should have received watch output: {collected_output}"
+    );
+    assert!(done, "watch should complete when session ends");
+}
+
+#[tokio::test]
+async fn test_supervisor_pattern() {
+    let dir = temp_dir("supervisor");
+    let sock = start_test_daemon(&dir).await;
+
+    // Launch two worker sessions
+    let resp1 = request_response(
+        &sock,
+        &Request::Launch {
+            command: vec!["bash".into(), "-c".into(), "echo WORKER1 && sleep 2".into()],
+            working_dir: "/tmp".to_string(),
+        },
+    )
+    .await;
+    let id1 = match resp1 {
+        Response::Launched { id } => id,
+        other => panic!("expected Launched, got: {other:?}"),
+    };
+
+    let resp2 = request_response(
+        &sock,
+        &Request::Launch {
+            command: vec!["bash".into(), "-c".into(), "cat".into()],
+            working_dir: "/tmp".to_string(),
+        },
+    )
+    .await;
+    let id2 = match resp2 {
+        Response::Launched { id } => id,
+        other => panic!("expected Launched, got: {other:?}"),
+    };
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Supervisor: Get status of worker 1
+    let resp = request_response(&sock, &Request::GetStatus { id: id1 }).await;
+    assert!(matches!(resp, Response::SessionStatus { .. }));
+
+    // Supervisor: Send input to worker 2
+    let resp = request_response(
+        &sock,
+        &Request::SendInput {
+            id: id2,
+            data: b"SUPERVISOR_MESSAGE\n".to_vec(),
+        },
+    )
+    .await;
+    assert!(matches!(resp, Response::InputSent { .. }));
+
+    // Supervisor: List all sessions
+    let resp = request_response(&sock, &Request::ListSessions).await;
+    match resp {
+        Response::SessionList { sessions } => {
+            assert!(sessions.len() >= 2, "should have at least 2 sessions");
+        }
+        other => panic!("expected SessionList, got: {other:?}"),
+    }
+
+    // Clean up
+    request_response(&sock, &Request::Kill { id: id1 }).await;
+    request_response(&sock, &Request::Kill { id: id2 }).await;
+}
+
+/// Test concurrent list and attach operations don't block each other
+#[tokio::test]
+async fn test_concurrent_list_and_attach() {
+    let dir = temp_dir("concurrent_list_attach");
+    let sock = start_test_daemon(&dir).await;
+
+    // Launch 3 sessions
+    let mut ids = Vec::new();
+    for _ in 0..3 {
+        let resp = request_response(
+            &sock,
+            &Request::Launch {
+                command: vec!["sleep".to_string(), "10".to_string()],
+                working_dir: "/tmp".to_string(),
+            },
+        )
+        .await;
+        match resp {
+            Response::Launched { id } => ids.push(id),
+            other => panic!("expected Launched, got: {other:?}"),
+        }
+    }
+
+    // Concurrently: list sessions, attach to different sessions, get status
+    // These should NOT block each other with our DashMap implementation
+    let list_task = tokio::spawn({
+        let sock = sock.clone();
+        async move {
+            for _ in 0..10 {
+                let _resp = request_response(&sock, &Request::ListSessions).await;
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }
+    });
+
+    let attach_tasks: Vec<_> = ids
+        .iter()
+        .map(|&id| {
+            let sock = sock.clone();
+            tokio::spawn(async move {
+                // Quick attach and detach
+                let stream = UnixStream::connect(&sock).await.unwrap();
+                let (mut reader, mut writer) = stream.into_split();
+                send_request(&mut writer, &Request::Attach { id })
+                    .await
+                    .unwrap();
+                let _resp = read_frame(&mut reader).await.unwrap();
+                send_request(&mut writer, &Request::Detach).await.unwrap();
+            })
+        })
+        .collect();
+
+    // All tasks should complete quickly without blocking
+    let start = std::time::Instant::now();
+    list_task.await.unwrap();
+    for task in attach_tasks {
+        task.await.unwrap();
+    }
+    let elapsed = start.elapsed();
+
+    // Should complete in well under 1 second with lock-free architecture
+    assert!(
+        elapsed.as_secs() < 1,
+        "Operations took too long: {:?}",
+        elapsed
+    );
+
+    // Clean up
+    request_response(&sock, &Request::KillAll).await;
+}
+
+/// Test that persistence only happens on state changes, not periodically
+#[tokio::test]
+async fn test_event_driven_persistence() {
+    let dir = temp_dir("evt_persist");
+    let sock = start_test_daemon(&dir).await;
+
+    let sessions_json = dir.join("sessions.json");
+
+    // Launch a session
+    let resp = request_response(
+        &sock,
+        &Request::Launch {
+            command: vec!["sleep".to_string(), "5".to_string()],
+            working_dir: "/tmp".to_string(),
+        },
+    )
+    .await;
+    let id = match resp {
+        Response::Launched { id } => id,
+        other => panic!("expected Launched, got: {other:?}"),
+    };
+
+    // Wait for persistence (debounced to 500ms)
+    tokio::time::sleep(Duration::from_millis(800)).await;
+
+    // Get initial mtime
+    let mtime1 = std::fs::metadata(&sessions_json)
+        .unwrap()
+        .modified()
+        .unwrap();
+
+    // Wait 2 seconds - no state changes, so no writes expected
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let mtime2 = std::fs::metadata(&sessions_json)
+        .unwrap()
+        .modified()
+        .unwrap();
+
+    // mtime should NOT have changed (no periodic writes!)
+    assert_eq!(
+        mtime1, mtime2,
+        "sessions.json was written without state changes"
+    );
+
+    // Now make a state change (kill the session)
+    request_response(&sock, &Request::Kill { id }).await;
+
+    // Wait for persistence
+    tokio::time::sleep(Duration::from_millis(800)).await;
+
+    let mtime3 = std::fs::metadata(&sessions_json)
+        .unwrap()
+        .modified()
+        .unwrap();
+
+    // mtime SHOULD have changed (state change triggered write)
+    assert!(mtime3 > mtime2, "sessions.json was not written on state change");
+}
+
+/// Test corrupt sessions.json recovery
+#[tokio::test]
+async fn test_corrupt_sessions_json_recovery() {
+    let dir = temp_dir("corrupt_sessions");
+    let sessions_json = dir.join("sessions.json");
+
+    // Write corrupt JSON
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(&sessions_json, "invalid json{[[").unwrap();
+
+    // Start daemon - should recover gracefully
+    let sock = start_test_daemon(&dir).await;
+
+    // Should start with empty session list (corrupt file ignored)
+    let resp = request_response(&sock, &Request::ListSessions).await;
+    match resp {
+        Response::SessionList { sessions } => {
+            assert_eq!(sessions.len(), 0, "should start with no sessions");
+        }
+        other => panic!("expected SessionList, got: {other:?}"),
+    }
+
+    // Backup file should exist
+    let backup_files: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .starts_with("sessions.json.corrupt")
+        })
+        .collect();
+
+    assert_eq!(
+        backup_files.len(),
+        1,
+        "corrupt file should be backed up"
+    );
+
+    // Daemon should be functional - launch a new session
+    let resp = request_response(
+        &sock,
+        &Request::Launch {
+            command: vec!["echo".to_string(), "test".to_string()],
+            working_dir: "/tmp".to_string(),
+        },
+    )
+    .await;
+
+    assert!(matches!(resp, Response::Launched { .. }));
+}

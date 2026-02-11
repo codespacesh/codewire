@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -14,7 +14,23 @@ async fn connect(data_dir: &Path) -> Result<UnixStream> {
     let sock = data_dir.join("server.sock");
     UnixStream::connect(&sock)
         .await
-        .with_context(|| format!("connecting to {}", sock.display()))
+        .with_context(|| {
+            format!(
+                "Failed to connect to CodeWire daemon at {}\nThe daemon may not be running. It should auto-start on first command.",
+                sock.display()
+            )
+        })
+}
+
+/// Format error message with helpful context
+fn format_error(message: &str) -> String {
+    if message.contains("not found") {
+        format!("{}\n\nUse 'cw list' to see active sessions", message)
+    } else if message.contains("not running") {
+        format!("{}\n\nUse 'cw status <id>' to check session status", message)
+    } else {
+        message.to_string()
+    }
 }
 
 /// Send a request and read a single response.
@@ -51,7 +67,7 @@ pub async fn list(data_dir: &Path, json: bool) -> Result<()> {
                 print_session_table(&sessions);
             }
         }
-        Response::Error { message } => bail!("{message}"),
+        Response::Error { message } => bail!("{}", format_error(&message)),
         _ => bail!("unexpected response"),
     }
     Ok(())
@@ -72,7 +88,7 @@ pub async fn launch(data_dir: &Path, command: Vec<String>, working_dir: String) 
         Response::Launched { id } => {
             println!("Session {id} launched: {display}");
         }
-        Response::Error { message } => bail!("{message}"),
+        Response::Error { message } => bail!("{}", format_error(&message)),
         _ => bail!("unexpected response"),
     }
     Ok(())
@@ -98,7 +114,7 @@ pub async fn attach(data_dir: &Path, id: u32) -> Result<()> {
         Response::Attached { id } => {
             eprintln!("[cw] attached to session {id} (Ctrl+B d to detach)");
         }
-        Response::Error { message } => bail!("{message}"),
+        Response::Error { message } => bail!("{}", format_error(&message)),
         _ => bail!("unexpected response"),
     }
 
@@ -185,7 +201,7 @@ pub async fn kill(data_dir: &Path, id: u32) -> Result<()> {
     let resp = request_response(data_dir, &Request::Kill { id }).await?;
     match resp {
         Response::Killed { id } => println!("Session {id} killed."),
-        Response::Error { message } => bail!("{message}"),
+        Response::Error { message } => bail!("{}", format_error(&message)),
         _ => bail!("unexpected response"),
     }
     Ok(())
@@ -195,7 +211,7 @@ pub async fn kill_all(data_dir: &Path) -> Result<()> {
     let resp = request_response(data_dir, &Request::KillAll).await?;
     match resp {
         Response::KilledAll { count } => println!("Killed {count} session(s)."),
-        Response::Error { message } => bail!("{message}"),
+        Response::Error { message } => bail!("{}", format_error(&message)),
         _ => bail!("unexpected response"),
     }
     Ok(())
@@ -224,7 +240,7 @@ pub async fn logs(data_dir: &Path, id: u32, follow: bool, tail: Option<usize>) -
                             break;
                         }
                     }
-                    Response::Error { message } => bail!("{message}"),
+                    Response::Error { message } => bail!("{}", format_error(&message)),
                     _ => {}
                 }
             }
@@ -233,6 +249,148 @@ pub async fn logs(data_dir: &Path, id: u32, follow: bool, tail: Option<usize>) -
         }
     }
 
+    Ok(())
+}
+
+pub async fn send_input(
+    data_dir: &Path,
+    id: u32,
+    input: Option<String>,
+    stdin: bool,
+    file: Option<PathBuf>,
+    no_newline: bool,
+) -> Result<()> {
+    // Collect input from various sources
+    let mut data = if let Some(text) = input {
+        text.into_bytes()
+    } else if stdin {
+        let mut buf = Vec::new();
+        tokio::io::stdin().read_to_end(&mut buf).await?;
+        buf
+    } else if let Some(path) = file {
+        std::fs::read(&path).with_context(|| format!("reading {}", path.display()))?
+    } else {
+        bail!("must provide input via argument, --stdin, or --file");
+    };
+
+    // Add newline unless disabled
+    if !no_newline && !data.ends_with(b"\n") {
+        data.push(b'\n');
+    }
+
+    let resp = request_response(data_dir, &Request::SendInput { id, data }).await?;
+
+    match resp {
+        Response::InputSent { id, bytes } => {
+            println!("Sent {bytes} bytes to session {id}");
+        }
+        Response::Error { message } => bail!("{}", format_error(&message)),
+        _ => bail!("unexpected response"),
+    }
+    Ok(())
+}
+
+pub async fn watch_session(
+    data_dir: &Path,
+    id: u32,
+    tail: Option<usize>,
+    no_history: bool,
+    timeout: Option<u64>,
+) -> Result<()> {
+    let stream = connect(data_dir).await?;
+    let (mut reader, mut writer) = stream.into_split();
+
+    // Send watch request
+    send_request(
+        &mut writer,
+        &Request::WatchSession {
+            id,
+            include_history: !no_history,
+            history_lines: tail,
+        },
+    )
+    .await?;
+
+    let mut stdout = tokio::io::stdout();
+
+    // Set up timeout if requested
+    let timeout_future = if let Some(seconds) = timeout {
+        tokio::time::sleep(tokio::time::Duration::from_secs(seconds))
+    } else {
+        tokio::time::sleep(tokio::time::Duration::from_secs(u64::MAX))
+    };
+
+    tokio::pin!(timeout_future);
+
+    loop {
+        tokio::select! {
+            frame = read_frame(&mut reader) => {
+                match frame? {
+                    Some(Frame::Control(payload)) => {
+                        let resp = protocol::parse_response(&payload)?;
+                        match resp {
+                            Response::WatchUpdate { status, output, done, .. } => {
+                                if let Some(text) = output {
+                                    stdout.write_all(text.as_bytes()).await?;
+                                    stdout.flush().await?;
+                                }
+                                if done {
+                                    eprintln!("\n[cw] session {status}");
+                                    break;
+                                }
+                            }
+                            Response::Error { message } => bail!("{}", format_error(&message)),
+                            _ => {}
+                        }
+                    }
+                    None => break,
+                    _ => {}
+                }
+            }
+
+            _ = &mut timeout_future => {
+                eprintln!("\n[cw] watch timeout");
+                break;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+pub async fn get_status(data_dir: &Path, id: u32, json: bool) -> Result<()> {
+    let resp = request_response(data_dir, &Request::GetStatus { id }).await?;
+
+    match resp {
+        Response::SessionStatus { info, output_size } => {
+            if json {
+                let mut obj = serde_json::to_value(&info)?;
+                if let Some(o) = obj.as_object_mut() {
+                    o.insert("output_size".to_string(), serde_json::json!(output_size));
+                }
+                println!("{}", serde_json::to_string_pretty(&obj)?);
+            } else {
+                println!("Session {}", info.id);
+                println!("  Status: {}", info.status);
+                println!("  Command: {}", info.prompt);
+                println!("  Working Dir: {}", info.working_dir);
+                println!("  Created: {}", info.created_at);
+                println!("  Attached: {}", if info.attached { "yes" } else { "no" });
+                if let Some(pid) = info.pid {
+                    println!("  PID: {}", pid);
+                }
+                println!("  Output Size: {} bytes", output_size);
+                if let Some(snippet) = info.last_output_snippet {
+                    println!("  Last Output:");
+                    for line in snippet.lines() {
+                        println!("    {}", line);
+                    }
+                }
+            }
+        }
+        Response::Error { message } => bail!("{}", format_error(&message)),
+        _ => bail!("unexpected response"),
+    }
     Ok(())
 }
 
