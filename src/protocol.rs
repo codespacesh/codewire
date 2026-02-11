@@ -38,6 +38,18 @@ pub enum Request {
         follow: bool,
         tail: Option<usize>,
     },
+    SendInput {
+        id: u32,
+        data: Vec<u8>,
+    },
+    GetStatus {
+        id: u32,
+    },
+    WatchSession {
+        id: u32,
+        include_history: bool,
+        history_lines: Option<usize>,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -64,6 +76,20 @@ pub enum Response {
         data: String,
         done: bool,
     },
+    InputSent {
+        id: u32,
+        bytes: usize,
+    },
+    SessionStatus {
+        info: SessionInfo,
+        output_size: u64,
+    },
+    WatchUpdate {
+        id: u32,
+        status: String,
+        output: Option<String>,
+        done: bool,
+    },
     Error {
         message: String,
     },
@@ -78,6 +104,12 @@ pub struct SessionInfo {
     pub created_at: String,
     pub status: String,
     pub attached: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_size_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_output_snippet: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
