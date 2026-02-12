@@ -9,7 +9,7 @@ mod mcp_server;
 
 use std::path::PathBuf;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
@@ -157,7 +157,9 @@ async fn main() -> Result<()> {
     match cli.command {
         Commands::Daemon | Commands::Start => {
             tracing_subscriber::fmt()
-                .with_env_filter(EnvFilter::from_default_env().add_directive("codewire=info".parse()?))
+                .with_env_filter(
+                    EnvFilter::from_default_env().add_directive("codewire=info".parse()?),
+                )
                 .init();
 
             let daemon = daemon::Daemon::new(&dir)?;
@@ -171,10 +173,8 @@ async fn main() -> Result<()> {
                 return Ok(());
             }
 
-            let pid_str = std::fs::read_to_string(&pid_file)
-                .context("reading daemon PID file")?;
-            let pid: i32 = pid_str.trim().parse()
-                .context("parsing daemon PID")?;
+            let pid_str = std::fs::read_to_string(&pid_file).context("reading daemon PID file")?;
+            let pid: i32 = pid_str.trim().parse().context("parsing daemon PID")?;
 
             // Send SIGTERM to daemon
             use nix::sys::signal::{kill, Signal};
@@ -198,7 +198,10 @@ async fn main() -> Result<()> {
             }
         }
 
-        Commands::Launch { dir: work_dir, command } => {
+        Commands::Launch {
+            dir: work_dir,
+            command,
+        } => {
             ensure_daemon(&dir).await?;
             let work_dir = work_dir.unwrap_or_else(|| {
                 std::env::current_dir()
@@ -300,10 +303,8 @@ async fn ensure_daemon(data_dir: &PathBuf) -> Result<()> {
     // Wait for socket to appear
     for _ in 0..50 {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        if sock.exists() {
-            if tokio::net::UnixStream::connect(&sock).await.is_ok() {
-                return Ok(());
-            }
+        if sock.exists() && tokio::net::UnixStream::connect(&sock).await.is_ok() {
+            return Ok(());
         }
     }
 

@@ -3,15 +3,22 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
-use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
+use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, mpsc, watch};
 use tracing::{error, info, warn};
 
 use crate::protocol::SessionInfo;
+
+/// Channels returned by [`SessionManager::attach`].
+pub type AttachChannels = (
+    broadcast::Receiver<Vec<u8>>,
+    mpsc::Sender<Vec<u8>>,
+    watch::Receiver<SessionStatus>,
+);
 
 // ---------------------------------------------------------------------------
 // Types
@@ -87,14 +94,18 @@ impl SessionManager {
                 Err(e) => {
                     // Backup corrupt file
                     let timestamp = Utc::now().format("%Y%m%d_%H%M%S");
-                    let backup_path = meta_path.with_extension(format!("json.corrupt.{}", timestamp));
+                    let backup_path =
+                        meta_path.with_extension(format!("json.corrupt.{}", timestamp));
                     if let Err(backup_err) = std::fs::copy(&meta_path, &backup_path) {
                         error!(?backup_err, "Failed to backup corrupt sessions.json");
                     } else {
                         info!(?backup_path, "Backed up corrupt sessions.json");
                     }
 
-                    error!(?e, "Corrupt sessions.json file - starting with empty session list");
+                    error!(
+                        ?e,
+                        "Corrupt sessions.json file - starting with empty session list"
+                    );
                     eprintln!("[cw] ERROR: sessions.json is corrupted and could not be parsed");
                     eprintln!("[cw] A backup has been saved to: {}", backup_path.display());
                     eprintln!("[cw] Starting with empty session list");
@@ -185,10 +196,7 @@ impl SessionManager {
             .master
             .try_clone_reader()
             .context("cloning PTY reader")?;
-        let mut master_writer = pair
-            .master
-            .take_writer()
-            .context("taking PTY writer")?;
+        let mut master_writer = pair.master.take_writer().context("taking PTY writer")?;
 
         // Channels
         let (broadcast_tx, _) = broadcast::channel::<Vec<u8>>(4096);
@@ -232,7 +240,12 @@ impl SessionManager {
             {
                 Ok(f) => Some(f),
                 Err(e) => {
-                    error!(session_id = id, ?e, ?log_path_async, "Failed to open session log file");
+                    error!(
+                        session_id = id,
+                        ?e,
+                        ?log_path_async,
+                        "Failed to open session log file"
+                    );
                     None
                 }
             };
@@ -298,17 +311,15 @@ impl SessionManager {
 
         // --- Background task: wait for child process exit ---
         let status_tx_waiter = status_tx.clone();
-        tokio::task::spawn_blocking(move || {
-            match child.wait() {
-                Ok(exit) => {
-                    let code = exit.exit_code() as i32;
-                    info!(id, code, "session process exited");
-                    let _ = status_tx_waiter.send(SessionStatus::Completed(code));
-                }
-                Err(e) => {
-                    error!(id, ?e, "waiting for child");
-                    let _ = status_tx_waiter.send(SessionStatus::Completed(-1));
-                }
+        tokio::task::spawn_blocking(move || match child.wait() {
+            Ok(exit) => {
+                let code = exit.exit_code() as i32;
+                info!(id, code, "session process exited");
+                let _ = status_tx_waiter.send(SessionStatus::Completed(code));
+            }
+            Err(e) => {
+                error!(id, ?e, "waiting for child");
+                let _ = status_tx_waiter.send(SessionStatus::Completed(-1));
             }
         });
 
@@ -343,14 +354,7 @@ impl SessionManager {
     }
 
     /// Attach a client. Returns (broadcast_rx, pty_input_tx, status_rx).
-    pub fn attach(
-        &self,
-        id: u32,
-    ) -> Result<(
-        broadcast::Receiver<Vec<u8>>,
-        mpsc::Sender<Vec<u8>>,
-        watch::Receiver<SessionStatus>,
-    )> {
+    pub fn attach(&self, id: u32) -> Result<AttachChannels> {
         let session = self
             .sessions
             .get(&id)

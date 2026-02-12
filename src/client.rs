@@ -1,13 +1,13 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
 
 use crate::protocol::{
-    self, Frame, Request, Response, SessionInfo, read_frame, send_data, send_request,
+    self, read_frame, send_data, send_request, Frame, Request, Response, SessionInfo,
 };
-use crate::terminal::{DetachDetector, RawModeGuard, resize_signal, terminal_size};
+use crate::terminal::{resize_signal, terminal_size, DetachDetector, RawModeGuard};
 
 /// Connect to the daemon socket.
 async fn connect(data_dir: &Path) -> Result<UnixStream> {
@@ -27,7 +27,10 @@ fn format_error(message: &str) -> String {
     if message.contains("not found") {
         format!("{}\n\nUse 'cw list' to see active sessions", message)
     } else if message.contains("not running") {
-        format!("{}\n\nUse 'cw status <id>' to check session status", message)
+        format!(
+            "{}\n\nUse 'cw status <id>' to check session status",
+            message
+        )
     } else {
         message.to_string()
     }
@@ -133,9 +136,7 @@ pub async fn attach(data_dir: &Path, id: Option<u32>) -> Result<()> {
     send_request(&mut writer, &Request::Attach { id }).await?;
 
     // Read response
-    let frame = read_frame(&mut reader)
-        .await?
-        .context("unexpected EOF")?;
+    let frame = read_frame(&mut reader).await?.context("unexpected EOF")?;
     let resp = match frame {
         Frame::Control(payload) => protocol::parse_response(&payload)?,
         _ => bail!("unexpected frame"),
@@ -435,8 +436,8 @@ pub async fn get_status(data_dir: &Path, id: u32, json: bool) -> Result<()> {
 
 fn print_session_table(sessions: &[SessionInfo]) {
     println!(
-        "{:<5} {:<12} {:<20} {:<8} {}",
-        "ID", "STATUS", "CREATED", "ATTACHED", "PROMPT"
+        "{:<5} {:<12} {:<20} {:<8} PROMPT",
+        "ID", "STATUS", "CREATED", "ATTACHED"
     );
     println!("{}", "-".repeat(70));
 
