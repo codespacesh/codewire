@@ -3,13 +3,13 @@
 //! These tests start a daemon, launch sessions using `bash -c` instead of `claude`,
 //! and verify the full lifecycle: launch, list, attach, detach, kill, and logs.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use tokio::net::UnixStream;
 
 use codewire::daemon::Daemon;
-use codewire::protocol::{self, Frame, Request, Response, read_frame, send_data, send_request};
+use codewire::protocol::{self, read_frame, send_data, send_request, Frame, Request, Response};
 
 /// Create a temp dir for a test and return its path.
 fn temp_dir(name: &str) -> PathBuf {
@@ -35,7 +35,7 @@ async fn request_response(sock_path: &PathBuf, req: &Request) -> Response {
 }
 
 /// Start a daemon in a background task.
-async fn start_test_daemon(data_dir: &PathBuf) -> PathBuf {
+async fn start_test_daemon(data_dir: &Path) -> PathBuf {
     let daemon = Daemon::new(data_dir).unwrap();
 
     let sock_path = data_dir.join("server.sock");
@@ -46,10 +46,8 @@ async fn start_test_daemon(data_dir: &PathBuf) -> PathBuf {
     // Wait for socket to appear
     for _ in 0..50 {
         tokio::time::sleep(Duration::from_millis(100)).await;
-        if sock_path.exists() {
-            if UnixStream::connect(&sock_path).await.is_ok() {
-                return sock_path;
-            }
+        if sock_path.exists() && UnixStream::connect(&sock_path).await.is_ok() {
+            return sock_path;
         }
     }
     panic!("daemon failed to start");
@@ -64,7 +62,11 @@ async fn test_launch_and_list() {
     let resp = request_response(
         &sock,
         &Request::Launch {
-            command: vec!["bash".into(), "-c".into(), "echo hello-from-codewire && sleep 5".into()],
+            command: vec![
+                "bash".into(),
+                "-c".into(),
+                "echo hello-from-codewire && sleep 5".into(),
+            ],
             working_dir: "/tmp".to_string(),
         },
     )
@@ -87,7 +89,11 @@ async fn test_launch_and_list() {
             assert!(found.is_some(), "launched session should appear in list");
             let s = found.unwrap();
             assert_eq!(s.status, "running");
-            assert!(s.prompt.contains("hello-from-codewire"), "prompt should contain the command, got: {}", s.prompt);
+            assert!(
+                s.prompt.contains("hello-from-codewire"),
+                "prompt should contain the command, got: {}",
+                s.prompt
+            );
         }
         other => panic!("expected SessionList, got: {other:?}"),
     }
@@ -217,7 +223,11 @@ async fn test_logs() {
     let resp = request_response(
         &sock,
         &Request::Launch {
-            command: vec!["bash".into(), "-c".into(), "echo LOG_TEST_OUTPUT_12345".into()],
+            command: vec![
+                "bash".into(),
+                "-c".into(),
+                "echo LOG_TEST_OUTPUT_12345".into(),
+            ],
             working_dir: "/tmp".to_string(),
         },
     )
@@ -262,7 +272,11 @@ async fn test_attach_and_receive_output() {
     let resp = request_response(
         &sock,
         &Request::Launch {
-            command: vec!["bash".into(), "-c".into(), "for i in 1 2 3; do echo ATTACH_TEST_$i; sleep 1; done".into()],
+            command: vec![
+                "bash".into(),
+                "-c".into(),
+                "for i in 1 2 3; do echo ATTACH_TEST_$i; sleep 1; done".into(),
+            ],
             working_dir: "/tmp".to_string(),
         },
     )
@@ -278,7 +292,9 @@ async fn test_attach_and_receive_output() {
     let stream = UnixStream::connect(&sock).await.unwrap();
     let (mut reader, mut writer) = stream.into_split();
 
-    send_request(&mut writer, &Request::Attach { id }).await.unwrap();
+    send_request(&mut writer, &Request::Attach { id })
+        .await
+        .unwrap();
 
     // Read attach confirmation
     let frame = read_frame(&mut reader).await.unwrap().unwrap();
@@ -362,7 +378,9 @@ async fn test_attach_send_input() {
     let stream = UnixStream::connect(&sock).await.unwrap();
     let (mut reader, mut writer) = stream.into_split();
 
-    send_request(&mut writer, &Request::Attach { id }).await.unwrap();
+    send_request(&mut writer, &Request::Attach { id })
+        .await
+        .unwrap();
 
     // Read attach confirmation
     let frame = read_frame(&mut reader).await.unwrap().unwrap();
@@ -385,15 +403,12 @@ async fn test_attach_send_input() {
     loop {
         tokio::select! {
             frame = read_frame(&mut reader) => {
-                match frame.unwrap() {
-                    Some(Frame::Data(bytes)) => {
-                        collected.extend_from_slice(&bytes);
-                        let text = String::from_utf8_lossy(&collected);
-                        if text.contains("INPUT_TEST_LINE") {
-                            break;
-                        }
+                if let Some(Frame::Data(bytes)) = frame.unwrap() {
+                    collected.extend_from_slice(&bytes);
+                    let text = String::from_utf8_lossy(&collected);
+                    if text.contains("INPUT_TEST_LINE") {
+                        break;
                     }
-                    _ => {}
                 }
             }
             _ = &mut timeout => {
@@ -438,7 +453,9 @@ async fn test_detach_from_attach() {
     let stream = UnixStream::connect(&sock).await.unwrap();
     let (mut reader, mut writer) = stream.into_split();
 
-    send_request(&mut writer, &Request::Attach { id }).await.unwrap();
+    send_request(&mut writer, &Request::Attach { id })
+        .await
+        .unwrap();
 
     let frame = read_frame(&mut reader).await.unwrap().unwrap();
     match frame {
@@ -470,7 +487,10 @@ async fn test_detach_from_attach() {
     match resp {
         Response::SessionList { sessions } => {
             let s = sessions.iter().find(|s| s.id == id).unwrap();
-            assert_eq!(s.status, "running", "session should still be running after detach");
+            assert_eq!(
+                s.status, "running",
+                "session should still be running after detach"
+            );
             assert!(!s.attached, "session should not be attached");
         }
         other => panic!("expected SessionList, got: {other:?}"),
@@ -488,7 +508,10 @@ async fn test_attach_nonexistent_session() {
     let resp = request_response(&sock, &Request::Attach { id: 9999 }).await;
     match resp {
         Response::Error { message } => {
-            assert!(message.contains("not found"), "error should mention not found: {message}");
+            assert!(
+                message.contains("not found"),
+                "error should mention not found: {message}"
+            );
         }
         other => panic!("expected Error, got: {other:?}"),
     }
@@ -518,13 +541,21 @@ async fn test_resize_during_attach() {
     let stream = UnixStream::connect(&sock).await.unwrap();
     let (mut reader, mut writer) = stream.into_split();
 
-    send_request(&mut writer, &Request::Attach { id }).await.unwrap();
+    send_request(&mut writer, &Request::Attach { id })
+        .await
+        .unwrap();
     let _ = read_frame(&mut reader).await.unwrap(); // Attached response
 
     // Send resize — should not error
-    send_request(&mut writer, &Request::Resize { cols: 120, rows: 40 })
-        .await
-        .unwrap();
+    send_request(
+        &mut writer,
+        &Request::Resize {
+            cols: 120,
+            rows: 40,
+        },
+    )
+    .await
+    .unwrap();
 
     // Small delay to process
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -552,7 +583,11 @@ async fn test_multiple_attachments() {
     let resp = request_response(
         &sock,
         &Request::Launch {
-            command: vec!["bash".into(), "-c".into(), "for i in 1 2 3 4 5; do echo MULTI_$i; sleep 1; done".into()],
+            command: vec![
+                "bash".into(),
+                "-c".into(),
+                "for i in 1 2 3 4 5; do echo MULTI_$i; sleep 1; done".into(),
+            ],
             working_dir: "/tmp".to_string(),
         },
     )
@@ -567,18 +602,25 @@ async fn test_multiple_attachments() {
     // Attach first client
     let stream1 = UnixStream::connect(&sock).await.unwrap();
     let (mut reader1, mut writer1) = stream1.into_split();
-    send_request(&mut writer1, &Request::Attach { id }).await.unwrap();
+    send_request(&mut writer1, &Request::Attach { id })
+        .await
+        .unwrap();
     let _ = read_frame(&mut reader1).await.unwrap(); // Attached response
 
     // Attach second client (should succeed with new multi-attach support)
     let stream2 = UnixStream::connect(&sock).await.unwrap();
     let (mut reader2, mut writer2) = stream2.into_split();
-    send_request(&mut writer2, &Request::Attach { id }).await.unwrap();
+    send_request(&mut writer2, &Request::Attach { id })
+        .await
+        .unwrap();
     let frame = read_frame(&mut reader2).await.unwrap().unwrap();
     match frame {
         Frame::Control(payload) => {
             let resp = protocol::parse_response(&payload).unwrap();
-            assert!(matches!(resp, Response::Attached { .. }), "second attach should succeed");
+            assert!(
+                matches!(resp, Response::Attached { .. }),
+                "second attach should succeed"
+            );
         }
         _ => panic!("expected control frame"),
     }
@@ -609,8 +651,14 @@ async fn test_multiple_attachments() {
     let text1 = String::from_utf8_lossy(&output1);
     let text2 = String::from_utf8_lossy(&output2);
 
-    assert!(text1.contains("MULTI_"), "first client should receive output: {text1}");
-    assert!(text2.contains("MULTI_"), "second client should receive output: {text2}");
+    assert!(
+        text1.contains("MULTI_"),
+        "first client should receive output: {text1}"
+    );
+    assert!(
+        text2.contains("MULTI_"),
+        "second client should receive output: {text2}"
+    );
 
     // Clean up
     request_response(&sock, &Request::Kill { id }).await;
@@ -693,7 +741,11 @@ async fn test_get_session_status() {
     let resp = request_response(
         &sock,
         &Request::Launch {
-            command: vec!["bash".into(), "-c".into(), "echo STATUS_TEST && sleep 2".into()],
+            command: vec![
+                "bash".into(),
+                "-c".into(),
+                "echo STATUS_TEST && sleep 2".into(),
+            ],
             working_dir: "/tmp".to_string(),
         },
     )
@@ -735,7 +787,11 @@ async fn test_watch_session() {
     let resp = request_response(
         &sock,
         &Request::Launch {
-            command: vec!["bash".into(), "-c".into(), "for i in 1 2 3; do echo WATCH_$i; sleep 1; done".into()],
+            command: vec![
+                "bash".into(),
+                "-c".into(),
+                "for i in 1 2 3; do echo WATCH_$i; sleep 1; done".into(),
+            ],
             working_dir: "/tmp".to_string(),
         },
     )
@@ -992,7 +1048,10 @@ async fn test_event_driven_persistence() {
         .unwrap();
 
     // mtime SHOULD have changed (state change triggered write)
-    assert!(mtime3 > mtime2, "sessions.json was not written on state change");
+    assert!(
+        mtime3 > mtime2,
+        "sessions.json was not written on state change"
+    );
 }
 
 /// Test corrupt sessions.json recovery
@@ -1028,11 +1087,7 @@ async fn test_corrupt_sessions_json_recovery() {
         })
         .collect();
 
-    assert_eq!(
-        backup_files.len(),
-        1,
-        "corrupt file should be backed up"
-    );
+    assert_eq!(backup_files.len(), 1, "corrupt file should be backed up");
 
     // Daemon should be functional - launch a new session
     let resp = request_response(
@@ -1214,7 +1269,9 @@ async fn test_auto_attach_skips_attached() {
     // Attach to first session (keep connection alive)
     let stream1 = UnixStream::connect(&sock).await.unwrap();
     let (mut reader1, mut writer1) = stream1.into_split();
-    send_request(&mut writer1, &Request::Attach { id: id1 }).await.unwrap();
+    send_request(&mut writer1, &Request::Attach { id: id1 })
+        .await
+        .unwrap();
     let _ = read_frame(&mut reader1).await.unwrap(); // Attached response
 
     // Small delay to ensure attach state is updated
@@ -1228,7 +1285,10 @@ async fn test_auto_attach_skips_attached() {
                 .into_iter()
                 .filter(|s| s.status == "running" && !s.attached)
                 .collect();
-            assert!(!candidates.is_empty(), "should have at least one unattached session");
+            assert!(
+                !candidates.is_empty(),
+                "should have at least one unattached session"
+            );
             candidates.sort_by(|a, b| a.created_at.cmp(&b.created_at));
             candidates[0].id
         }
@@ -1290,14 +1350,20 @@ async fn test_auto_attach_skips_completed() {
                 .into_iter()
                 .filter(|s| s.status == "running" && !s.attached)
                 .collect();
-            assert!(!candidates.is_empty(), "should have at least one running session");
+            assert!(
+                !candidates.is_empty(),
+                "should have at least one running session"
+            );
             candidates.sort_by(|a, b| a.created_at.cmp(&b.created_at));
             candidates[0].id
         }
         other => panic!("expected SessionList, got: {other:?}"),
     };
 
-    assert_eq!(auto_id, id2, "should skip completed session and select running id2");
+    assert_eq!(
+        auto_id, id2,
+        "should skip completed session and select running id2"
+    );
     assert_ne!(auto_id, id1, "should not select completed session");
 
     // Clean up
@@ -1317,7 +1383,10 @@ async fn test_auto_attach_no_candidates() {
                 .into_iter()
                 .filter(|s| s.status == "running" && !s.attached)
                 .collect();
-            assert!(candidates.is_empty(), "should have no candidates when no sessions exist");
+            assert!(
+                candidates.is_empty(),
+                "should have no candidates when no sessions exist"
+            );
         }
         other => panic!("expected SessionList, got: {other:?}"),
     }
@@ -1341,7 +1410,9 @@ async fn test_auto_attach_no_candidates() {
     // Attach to it
     let stream = UnixStream::connect(&sock).await.unwrap();
     let (mut reader, mut writer) = stream.into_split();
-    send_request(&mut writer, &Request::Attach { id }).await.unwrap();
+    send_request(&mut writer, &Request::Attach { id })
+        .await
+        .unwrap();
     let _ = read_frame(&mut reader).await.unwrap();
 
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -1405,7 +1476,10 @@ async fn test_explicit_attach_still_works() {
     let resp = request_response(&sock, &Request::Attach { id: id2 }).await;
     match resp {
         Response::Attached { id: attached_id } => {
-            assert_eq!(attached_id, id2, "should attach to explicitly specified session");
+            assert_eq!(
+                attached_id, id2,
+                "should attach to explicitly specified session"
+            );
         }
         other => panic!("expected Attached, got: {other:?}"),
     }

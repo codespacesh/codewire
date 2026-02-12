@@ -4,12 +4,10 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::mpsc;
-use tokio::time::{Duration, sleep};
+use tokio::time::{sleep, Duration};
 use tracing::{error, info, warn};
 
-use crate::protocol::{
-    self, Frame, Request, Response, read_frame, send_data, send_response,
-};
+use crate::protocol::{self, read_frame, send_data, send_response, Frame, Request, Response};
 use crate::session::{SessionManager, SessionStatus};
 
 pub struct Daemon {
@@ -45,8 +43,7 @@ impl Daemon {
             std::fs::remove_file(&self.socket_path)?;
         }
 
-        let listener = UnixListener::bind(&self.socket_path)
-            .context("binding Unix socket")?;
+        let listener = UnixListener::bind(&self.socket_path).context("binding Unix socket")?;
 
         info!(path = %self.socket_path.display(), "daemon listening");
 
@@ -85,10 +82,7 @@ impl Drop for Daemon {
     }
 }
 
-async fn handle_client(
-    stream: UnixStream,
-    manager: Arc<SessionManager>,
-) -> Result<()> {
+async fn handle_client(stream: UnixStream, manager: Arc<SessionManager>) -> Result<()> {
     let (mut reader, mut writer) = stream.into_split();
 
     // Read the first frame — must be a control message
@@ -112,7 +106,10 @@ async fn handle_client(
             send_response(&mut writer, &Response::SessionList { sessions }).await?;
         }
 
-        Request::Launch { command, working_dir } => {
+        Request::Launch {
+            command,
+            working_dir,
+        } => {
             let result = manager.launch(command, working_dir);
             match result {
                 Ok(id) => send_response(&mut writer, &Response::Launched { id }).await?,
@@ -218,9 +215,7 @@ async fn handle_client(
         Request::SendInput { id, data } => {
             let result = manager.send_input(id, data);
             match result {
-                Ok(bytes) => {
-                    send_response(&mut writer, &Response::InputSent { id, bytes }).await?
-                }
+                Ok(bytes) => send_response(&mut writer, &Response::InputSent { id, bytes }).await?,
                 Err(e) => {
                     send_response(
                         &mut writer,

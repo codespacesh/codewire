@@ -3,7 +3,7 @@ use std::os::fd::{AsRawFd, BorrowedFd};
 
 use anyhow::{Context, Result};
 use nix::sys::termios::{self, Termios};
-use tokio::signal::unix::{SignalKind, signal};
+use tokio::signal::unix::{signal, SignalKind};
 
 /// Saved terminal state for restoring on exit.
 pub struct RawModeGuard {
@@ -16,12 +16,11 @@ impl RawModeGuard {
     pub fn enable() -> Result<Self> {
         let fd = io::stdin().as_raw_fd();
         let borrowed = unsafe { BorrowedFd::borrow_raw(fd) };
-        let original = termios::tcgetattr(&borrowed).context("tcgetattr")?;
+        let original = termios::tcgetattr(borrowed).context("tcgetattr")?;
 
         let mut raw = original.clone();
         termios::cfmakeraw(&mut raw);
-        termios::tcsetattr(&borrowed, termios::SetArg::TCSANOW, &raw)
-            .context("tcsetattr raw")?;
+        termios::tcsetattr(borrowed, termios::SetArg::TCSANOW, &raw).context("tcsetattr raw")?;
 
         Ok(Self { original, fd })
     }
@@ -29,7 +28,7 @@ impl RawModeGuard {
     /// Restore the terminal to its original state.
     pub fn restore(&self) {
         let borrowed = unsafe { BorrowedFd::borrow_raw(self.fd) };
-        let _ = termios::tcsetattr(&borrowed, termios::SetArg::TCSANOW, &self.original);
+        let _ = termios::tcsetattr(borrowed, termios::SetArg::TCSANOW, &self.original);
     }
 }
 
@@ -63,13 +62,14 @@ pub fn resize_signal() -> Result<tokio::signal::unix::Signal> {
 /// Detach key sequence detector.
 ///
 /// Default: Ctrl+B followed by 'd' (like tmux).
+#[derive(Default)]
 pub struct DetachDetector {
     saw_prefix: bool,
 }
 
 impl DetachDetector {
     pub fn new() -> Self {
-        Self { saw_prefix: false }
+        Self::default()
     }
 
     /// Feed a byte. Returns (detach_detected, bytes_to_forward).

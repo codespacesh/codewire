@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
@@ -187,10 +187,7 @@ pub async fn send_request<W: AsyncWrite + Unpin>(writer: &mut W, req: &Request) 
     write_frame(writer, &frame).await
 }
 
-pub async fn send_response<W: AsyncWrite + Unpin>(
-    writer: &mut W,
-    resp: &Response,
-) -> Result<()> {
+pub async fn send_response<W: AsyncWrite + Unpin>(writer: &mut W, resp: &Response) -> Result<()> {
     let frame = Frame::control(resp)?;
     write_frame(writer, &frame).await
 }
