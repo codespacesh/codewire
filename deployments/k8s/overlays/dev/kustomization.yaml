@@ -1,0 +1,46 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: codewire-dev
+
+resources:
+  - ../../base
+
+patches:
+  # Create dev namespace instead of prod
+  - patch: |-
+      - op: replace
+        path: /metadata/name
+        value: codewire-dev
+    target:
+      kind: Namespace
+      name: codewire-prod
+  # Ingress patches for dev domain
+  - patch: |-
+      - op: replace
+        path: /spec/tls/0/hosts/0
+        value: dev.codewire.sh
+      - op: replace
+        path: /spec/tls/0/secretName
+        value: codewire-dev-tls
+      - op: replace
+        path: /spec/rules/0/host
+        value: dev.codewire.sh
+    target:
+      kind: Ingress
+      name: codewire-docs
+  # Registry secret (uses prod credentials, outputs to dev namespace)
+  - patch: |-
+      - op: replace
+        path: /spec/managedSecretReference/secretNamespace
+        value: codewire-dev
+      - op: replace
+        path: /spec/authentication/universalAuth/credentialsRef/secretNamespace
+        value: codewire-dev
+    target:
+      kind: InfisicalSecret
+      name: gitea-registry-sync
+
+images:
+  - name: git.noel.sh/codespace/codewire.sh
+    newTag: latest

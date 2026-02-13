@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-docs:
+    name: Build Docs Image
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Infisical
+        run: |
+          RESPONSE=$(curl -s -X POST "${INFISICAL_API_URL}/v1/auth/oidc-auth/login" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"identityId\": \"${INFISICAL_IDENTITY_ID}\",
+              \"jwt\": \"$(cat ${INFISICAL_SA_TOKEN_PATH})\"
+            }")
+          ACCESS_TOKEN=$(echo "$RESPONSE" | jq -r '.accessToken')
+          if [ "$ACCESS_TOKEN" = "null" ] || [ -z "$ACCESS_TOKEN" ]; then
+            echo "Failed to authenticate to Infisical"
+            echo "$RESPONSE"
+            exit 1
+          fi
+          echo "INFISICAL_TOKEN=$ACCESS_TOKEN" >> $GITHUB_ENV
+
+      - name: Login to Gitea Container Registry
+        run: |
+          REGISTRY_TOKEN=$(curl -s "${INFISICAL_API_URL}/v3/secrets/raw/GITEA_REGISTRY_TOKEN?workspaceSlug=codespace&environment=prod&secretPath=/ci" \
+            -H "Authorization: Bearer ${INFISICAL_TOKEN}" | jq -r '.secret.secretValue')
+          echo "$REGISTRY_TOKEN" | docker login git.noel.sh -u ci --password-stdin
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker
+
+      - name: Determine image tags
+        id: tags
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            TAG="${{ github.ref_name }}"
+            echo "tags=git.noel.sh/codespace/codewire.sh:${TAG},git.noel.sh/codespace/codewire.sh:${{ gitea.sha }}" >> $GITHUB_OUTPUT
+          else
+            echo "tags=git.noel.sh/codespace/codewire.sh:latest,git.noel.sh/codespace/codewire.sh:${{ gitea.sha }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build and push docs image
+        uses: docker/build-push-action@v5
+        with:
+          context: docs
+          file: docs/Dockerfile
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+
+  deploy-prod:
+    name: Deploy to Prod
+    needs: [build-docs]
+    if: startsWith(github.ref, 'refs/tags/v')
+    uses: ./.gitea/workflows/deploy-prod.yaml
+    with:
+      tag: ${{ github.ref_name }}
