@@ -2,22 +2,27 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use tokio::net::{UnixListener, UnixStream};
+use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use tokio::time::{sleep, Duration};
 use tracing::{error, info, warn};
 
-use crate::protocol::{self, read_frame, send_data, send_response, Frame, Request, Response};
+use crate::config::Config;
+use crate::connection::{FrameReader, FrameWriter};
+use crate::protocol::{self, Frame, Request, Response};
 use crate::session::{SessionManager, SessionStatus};
 
 pub struct Daemon {
     manager: Arc<SessionManager>,
     socket_path: PathBuf,
     pid_path: PathBuf,
+    config: Config,
+    data_dir: PathBuf,
 }
 
 impl Daemon {
     pub fn new(data_dir: &Path) -> Result<Self> {
+        let config = Config::load(data_dir)?;
         let (manager, persist_rx) = SessionManager::new(data_dir.to_path_buf())?;
         let manager = Arc::new(manager);
 
@@ -27,10 +32,15 @@ impl Daemon {
             persistence_manager(manager_persist, persist_rx).await;
         });
 
+        // Generate auth token (for WebSocket connections)
+        let _ = crate::auth::load_or_generate_token(data_dir);
+
         Ok(Self {
             manager,
             socket_path: data_dir.join("server.sock"),
             pid_path: data_dir.join("daemon.pid"),
+            config,
+            data_dir: data_dir.to_path_buf(),
         })
     }
 
@@ -45,7 +55,33 @@ impl Daemon {
 
         let listener = UnixListener::bind(&self.socket_path).context("binding Unix socket")?;
 
-        info!(path = %self.socket_path.display(), "daemon listening");
+        info!(path = %self.socket_path.display(), "daemon listening on Unix socket");
+
+        // Start WebSocket listener if configured
+        #[cfg(feature = "ws")]
+        if let Some(ref listen_addr) = self.config.daemon.listen {
+            let manager = self.manager.clone();
+            let data_dir = self.data_dir.clone();
+            let addr = listen_addr.clone();
+            tokio::spawn(async move {
+                if let Err(e) = run_ws_server(&addr, manager, &data_dir).await {
+                    error!(?e, "WebSocket server error");
+                }
+            });
+        }
+
+        // Start NATS fleet integration if configured
+        #[cfg(feature = "nats")]
+        if let Some(ref nats_config) = self.config.nats {
+            let manager = self.manager.clone();
+            let daemon_config = self.config.daemon.clone();
+            let nats_cfg = nats_config.clone();
+            tokio::spawn(async move {
+                if let Err(e) = crate::fleet::run_fleet(&nats_cfg, &daemon_config, manager).await {
+                    error!(?e, "NATS fleet error");
+                }
+            });
+        }
 
         // Periodic status refresh (still needed to update from watch channels)
         let manager_refresh = self.manager.clone();
@@ -62,7 +98,10 @@ impl Daemon {
                 Ok((stream, _)) => {
                     let manager = self.manager.clone();
                     tokio::spawn(async move {
-                        if let Err(e) = handle_client(stream, manager).await {
+                        let (r, w) = stream.into_split();
+                        let reader = FrameReader::Unix(r);
+                        let writer = FrameWriter::Unix(w);
+                        if let Err(e) = handle_client(reader, writer, manager).await {
                             warn!(?e, "client handler error");
                         }
                     });
@@ -82,19 +121,82 @@ impl Drop for Daemon {
     }
 }
 
-async fn handle_client(stream: UnixStream, manager: Arc<SessionManager>) -> Result<()> {
-    let (mut reader, mut writer) = stream.into_split();
+// ---------------------------------------------------------------------------
+// WebSocket server (optional, behind "ws" feature)
+// ---------------------------------------------------------------------------
 
+#[cfg(feature = "ws")]
+async fn run_ws_server(
+    addr: &str,
+    manager: Arc<SessionManager>,
+    data_dir: &Path,
+) -> Result<()> {
+    use axum::extract::{ws::WebSocketUpgrade, Query, State};
+    use axum::response::IntoResponse;
+    use axum::routing::get;
+    use axum::Router;
+    use std::collections::HashMap;
+
+    #[derive(Clone)]
+    struct WsState {
+        manager: Arc<SessionManager>,
+        data_dir: PathBuf,
+    }
+
+    async fn ws_handler(
+        ws: WebSocketUpgrade,
+        Query(params): Query<HashMap<String, String>>,
+        State(state): State<WsState>,
+    ) -> impl IntoResponse {
+        // Validate token
+        let token = params.get("token").map(|s| s.as_str()).unwrap_or("");
+        if !crate::auth::validate_token(&state.data_dir, token) {
+            return axum::http::StatusCode::UNAUTHORIZED.into_response();
+        }
+
+        ws.on_upgrade(move |socket| async move {
+            use futures::StreamExt;
+            let (ws_writer, ws_reader) = socket.split();
+            let reader = FrameReader::WebSocket(ws_reader);
+            let writer = FrameWriter::WebSocket(ws_writer);
+            if let Err(e) = handle_client(reader, writer, state.manager).await {
+                warn!(?e, "WebSocket client handler error");
+            }
+        })
+    }
+
+    let state = WsState {
+        manager,
+        data_dir: data_dir.to_path_buf(),
+    };
+
+    let app = Router::new()
+        .route("/ws", get(ws_handler))
+        .with_state(state);
+
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    info!(addr, "WebSocket server listening");
+    axum::serve(listener, app).await?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Client handler (transport-agnostic)
+// ---------------------------------------------------------------------------
+
+async fn handle_client(
+    mut reader: FrameReader,
+    mut writer: FrameWriter,
+    manager: Arc<SessionManager>,
+) -> Result<()> {
     // Read the first frame — must be a control message
-    let frame = read_frame(&mut reader).await?;
+    let frame = reader.read_frame().await?;
     let Some(Frame::Control(payload)) = frame else {
-        send_response(
-            &mut writer,
-            &Response::Error {
+        writer
+            .send_response(&Response::Error {
                 message: "expected control message".into(),
-            },
-        )
-        .await?;
+            })
+            .await?;
         return Ok(());
     };
 
@@ -103,7 +205,9 @@ async fn handle_client(stream: UnixStream, manager: Arc<SessionManager>) -> Resu
     match request {
         Request::ListSessions => {
             let sessions = manager.list();
-            send_response(&mut writer, &Response::SessionList { sessions }).await?;
+            writer
+                .send_response(&Response::SessionList { sessions })
+                .await?;
         }
 
         Request::Launch {
@@ -112,15 +216,13 @@ async fn handle_client(stream: UnixStream, manager: Arc<SessionManager>) -> Resu
         } => {
             let result = manager.launch(command, working_dir);
             match result {
-                Ok(id) => send_response(&mut writer, &Response::Launched { id }).await?,
+                Ok(id) => writer.send_response(&Response::Launched { id }).await?,
                 Err(e) => {
-                    send_response(
-                        &mut writer,
-                        &Response::Error {
+                    writer
+                        .send_response(&Response::Error {
                             message: e.to_string(),
-                        },
-                    )
-                    .await?
+                        })
+                        .await?
                 }
             }
         }
@@ -129,7 +231,7 @@ async fn handle_client(stream: UnixStream, manager: Arc<SessionManager>) -> Resu
             let attach_result = manager.attach(id);
             match attach_result {
                 Ok((mut broadcast_rx, pty_input_tx, mut status_rx)) => {
-                    send_response(&mut writer, &Response::Attached { id }).await?;
+                    writer.send_response(&Response::Attached { id }).await?;
 
                     // Bridge: PTY output → client, client input → PTY
                     let detached = handle_attach_session(
@@ -153,13 +255,11 @@ async fn handle_client(stream: UnixStream, manager: Arc<SessionManager>) -> Resu
                     }
                 }
                 Err(e) => {
-                    send_response(
-                        &mut writer,
-                        &Response::Error {
+                    writer
+                        .send_response(&Response::Error {
                             message: e.to_string(),
-                        },
-                    )
-                    .await?;
+                        })
+                        .await?;
                 }
             }
         }
@@ -167,31 +267,31 @@ async fn handle_client(stream: UnixStream, manager: Arc<SessionManager>) -> Resu
         Request::Kill { id } => {
             let result = manager.kill(id);
             match result {
-                Ok(()) => send_response(&mut writer, &Response::Killed { id }).await?,
+                Ok(()) => writer.send_response(&Response::Killed { id }).await?,
                 Err(e) => {
-                    send_response(
-                        &mut writer,
-                        &Response::Error {
+                    writer
+                        .send_response(&Response::Error {
                             message: e.to_string(),
-                        },
-                    )
-                    .await?
+                        })
+                        .await?
                 }
             }
         }
 
         Request::KillAll => {
             let count = manager.kill_all();
-            send_response(&mut writer, &Response::KilledAll { count }).await?;
+            writer
+                .send_response(&Response::KilledAll { count })
+                .await?;
         }
 
         Request::Resize { .. } => {
             // Resize only makes sense during attach, but handle gracefully
-            send_response(&mut writer, &Response::Resized).await?;
+            writer.send_response(&Response::Resized).await?;
         }
 
         Request::Detach => {
-            send_response(&mut writer, &Response::Detached).await?;
+            writer.send_response(&Response::Detached).await?;
         }
 
         Request::Logs { id, follow, tail } => {
@@ -201,13 +301,11 @@ async fn handle_client(stream: UnixStream, manager: Arc<SessionManager>) -> Resu
                     handle_logs(&mut writer, &path, follow, tail).await?;
                 }
                 Err(e) => {
-                    send_response(
-                        &mut writer,
-                        &Response::Error {
+                    writer
+                        .send_response(&Response::Error {
                             message: e.to_string(),
-                        },
-                    )
-                    .await?;
+                        })
+                        .await?;
                 }
             }
         }
@@ -215,15 +313,17 @@ async fn handle_client(stream: UnixStream, manager: Arc<SessionManager>) -> Resu
         Request::SendInput { id, data } => {
             let result = manager.send_input(id, data);
             match result {
-                Ok(bytes) => send_response(&mut writer, &Response::InputSent { id, bytes }).await?,
+                Ok(bytes) => {
+                    writer
+                        .send_response(&Response::InputSent { id, bytes })
+                        .await?
+                }
                 Err(e) => {
-                    send_response(
-                        &mut writer,
-                        &Response::Error {
+                    writer
+                        .send_response(&Response::Error {
                             message: e.to_string(),
-                        },
-                    )
-                    .await?
+                        })
+                        .await?
                 }
             }
         }
@@ -232,17 +332,16 @@ async fn handle_client(stream: UnixStream, manager: Arc<SessionManager>) -> Resu
             let result = manager.get_status(id);
             match result {
                 Ok((info, output_size)) => {
-                    send_response(&mut writer, &Response::SessionStatus { info, output_size })
+                    writer
+                        .send_response(&Response::SessionStatus { info, output_size })
                         .await?
                 }
                 Err(e) => {
-                    send_response(
-                        &mut writer,
-                        &Response::Error {
+                    writer
+                        .send_response(&Response::Error {
                             message: e.to_string(),
-                        },
-                    )
-                    .await?
+                        })
+                        .await?
                 }
             }
         }
@@ -269,8 +368,8 @@ async fn handle_client(stream: UnixStream, manager: Arc<SessionManager>) -> Resu
 
 /// Handle an attached session: bridge PTY ↔ client.
 async fn handle_attach_session(
-    reader: &mut tokio::net::unix::OwnedReadHalf,
-    writer: &mut tokio::net::unix::OwnedWriteHalf,
+    reader: &mut FrameReader,
+    writer: &mut FrameWriter,
     broadcast_rx: &mut tokio::sync::broadcast::Receiver<Vec<u8>>,
     pty_input_tx: &tokio::sync::mpsc::Sender<Vec<u8>>,
     status_rx: &mut tokio::sync::watch::Receiver<SessionStatus>,
@@ -283,7 +382,7 @@ async fn handle_attach_session(
             data = broadcast_rx.recv() => {
                 match data {
                     Ok(bytes) => {
-                        send_data(writer, &bytes).await?;
+                        writer.send_data(&bytes).await?;
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                         warn!(session_id, n, "client lagged, skipped messages");
@@ -296,7 +395,7 @@ async fn handle_attach_session(
             }
 
             // Client input → PTY (or control messages)
-            frame = read_frame(reader) => {
+            frame = reader.read_frame() => {
                 match frame? {
                     Some(Frame::Data(bytes)) => {
                         if let Err(e) = pty_input_tx.send(bytes).await {
@@ -307,7 +406,7 @@ async fn handle_attach_session(
                         let req: Request = protocol::parse_request(&payload)?;
                         match req {
                             Request::Detach => {
-                                send_response(writer, &Response::Detached).await?;
+                                writer.send_response(&Response::Detached).await?;
                                 break;
                             }
                             Request::Resize { cols, rows } => {
@@ -332,7 +431,7 @@ async fn handle_attach_session(
                 if status != SessionStatus::Running {
                     info!(session_id, %status, "session ended while attached");
                     // Send remaining output then notify
-                    if let Err(e) = send_response(writer, &Response::Error {
+                    if let Err(e) = writer.send_response(&Response::Error {
                         message: format!("session {status}"),
                     }).await {
                         warn!(session_id, ?e, "Failed to send session end notification");
@@ -347,8 +446,8 @@ async fn handle_attach_session(
 
 /// Watch a session in real-time, streaming output and status updates
 async fn handle_watch_session(
-    _reader: &mut tokio::net::unix::OwnedReadHalf,
-    writer: &mut tokio::net::unix::OwnedWriteHalf,
+    _reader: &mut FrameReader,
+    writer: &mut FrameWriter,
     manager: &Arc<SessionManager>,
     id: u32,
     include_history: bool,
@@ -372,16 +471,14 @@ async fn handle_watch_session(
             };
 
             if !output.is_empty() {
-                send_response(
-                    writer,
-                    &Response::WatchUpdate {
+                writer
+                    .send_response(&Response::WatchUpdate {
                         id,
                         status: "running".to_string(),
                         output: Some(output),
                         done: false,
-                    },
-                )
-                .await?;
+                    })
+                    .await?;
             }
         }
     }
@@ -393,8 +490,7 @@ async fn handle_watch_session(
                 match data {
                     Ok(bytes) => {
                         let output = String::from_utf8_lossy(&bytes).to_string();
-                        send_response(
-                            writer,
+                        writer.send_response(
                             &Response::WatchUpdate {
                                 id,
                                 status: "running".to_string(),
@@ -420,8 +516,7 @@ async fn handle_watch_session(
                 let status_str = status.to_string();
                 let done = status != crate::session::SessionStatus::Running;
 
-                send_response(
-                    writer,
+                writer.send_response(
                     &Response::WatchUpdate {
                         id,
                         status: status_str,
@@ -443,7 +538,7 @@ async fn handle_watch_session(
 
 /// Send log file contents to the client.
 async fn handle_logs(
-    writer: &mut tokio::net::unix::OwnedWriteHalf,
+    writer: &mut FrameWriter,
     path: &Path,
     follow: bool,
     tail: Option<usize>,
@@ -462,14 +557,12 @@ async fn handle_logs(
         content
     };
 
-    send_response(
-        writer,
-        &Response::LogData {
+    writer
+        .send_response(&Response::LogData {
             data: output,
             done: !follow,
-        },
-    )
-    .await?;
+        })
+        .await?;
 
     if follow {
         // Tail the file — simple poll approach
@@ -480,14 +573,12 @@ async fn handle_logs(
             if current_len > last_len {
                 if let Ok(data) = std::fs::read(path) {
                     let new_data = &data[last_len as usize..];
-                    send_response(
-                        writer,
-                        &Response::LogData {
+                    writer
+                        .send_response(&Response::LogData {
                             data: String::from_utf8_lossy(new_data).into_owned(),
                             done: false,
-                        },
-                    )
-                    .await?;
+                        })
+                        .await?;
                     last_len = current_len;
                 }
             }
