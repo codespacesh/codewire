@@ -200,6 +200,23 @@ Stop the running daemon gracefully.
 cw stop
 ```
 
+### `cw server`
+
+Manage saved remote server connections.
+
+```bash
+cw server add my-gpu ws://gpu-host:9100 --token <token>   # Save a server
+cw server remove my-gpu                                    # Remove it
+cw server list                                             # List saved servers
+```
+
+Saved servers can be referenced by name with `--server`:
+
+```bash
+cw --server my-gpu list
+cw --server my-gpu attach 1
+```
+
 ## How It Works
 
 Codewire is a single Rust binary (`cw`) that acts as both daemon and CLI client.
