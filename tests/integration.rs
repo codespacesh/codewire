@@ -1620,7 +1620,10 @@ async fn test_ws_auth_rejection() {
     // Try connecting with wrong token — should get HTTP 401 (connection fails)
     let url = format!("ws://127.0.0.1:{}/ws?token=wrong-token", port);
     let result = tokio_tungstenite::connect_async(&url).await;
-    assert!(result.is_err(), "expected connection to fail with bad token");
+    assert!(
+        result.is_err(),
+        "expected connection to fail with bad token"
+    );
 }
 
 #[tokio::test]
@@ -1661,10 +1664,7 @@ async fn test_ws_attach_and_receive_output() {
     let mut reader = FrameReader::WsClient(ws_reader);
     let mut writer = FrameWriter::WsClient(ws_writer);
 
-    writer
-        .send_request(&Request::Attach { id })
-        .await
-        .unwrap();
+    writer.send_request(&Request::Attach { id }).await.unwrap();
 
     // Read attached confirmation
     let frame = reader.read_frame().await.unwrap().unwrap();

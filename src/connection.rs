@@ -93,9 +93,7 @@ pub enum FrameWriter {
     Unix(tokio::net::unix::OwnedWriteHalf),
 
     #[cfg(feature = "ws")]
-    WebSocket(
-        futures::stream::SplitSink<axum::extract::ws::WebSocket, axum::extract::ws::Message>,
-    ),
+    WebSocket(futures::stream::SplitSink<axum::extract::ws::WebSocket, axum::extract::ws::Message>),
 
     #[cfg(feature = "ws")]
     WsClient(
@@ -120,9 +118,7 @@ impl FrameWriter {
                     Frame::Control(data) => axum::extract::ws::Message::Text(
                         String::from_utf8_lossy(data).into_owned().into(),
                     ),
-                    Frame::Data(data) => {
-                        axum::extract::ws::Message::Binary(data.clone().into())
-                    }
+                    Frame::Data(data) => axum::extract::ws::Message::Binary(data.clone().into()),
                 };
                 w.send(msg).await.map_err(Into::into)
             }
