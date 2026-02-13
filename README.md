@@ -290,6 +290,8 @@ Discover and manage codewire daemons across multiple machines using NATS as the 
 cargo build --features nats
 ```
 
+> **Note:** Fleet commands require building with `--features nats`. Pre-built release binaries do not include fleet support.
+
 ### Configuration
 
 ```toml
