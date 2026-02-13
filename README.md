@@ -11,8 +11,7 @@ Works with any CLI-based AI agent: Claude Code, Aider, Goose, Codex, or anything
 ### Homebrew (macOS/Linux)
 
 ```bash
-brew tap codespacesh/tap
-brew install codewire
+brew install codespacesh/codewire/codewire
 ```
 
 ### Install Script
