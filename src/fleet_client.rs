@@ -69,13 +69,13 @@ pub async fn fleet_request(
 /// Display fleet discovery results as a table.
 pub fn print_fleet_table(daemons: &[DaemonInfo]) {
     if daemons.is_empty() {
-        println!("No daemons discovered.");
+        println!("No nodes discovered.");
         return;
     }
 
     println!(
         "{:<20} {:>8}  {:>8}  {}",
-        "DAEMON", "SESSIONS", "UPTIME", "URL"
+        "NODE", "SESSIONS", "UPTIME", "URL"
     );
     println!("{}", "-".repeat(72));
     for d in daemons {
@@ -94,7 +94,7 @@ pub fn print_fleet_table(daemons: &[DaemonInfo]) {
 /// Display fleet discovery results with session details.
 pub fn print_fleet_detail(daemons: &[DaemonInfo]) {
     if daemons.is_empty() {
-        println!("No daemons discovered.");
+        println!("No nodes discovered.");
         return;
     }
 
@@ -132,7 +132,7 @@ fn format_uptime(secs: u64) -> String {
 pub fn parse_fleet_target(target: &str) -> Result<(&str, u32)> {
     let (daemon, id_str) = target
         .split_once(':')
-        .context("fleet target must be <daemon>:<session_id>")?;
+        .context("fleet target must be <node>:<session_id>")?;
     let id: u32 = id_str.parse().context("session ID must be a number")?;
     Ok((daemon, id))
 }
@@ -241,12 +241,12 @@ pub async fn handle_fleet_attach(
     let daemon = daemons
         .iter()
         .find(|d| d.name == daemon_name)
-        .with_context(|| format!("daemon '{}' not found in fleet", daemon_name))?;
+        .with_context(|| format!("node '{}' not found in fleet", daemon_name))?;
 
     let external_url = daemon
         .external_url
         .as_ref()
-        .with_context(|| format!("daemon '{}' has no external_url configured", daemon_name))?;
+        .with_context(|| format!("node '{}' has no external_url configured", daemon_name))?;
 
     // Look up auth token from servers.toml
     let servers = crate::config::ServersConfig::load(data_dir)?;

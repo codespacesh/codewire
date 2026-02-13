@@ -298,12 +298,15 @@ export CODEWIRE_EXTERNAL_URL="wss://9100--myworkspace.coder.codespace.sh/ws"
 ### Fleet Commands
 
 ```bash
-# Discover all daemons
+# Discover all nodes
 cw fleet list
 cw fleet list --json
 
-# Launch a session on a specific daemon
+# Launch a session on a specific node
 cw fleet launch --on gpu-box -- claude -p "train the model"
+
+# Send input to a remote session
+cw fleet send gpu-box:1 "Status update?"
 
 # Kill a remote session
 cw fleet kill gpu-box:1

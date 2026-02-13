@@ -180,7 +180,7 @@ enum Commands {
 #[cfg(feature = "nats")]
 #[derive(Subcommand)]
 enum FleetAction {
-    /// List all daemons and their sessions across the fleet
+    /// List all nodes and their sessions across the fleet
     List {
         /// Discovery timeout in seconds
         #[arg(long, default_value = "2")]
@@ -189,17 +189,17 @@ enum FleetAction {
         #[arg(long)]
         json: bool,
     },
-    /// Attach to a remote session: cw fleet attach <daemon>:<session_id>
+    /// Attach to a remote session: cw fleet attach <node>:<session_id>
     Attach {
-        /// Target in <daemon>:<session_id> format
+        /// Target in <node>:<session_id> format
         target: String,
     },
-    /// Launch a session on a specific daemon
+    /// Launch a session on a specific node
     Launch {
-        /// Daemon name to launch on
+        /// Node name to launch on
         #[arg(long)]
         on: String,
-        /// Working directory on the remote daemon
+        /// Working directory on the remote node
         #[arg(long, short)]
         dir: Option<String>,
         /// Command and arguments
