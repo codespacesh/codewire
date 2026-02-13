@@ -243,6 +243,96 @@ Communication between client and daemon uses a frame-based binary protocol over 
         └── output.log
 ```
 
+## Remote Access (WebSocket)
+
+Connect to a codewire daemon running on a remote machine over WebSocket:
+
+```bash
+# On the remote machine: start daemon with WS listener
+cat >> ~/.codewire/config.toml << 'EOF'
+[daemon]
+listen = "0.0.0.0:9100"
+EOF
+cw daemon
+
+# On your local machine: save the remote server
+cw server add my-server ws://remote-host:9100 --token <token>
+
+# Use it
+cw --server my-server list
+cw --server my-server attach 1
+```
+
+WSS (TLS) is supported automatically — use `wss://` URLs for connections through TLS proxies like Caddy or Cloudflare.
+
+## Fleet Discovery (NATS)
+
+Discover and manage codewire daemons across multiple machines using NATS as the control plane. Build with the `nats` feature:
+
+```bash
+cargo build --features nats
+```
+
+### Configuration
+
+```toml
+# ~/.codewire/config.toml
+[daemon]
+name = "gpu-box"
+listen = "0.0.0.0:9100"
+external_url = "wss://9100--gpu.coder.codespace.sh/ws"
+
+[nats]
+url = "nats://nats.example.com:4222"
+creds_file = "~/.codewire/fleet.creds"
+```
+
+Or via environment variables (zero-config in codespace.sh workspaces):
+
+```bash
+export CODEWIRE_NATS_URL="nats://nats.example.com:4222"
+export CODEWIRE_NATS_CREDS="~/.codewire/fleet.creds"
+export CODEWIRE_EXTERNAL_URL="wss://9100--myworkspace.coder.codespace.sh/ws"
+```
+
+### Fleet Commands
+
+```bash
+# Discover all daemons
+cw fleet list
+cw fleet list --json
+
+# Launch a session on a specific daemon
+cw fleet launch --on gpu-box -- claude -p "train the model"
+
+# Kill a remote session
+cw fleet kill gpu-box:1
+
+# Attach to a remote session (discovers URL via NATS, connects via WSS)
+cw fleet attach gpu-box:1
+```
+
+### Architecture
+
+- **NATS** = control plane (discovery, commands — JSON messages)
+- **WSS** = data plane (PTY attach/streaming — binary frames)
+- NATS never carries binary PTY data
+- Daemons heartbeat every 30 seconds on `cw.fleet.heartbeat`
+
+### Local Development
+
+```bash
+# Start NATS + Caddy (for TLS)
+docker compose -f docker-compose.fleet.yml up -d
+
+# Configure and start daemon
+export CODEWIRE_NATS_URL="nats://127.0.0.1:4222"
+cw daemon &
+
+# Discover
+cw fleet list
+```
+
 ## Multi-Agent Patterns
 
 CodeWire supports full cross-session communication, enabling multi-agent collaboration:
