@@ -1258,3 +1258,112 @@ async fn test_docker_compose_real_claude() {
     )
     .await;
 }
+
+/// Docker Compose e2e: round-robin message passing across the Docker boundary.
+/// Same pattern as test_session_round_robin but targeting the containerized node.
+/// Proves: NATS fleet SendInput → container PTY stdin → stdout → WS watch back to host.
+#[tokio::test]
+async fn test_docker_compose_round_robin() {
+    let client = require_docker_compose().await;
+
+    // Launch 3 sessions on the container — each reads stdin and echoes with a prefix
+    let sessions = ["X", "Y", "Z"];
+    let mut ids = Vec::new();
+    for label in &sessions {
+        let req = FleetRequest::Launch {
+            command: vec![
+                "bash".into(),
+                "-c".into(),
+                format!(
+                    "while IFS= read -r line; do echo '{}:'\"$line\"; done",
+                    label
+                ),
+            ],
+            working_dir: "/tmp".to_string(),
+        };
+        let resp = fleet_request(&client, DOCKER_COMPOSE_DAEMON, &req, Duration::from_secs(10))
+            .await
+            .unwrap();
+        match resp {
+            FleetResponse::Launched { id, .. } => {
+                eprintln!("Launched session {} ({}) on container", id, label);
+                ids.push(id);
+            }
+            other => panic!("expected Launched, got: {:?}", other),
+        }
+    }
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Send "PING" to session X via NATS
+    let send = FleetRequest::SendInput {
+        id: ids[0],
+        data: b"PING\n".to_vec(),
+    };
+    fleet_request(&client, DOCKER_COMPOSE_DAEMON, &send, Duration::from_secs(5))
+        .await
+        .unwrap();
+
+    // Watch X's output via WS, get "X:PING"
+    let output_x = watch_for_output(DOCKER_COMPOSE_WS_PORT, DOCKER_COMPOSE_TOKEN, ids[0], "X:PING", 10).await;
+    assert!(output_x.contains("X:PING"), "expected X:PING, got: {}", output_x);
+    eprintln!("X output: {}", output_x.trim());
+
+    // Send X's output line to session Y
+    let x_line = output_x.lines().find(|l| l.contains("X:PING")).unwrap().trim();
+    let send = FleetRequest::SendInput {
+        id: ids[1],
+        data: format!("{}\n", x_line).into_bytes(),
+    };
+    fleet_request(&client, DOCKER_COMPOSE_DAEMON, &send, Duration::from_secs(5))
+        .await
+        .unwrap();
+
+    // Watch Y's output, get "Y:X:PING"
+    let output_y = watch_for_output(DOCKER_COMPOSE_WS_PORT, DOCKER_COMPOSE_TOKEN, ids[1], "Y:X:PING", 10).await;
+    assert!(output_y.contains("Y:X:PING"), "expected Y:X:PING, got: {}", output_y);
+    eprintln!("Y output: {}", output_y.trim());
+
+    // Send Y's output line to session Z
+    let y_line = output_y.lines().find(|l| l.contains("Y:X:PING")).unwrap().trim();
+    let send = FleetRequest::SendInput {
+        id: ids[2],
+        data: format!("{}\n", y_line).into_bytes(),
+    };
+    fleet_request(&client, DOCKER_COMPOSE_DAEMON, &send, Duration::from_secs(5))
+        .await
+        .unwrap();
+
+    // Watch Z's output, get "Z:Y:X:PING"
+    let output_z = watch_for_output(DOCKER_COMPOSE_WS_PORT, DOCKER_COMPOSE_TOKEN, ids[2], "Z:Y:X:PING", 10).await;
+    assert!(output_z.contains("Z:Y:X:PING"), "expected Z:Y:X:PING, got: {}", output_z);
+    eprintln!("Z output: {}", output_z.trim());
+
+    // Full round-robin: send Z's output back to X
+    let z_line = output_z.lines().find(|l| l.contains("Z:Y:X:PING")).unwrap().trim();
+    let send = FleetRequest::SendInput {
+        id: ids[0],
+        data: format!("{}\n", z_line).into_bytes(),
+    };
+    fleet_request(&client, DOCKER_COMPOSE_DAEMON, &send, Duration::from_secs(5))
+        .await
+        .unwrap();
+
+    let output_final = watch_for_output(DOCKER_COMPOSE_WS_PORT, DOCKER_COMPOSE_TOKEN, ids[0], "X:Z:Y:X:PING", 10).await;
+    assert!(
+        output_final.contains("X:Z:Y:X:PING"),
+        "Expected round-robin chain X:Z:Y:X:PING, got: {}",
+        output_final
+    );
+    eprintln!("Full round-robin complete: X:Z:Y:X:PING");
+
+    // Clean up
+    for id in &ids {
+        let _ = fleet_request(
+            &client,
+            DOCKER_COMPOSE_DAEMON,
+            &FleetRequest::Kill { id: *id },
+            Duration::from_secs(5),
+        )
+        .await;
+    }
+}
