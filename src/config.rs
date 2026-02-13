@@ -101,10 +101,41 @@ impl Config {
             config.daemon.external_url = std::env::var("CODEWIRE_EXTERNAL_URL").ok();
         }
 
+        // Auto-discover NATS from env vars / well-known paths
+        if config.nats.is_none() {
+            config.nats = auto_discover_nats();
+        }
+
         validate_daemon_name(&config.daemon.name)?;
 
         Ok(config)
     }
+}
+
+/// Auto-discover NATS config from environment variables or well-known paths.
+fn auto_discover_nats() -> Option<NatsConfig> {
+    // Check environment variables first
+    if let Ok(url) = std::env::var("CODEWIRE_NATS_URL") {
+        return Some(NatsConfig {
+            url,
+            token: std::env::var("CODEWIRE_NATS_TOKEN").ok(),
+            creds_file: std::env::var("CODEWIRE_NATS_CREDS").ok().map(PathBuf::from),
+        });
+    }
+
+    // Check well-known path (mounted by Coder template in codespace.sh workspaces)
+    let creds_path = PathBuf::from("/etc/codewire/nats.creds");
+    if creds_path.exists() {
+        let url = std::env::var("CODEWIRE_NATS_URL")
+            .unwrap_or_else(|_| "nats://nats.codespace-system:4222".to_string());
+        return Some(NatsConfig {
+            url,
+            token: None,
+            creds_file: Some(creds_path),
+        });
+    }
+
+    None
 }
 
 impl ServersConfig {
