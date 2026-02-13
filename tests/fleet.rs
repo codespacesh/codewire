@@ -22,8 +22,7 @@ use tokio::net::UnixStream;
 
 fn nats_config() -> NatsConfig {
     NatsConfig {
-        url: std::env::var("TEST_NATS_URL")
-            .unwrap_or_else(|_| "nats://127.0.0.1:4222".to_string()),
+        url: std::env::var("TEST_NATS_URL").unwrap_or_else(|_| "nats://127.0.0.1:4222".to_string()),
         token: None,
         creds_file: None,
     }
@@ -205,16 +204,14 @@ async fn test_fleet_discover_two_daemons() {
     let nats_a = nats_config.clone();
     let cfg_a = config_a.clone();
     let mgr_a = manager_a.clone();
-    let fleet_a = tokio::spawn(async move {
-        codewire::fleet::run_fleet(&nats_a, &cfg_a, mgr_a).await
-    });
+    let fleet_a =
+        tokio::spawn(async move { codewire::fleet::run_fleet(&nats_a, &cfg_a, mgr_a).await });
 
     let nats_b = nats_config.clone();
     let cfg_b = config_b.clone();
     let mgr_b = manager_b.clone();
-    let fleet_b = tokio::spawn(async move {
-        codewire::fleet::run_fleet(&nats_b, &cfg_b, mgr_b).await
-    });
+    let fleet_b =
+        tokio::spawn(async move { codewire::fleet::run_fleet(&nats_b, &cfg_b, mgr_b).await });
 
     tokio::time::sleep(Duration::from_millis(500)).await;
 
@@ -223,8 +220,16 @@ async fn test_fleet_discover_two_daemons() {
         .unwrap();
 
     let names: Vec<&str> = daemons.iter().map(|d| d.name.as_str()).collect();
-    assert!(names.contains(&"e2e-disc-a"), "missing daemon A: {:?}", names);
-    assert!(names.contains(&"e2e-disc-b"), "missing daemon B: {:?}", names);
+    assert!(
+        names.contains(&"e2e-disc-a"),
+        "missing daemon A: {:?}",
+        names
+    );
+    assert!(
+        names.contains(&"e2e-disc-b"),
+        "missing daemon B: {:?}",
+        names
+    );
 
     let a = daemons.iter().find(|d| d.name == "e2e-disc-a").unwrap();
     assert_eq!(
@@ -249,9 +254,8 @@ async fn test_fleet_launch_and_list() {
     let nats_cfg = nats_config.clone();
     let cfg = config.clone();
     let mgr = manager.clone();
-    let handle = tokio::spawn(async move {
-        codewire::fleet::run_fleet(&nats_cfg, &cfg, mgr).await
-    });
+    let handle =
+        tokio::spawn(async move { codewire::fleet::run_fleet(&nats_cfg, &cfg, mgr).await });
 
     tokio::time::sleep(Duration::from_millis(500)).await;
 
@@ -306,9 +310,8 @@ async fn test_fleet_kill_session() {
     let nats_cfg = nats_config.clone();
     let cfg = config.clone();
     let mgr = manager.clone();
-    let handle = tokio::spawn(async move {
-        codewire::fleet::run_fleet(&nats_cfg, &cfg, mgr).await
-    });
+    let handle =
+        tokio::spawn(async move { codewire::fleet::run_fleet(&nats_cfg, &cfg, mgr).await });
 
     tokio::time::sleep(Duration::from_millis(500)).await;
 
@@ -359,15 +362,18 @@ async fn test_fleet_get_status() {
     let nats_cfg = nats_config.clone();
     let cfg = config.clone();
     let mgr = manager.clone();
-    let handle = tokio::spawn(async move {
-        codewire::fleet::run_fleet(&nats_cfg, &cfg, mgr).await
-    });
+    let handle =
+        tokio::spawn(async move { codewire::fleet::run_fleet(&nats_cfg, &cfg, mgr).await });
 
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     // Launch
     let req = FleetRequest::Launch {
-        command: vec!["bash".into(), "-c".into(), "echo status-test && sleep 30".into()],
+        command: vec![
+            "bash".into(),
+            "-c".into(),
+            "echo status-test && sleep 30".into(),
+        ],
         working_dir: "/tmp".to_string(),
     };
     let resp = fleet_request(&client, "e2e-status", &req, Duration::from_secs(5))
@@ -430,7 +436,11 @@ async fn test_e2e_nats_discover_ws_list() {
 
     // Launch a session via NATS
     let req = FleetRequest::Launch {
-        command: vec!["bash".into(), "-c".into(), "echo nats-launched && sleep 30".into()],
+        command: vec![
+            "bash".into(),
+            "-c".into(),
+            "echo nats-launched && sleep 30".into(),
+        ],
         working_dir: "/tmp".to_string(),
     };
     let resp = fleet_request(&client, "e2e-full", &req, Duration::from_secs(5))
@@ -489,7 +499,11 @@ async fn test_e2e_ws_launch_nats_discover() {
         port,
         &token,
         &Request::Launch {
-            command: vec!["bash".into(), "-c".into(), "echo ws-launched && sleep 30".into()],
+            command: vec![
+                "bash".into(),
+                "-c".into(),
+                "echo ws-launched && sleep 30".into(),
+            ],
             working_dir: "/tmp".into(),
         },
     )
@@ -603,7 +617,9 @@ async fn test_e2e_multi_daemon_fleet() {
     let resp = ws_request(port_b, &token_b, &Request::ListSessions).await;
     match resp {
         Response::SessionList { sessions } => {
-            assert!(sessions.iter().any(|s| s.id == id_b && s.status == "running"));
+            assert!(sessions
+                .iter()
+                .any(|s| s.id == id_b && s.status == "running"));
         }
         other => panic!("expected SessionList, got: {:?}", other),
     }
@@ -762,10 +778,20 @@ async fn test_node_to_node_communication() {
     let client = connect_nats(&nats_config()).await.unwrap();
 
     // Both nodes visible via fleet discover
-    let daemons = discover_fleet(&client, Duration::from_secs(3)).await.unwrap();
+    let daemons = discover_fleet(&client, Duration::from_secs(3))
+        .await
+        .unwrap();
     let names: Vec<&str> = daemons.iter().map(|d| d.name.as_str()).collect();
-    assert!(names.contains(&"node-alpha"), "missing node-alpha: {:?}", names);
-    assert!(names.contains(&"node-beta"), "missing node-beta: {:?}", names);
+    assert!(
+        names.contains(&"node-alpha"),
+        "missing node-alpha: {:?}",
+        names
+    );
+    assert!(
+        names.contains(&"node-beta"),
+        "missing node-beta: {:?}",
+        names
+    );
 
     // Launch a session on node-alpha from node-beta's perspective
     let req = FleetRequest::Launch {
@@ -860,7 +886,13 @@ async fn test_node_to_node_communication() {
 }
 
 /// Helper: connect via WS, watch session until expected text appears or timeout.
-async fn watch_for_output(port: u16, token: &str, id: u32, expected: &str, timeout_secs: u64) -> String {
+async fn watch_for_output(
+    port: u16,
+    token: &str,
+    id: u32,
+    expected: &str,
+    timeout_secs: u64,
+) -> String {
     let url = format!("ws://127.0.0.1:{}/ws?token={}", port, token);
     let (ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
     let (ws_writer, ws_reader) = ws.split();
@@ -955,10 +987,18 @@ async fn test_session_round_robin() {
 
     // Watch A's output via WS, get "A:HELLO"
     let output_a = watch_for_output(port, &token, ids[0], "A:HELLO", 5).await;
-    assert!(output_a.contains("A:HELLO"), "expected A:HELLO, got: {}", output_a);
+    assert!(
+        output_a.contains("A:HELLO"),
+        "expected A:HELLO, got: {}",
+        output_a
+    );
 
     // Send A's output line to session B
-    let a_line = output_a.lines().find(|l| l.contains("A:HELLO")).unwrap().trim();
+    let a_line = output_a
+        .lines()
+        .find(|l| l.contains("A:HELLO"))
+        .unwrap()
+        .trim();
     let send = FleetRequest::SendInput {
         id: ids[1],
         data: format!("{}\n", a_line).into_bytes(),
@@ -969,10 +1009,18 @@ async fn test_session_round_robin() {
 
     // Watch B's output, get "B:A:HELLO"
     let output_b = watch_for_output(port, &token, ids[1], "B:A:HELLO", 5).await;
-    assert!(output_b.contains("B:A:HELLO"), "expected B:A:HELLO, got: {}", output_b);
+    assert!(
+        output_b.contains("B:A:HELLO"),
+        "expected B:A:HELLO, got: {}",
+        output_b
+    );
 
     // Send B's output line to session C
-    let b_line = output_b.lines().find(|l| l.contains("B:A:HELLO")).unwrap().trim();
+    let b_line = output_b
+        .lines()
+        .find(|l| l.contains("B:A:HELLO"))
+        .unwrap()
+        .trim();
     let send = FleetRequest::SendInput {
         id: ids[2],
         data: format!("{}\n", b_line).into_bytes(),
@@ -990,7 +1038,11 @@ async fn test_session_round_robin() {
     );
 
     // Full round-robin: send C's output back to A
-    let c_line = output_c.lines().find(|l| l.contains("C:B:A:HELLO")).unwrap().trim();
+    let c_line = output_c
+        .lines()
+        .find(|l| l.contains("C:B:A:HELLO"))
+        .unwrap()
+        .trim();
     let send = FleetRequest::SendInput {
         id: ids[0],
         data: format!("{}\n", c_line).into_bytes(),
@@ -1040,7 +1092,9 @@ async fn require_docker_compose() -> async_nats::Client {
     let client = require_nats().await;
 
     // Try to discover the docker-compose daemon
-    let daemons = discover_fleet(&client, Duration::from_secs(3)).await.unwrap();
+    let daemons = discover_fleet(&client, Duration::from_secs(3))
+        .await
+        .unwrap();
     let found = daemons.iter().any(|d| d.name == DOCKER_COMPOSE_DAEMON);
     if !found {
         eprintln!(
@@ -1058,12 +1112,20 @@ async fn require_docker_compose() -> async_nats::Client {
 async fn test_docker_compose_discover() {
     let client = require_docker_compose().await;
 
-    let daemons = discover_fleet(&client, Duration::from_secs(3)).await.unwrap();
-    let daemon = daemons.iter().find(|d| d.name == DOCKER_COMPOSE_DAEMON).unwrap();
+    let daemons = discover_fleet(&client, Duration::from_secs(3))
+        .await
+        .unwrap();
+    let daemon = daemons
+        .iter()
+        .find(|d| d.name == DOCKER_COMPOSE_DAEMON)
+        .unwrap();
 
     assert_eq!(daemon.name, DOCKER_COMPOSE_DAEMON);
     assert!(daemon.external_url.is_some());
-    eprintln!("Discovered daemon: {} (url: {:?})", daemon.name, daemon.external_url);
+    eprintln!(
+        "Discovered daemon: {} (url: {:?})",
+        daemon.name, daemon.external_url
+    );
 }
 
 /// Docker Compose e2e: launch a command via NATS, watch output via WS
@@ -1081,9 +1143,14 @@ async fn test_docker_compose_launch_and_watch() {
         ],
         working_dir: "/tmp".to_string(),
     };
-    let resp = fleet_request(&client, DOCKER_COMPOSE_DAEMON, &req, Duration::from_secs(10))
-        .await
-        .unwrap();
+    let resp = fleet_request(
+        &client,
+        DOCKER_COMPOSE_DAEMON,
+        &req,
+        Duration::from_secs(10),
+    )
+    .await
+    .unwrap();
     let id = match resp {
         FleetResponse::Launched { id, .. } => id,
         other => panic!("expected Launched, got: {:?}", other),
@@ -1151,8 +1218,7 @@ async fn test_docker_compose_launch_and_watch() {
 /// Run with: set -a && source .env && set +a && cargo test --features nats -- test_docker_compose_real_claude --nocapture
 #[tokio::test]
 async fn test_docker_compose_real_claude() {
-    if std::env::var("ANTHROPIC_API_KEY").is_err()
-        && std::env::var("ANTHROPIC_AUTH_TOKEN").is_err()
+    if std::env::var("ANTHROPIC_API_KEY").is_err() && std::env::var("ANTHROPIC_AUTH_TOKEN").is_err()
     {
         eprintln!("ANTHROPIC_API_KEY not set, skipping real Claude test");
         return;
@@ -1170,9 +1236,14 @@ async fn test_docker_compose_real_claude() {
         ],
         working_dir: "/tmp".to_string(),
     };
-    let resp = fleet_request(&client, DOCKER_COMPOSE_DAEMON, &req, Duration::from_secs(10))
-        .await
-        .unwrap();
+    let resp = fleet_request(
+        &client,
+        DOCKER_COMPOSE_DAEMON,
+        &req,
+        Duration::from_secs(10),
+    )
+    .await
+    .unwrap();
     let id = match resp {
         FleetResponse::Launched { id, .. } => {
             eprintln!("Launched real Claude session {} on container", id);
@@ -1281,9 +1352,14 @@ async fn test_docker_compose_round_robin() {
             ],
             working_dir: "/tmp".to_string(),
         };
-        let resp = fleet_request(&client, DOCKER_COMPOSE_DAEMON, &req, Duration::from_secs(10))
-            .await
-            .unwrap();
+        let resp = fleet_request(
+            &client,
+            DOCKER_COMPOSE_DAEMON,
+            &req,
+            Duration::from_secs(10),
+        )
+        .await
+        .unwrap();
         match resp {
             FleetResponse::Launched { id, .. } => {
                 eprintln!("Launched session {} ({}) on container", id, label);
@@ -1299,56 +1375,128 @@ async fn test_docker_compose_round_robin() {
         id: ids[0],
         data: b"PING\n".to_vec(),
     };
-    fleet_request(&client, DOCKER_COMPOSE_DAEMON, &send, Duration::from_secs(5))
-        .await
-        .unwrap();
+    fleet_request(
+        &client,
+        DOCKER_COMPOSE_DAEMON,
+        &send,
+        Duration::from_secs(5),
+    )
+    .await
+    .unwrap();
 
     // Watch X's output via WS, get "X:PING"
-    let output_x = watch_for_output(DOCKER_COMPOSE_WS_PORT, DOCKER_COMPOSE_TOKEN, ids[0], "X:PING", 10).await;
-    assert!(output_x.contains("X:PING"), "expected X:PING, got: {}", output_x);
+    let output_x = watch_for_output(
+        DOCKER_COMPOSE_WS_PORT,
+        DOCKER_COMPOSE_TOKEN,
+        ids[0],
+        "X:PING",
+        10,
+    )
+    .await;
+    assert!(
+        output_x.contains("X:PING"),
+        "expected X:PING, got: {}",
+        output_x
+    );
     eprintln!("X output: {}", output_x.trim());
 
     // Send X's output line to session Y
-    let x_line = output_x.lines().find(|l| l.contains("X:PING")).unwrap().trim();
+    let x_line = output_x
+        .lines()
+        .find(|l| l.contains("X:PING"))
+        .unwrap()
+        .trim();
     let send = FleetRequest::SendInput {
         id: ids[1],
         data: format!("{}\n", x_line).into_bytes(),
     };
-    fleet_request(&client, DOCKER_COMPOSE_DAEMON, &send, Duration::from_secs(5))
-        .await
-        .unwrap();
+    fleet_request(
+        &client,
+        DOCKER_COMPOSE_DAEMON,
+        &send,
+        Duration::from_secs(5),
+    )
+    .await
+    .unwrap();
 
     // Watch Y's output, get "Y:X:PING"
-    let output_y = watch_for_output(DOCKER_COMPOSE_WS_PORT, DOCKER_COMPOSE_TOKEN, ids[1], "Y:X:PING", 10).await;
-    assert!(output_y.contains("Y:X:PING"), "expected Y:X:PING, got: {}", output_y);
+    let output_y = watch_for_output(
+        DOCKER_COMPOSE_WS_PORT,
+        DOCKER_COMPOSE_TOKEN,
+        ids[1],
+        "Y:X:PING",
+        10,
+    )
+    .await;
+    assert!(
+        output_y.contains("Y:X:PING"),
+        "expected Y:X:PING, got: {}",
+        output_y
+    );
     eprintln!("Y output: {}", output_y.trim());
 
     // Send Y's output line to session Z
-    let y_line = output_y.lines().find(|l| l.contains("Y:X:PING")).unwrap().trim();
+    let y_line = output_y
+        .lines()
+        .find(|l| l.contains("Y:X:PING"))
+        .unwrap()
+        .trim();
     let send = FleetRequest::SendInput {
         id: ids[2],
         data: format!("{}\n", y_line).into_bytes(),
     };
-    fleet_request(&client, DOCKER_COMPOSE_DAEMON, &send, Duration::from_secs(5))
-        .await
-        .unwrap();
+    fleet_request(
+        &client,
+        DOCKER_COMPOSE_DAEMON,
+        &send,
+        Duration::from_secs(5),
+    )
+    .await
+    .unwrap();
 
     // Watch Z's output, get "Z:Y:X:PING"
-    let output_z = watch_for_output(DOCKER_COMPOSE_WS_PORT, DOCKER_COMPOSE_TOKEN, ids[2], "Z:Y:X:PING", 10).await;
-    assert!(output_z.contains("Z:Y:X:PING"), "expected Z:Y:X:PING, got: {}", output_z);
+    let output_z = watch_for_output(
+        DOCKER_COMPOSE_WS_PORT,
+        DOCKER_COMPOSE_TOKEN,
+        ids[2],
+        "Z:Y:X:PING",
+        10,
+    )
+    .await;
+    assert!(
+        output_z.contains("Z:Y:X:PING"),
+        "expected Z:Y:X:PING, got: {}",
+        output_z
+    );
     eprintln!("Z output: {}", output_z.trim());
 
     // Full round-robin: send Z's output back to X
-    let z_line = output_z.lines().find(|l| l.contains("Z:Y:X:PING")).unwrap().trim();
+    let z_line = output_z
+        .lines()
+        .find(|l| l.contains("Z:Y:X:PING"))
+        .unwrap()
+        .trim();
     let send = FleetRequest::SendInput {
         id: ids[0],
         data: format!("{}\n", z_line).into_bytes(),
     };
-    fleet_request(&client, DOCKER_COMPOSE_DAEMON, &send, Duration::from_secs(5))
-        .await
-        .unwrap();
+    fleet_request(
+        &client,
+        DOCKER_COMPOSE_DAEMON,
+        &send,
+        Duration::from_secs(5),
+    )
+    .await
+    .unwrap();
 
-    let output_final = watch_for_output(DOCKER_COMPOSE_WS_PORT, DOCKER_COMPOSE_TOKEN, ids[0], "X:Z:Y:X:PING", 10).await;
+    let output_final = watch_for_output(
+        DOCKER_COMPOSE_WS_PORT,
+        DOCKER_COMPOSE_TOKEN,
+        ids[0],
+        "X:Z:Y:X:PING",
+        10,
+    )
+    .await;
     assert!(
         output_final.contains("X:Z:Y:X:PING"),
         "Expected round-robin chain X:Z:Y:X:PING, got: {}",

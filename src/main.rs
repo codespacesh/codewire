@@ -390,12 +390,11 @@ async fn main() -> Result<()> {
 #[cfg(feature = "nats")]
 async fn handle_fleet_action(action: FleetAction, data_dir: &std::path::Path) -> Result<()> {
     let config = config::Config::load(data_dir)?;
-    let nats_config = config
-        .nats
-        .as_ref()
-        .ok_or_else(|| anyhow::anyhow!(
+    let nats_config = config.nats.as_ref().ok_or_else(|| {
+        anyhow::anyhow!(
             "NATS not configured. Set CODEWIRE_NATS_URL or add [nats] to ~/.codewire/config.toml"
-        ))?;
+        )
+    })?;
 
     match action {
         FleetAction::List { timeout, json } => {
@@ -408,9 +407,7 @@ async fn handle_fleet_action(action: FleetAction, data_dir: &std::path::Path) ->
             let working_dir = dir.unwrap_or_else(|| ".".to_string());
             fleet_client::handle_fleet_launch(nats_config, &on, command, working_dir).await
         }
-        FleetAction::Kill { target } => {
-            fleet_client::handle_fleet_kill(nats_config, &target).await
-        }
+        FleetAction::Kill { target } => fleet_client::handle_fleet_kill(nats_config, &target).await,
         FleetAction::Send { target, input } => {
             fleet_client::handle_fleet_send_input(nats_config, &target, input.into_bytes()).await
         }

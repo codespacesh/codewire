@@ -126,11 +126,7 @@ impl Drop for Daemon {
 // ---------------------------------------------------------------------------
 
 #[cfg(feature = "ws")]
-async fn run_ws_server(
-    addr: &str,
-    manager: Arc<SessionManager>,
-    data_dir: &Path,
-) -> Result<()> {
+async fn run_ws_server(addr: &str, manager: Arc<SessionManager>, data_dir: &Path) -> Result<()> {
     use axum::extract::{ws::WebSocketUpgrade, Query, State};
     use axum::response::IntoResponse;
     use axum::routing::get;
@@ -280,9 +276,7 @@ async fn handle_client(
 
         Request::KillAll => {
             let count = manager.kill_all();
-            writer
-                .send_response(&Response::KilledAll { count })
-                .await?;
+            writer.send_response(&Response::KilledAll { count }).await?;
         }
 
         Request::Resize { .. } => {
