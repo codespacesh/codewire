@@ -32,7 +32,11 @@
       "Bash(./target/release/cw attach:*)",
       "Bash(./target/release/cw kill:*)",
       "Bash(cargo run:*)",
-      "Bash(./tests/manual_test.sh:*)"
+      "Bash(./tests/manual_test.sh:*)",
+      "Bash(cargo fmt:*)",
+      "Bash(cargo clippy:*)",
+      "Bash(git -C /Users/noel/src/sonica/codewire status)",
+      "Bash(git -C /Users/noel/src/sonica/codewire diff .github/workflows/ci.yml src/client.rs src/daemon.rs src/main.rs src/session.rs src/terminal.rs tests/integration.rs)"
     ]
   },
   "enableAllProjectMcpServers": true,
