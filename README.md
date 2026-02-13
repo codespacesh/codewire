@@ -301,7 +301,7 @@ Discover and manage codewire daemons across multiple machines using NATS as the 
 cargo build --features nats
 ```
 
-> **Note:** Fleet commands require building with `--features nats`. Pre-built release binaries do not include fleet support.
+> **Note:** When building from source, fleet commands require `--features nats`. Pre-built release binaries include all features.
 
 See [Configuration](#configuration) for all config options. Fleet requires at minimum `[nats] url`.
 
