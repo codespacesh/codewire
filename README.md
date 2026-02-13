@@ -371,18 +371,32 @@ cw fleet launch --on <node> -- <cmd>     # Launch remotely
 cw fleet kill <node>:<id>                # Kill remotely
 ```
 
-### Local Development
+### Local Development (Docker Compose)
+
+The repo includes a Docker Compose stack for local fleet development and testing:
+
+- **NATS** — message broker on `localhost:4222` (monitor: `localhost:8222`)
+- **Caddy** — TLS reverse proxy on `localhost:9443`
+- **Codewire** — containerized node (`docker-test`) on `localhost:9100`
 
 ```bash
-# Start NATS + Caddy (for TLS)
-docker compose up -d
+# Copy env file (optionally set ANTHROPIC_API_KEY for Claude e2e tests)
+cp .env.example .env
 
-# Configure and start daemon
-export CODEWIRE_NATS_URL="nats://127.0.0.1:4222"
-cw daemon &
+# Start the stack
+docker compose up -d --build
 
-# Discover
-cw fleet list
+# Discover the containerized node
+CODEWIRE_NATS_URL=nats://127.0.0.1:4222 cw fleet list
+
+# Launch a session on the container
+CODEWIRE_NATS_URL=nats://127.0.0.1:4222 cw fleet launch --on docker-test -- echo hello
+
+# Run fleet tests
+cargo test --features nats --test fleet
+
+# Tear down
+docker compose down
 ```
 
 ## Multi-Agent Patterns
