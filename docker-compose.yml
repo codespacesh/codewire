@@ -10,12 +10,25 @@ services:
     image: caddy:2-alpine
     ports:
       - "9443:443"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile
       - caddy_data:/data
       - caddy_config:/config
+    depends_on:
+      - codewire
+
+  codewire:
+    build: .
+    ports:
+      - "9100:9100"
+    environment:
+      - CODEWIRE_DAEMON_NAME=docker-test
+      - CODEWIRE_LISTEN=0.0.0.0:9100
+      - CODEWIRE_NATS_URL=nats://nats:4222
+      - CODEWIRE_TOKEN=test-token-for-e2e
+      - CODEWIRE_EXTERNAL_URL=wss://localhost:9443/ws
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - TERM=xterm-256color
     depends_on:
       - nats
 

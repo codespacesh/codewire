@@ -1,25 +1,59 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::UnixStream;
 
-use crate::protocol::{
-    self, read_frame, send_data, send_request, Frame, Request, Response, SessionInfo,
-};
+use crate::connection::{FrameReader, FrameWriter};
+use crate::protocol::{self, Frame, Request, Response, SessionInfo};
 use crate::terminal::{resize_signal, terminal_size, DetachDetector, RawModeGuard};
 
-/// Connect to the daemon socket.
-async fn connect(data_dir: &Path) -> Result<UnixStream> {
-    let sock = data_dir.join("server.sock");
-    UnixStream::connect(&sock)
-        .await
-        .with_context(|| {
-            format!(
-                "Failed to connect to CodeWire daemon at {}\nThe daemon may not be running. It should auto-start on first command.",
-                sock.display()
-            )
-        })
+// ---------------------------------------------------------------------------
+// Connection target — local daemon or remote server
+// ---------------------------------------------------------------------------
+
+/// Where to connect — local daemon or remote server.
+#[derive(Clone)]
+pub enum Target {
+    Local(PathBuf),
+    Remote { url: String, token: String },
+}
+
+impl Target {
+    /// Connect and return (reader, writer) pair.
+    pub async fn connect(&self) -> Result<(FrameReader, FrameWriter)> {
+        match self {
+            Target::Local(data_dir) => {
+                let sock = data_dir.join("server.sock");
+                let stream = tokio::net::UnixStream::connect(&sock)
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "Failed to connect to CodeWire daemon at {}\nThe daemon may not be running. It should auto-start on first command.",
+                            sock.display()
+                        )
+                    })?;
+                let (r, w) = stream.into_split();
+                Ok((FrameReader::Unix(r), FrameWriter::Unix(w)))
+            }
+            #[cfg(feature = "ws")]
+            Target::Remote { url, token } => {
+                use tokio_tungstenite::connect_async;
+                let ws_url = format!("{}/ws?token={}", url, token);
+                let (ws, _response) = connect_async(&ws_url)
+                    .await
+                    .with_context(|| format!("connecting to {}", url))?;
+                let (ws_writer, ws_reader) = futures::StreamExt::split(ws);
+                Ok((
+                    FrameReader::WsClient(ws_reader),
+                    FrameWriter::WsClient(ws_writer),
+                ))
+            }
+            #[cfg(not(feature = "ws"))]
+            Target::Remote { .. } => {
+                bail!("Remote connections require the 'ws' feature")
+            }
+        }
+    }
 }
 
 /// Format error message with helpful context
@@ -37,13 +71,13 @@ fn format_error(message: &str) -> String {
 }
 
 /// Send a request and read a single response.
-async fn request_response(data_dir: &Path, req: &Request) -> Result<Response> {
-    let stream = connect(data_dir).await?;
-    let (mut reader, mut writer) = stream.into_split();
+async fn request_response(target: &Target, req: &Request) -> Result<Response> {
+    let (mut reader, mut writer) = target.connect().await?;
 
-    send_request(&mut writer, req).await?;
+    writer.send_request(req).await?;
 
-    let frame = read_frame(&mut reader)
+    let frame = reader
+        .read_frame()
         .await?
         .context("unexpected EOF from daemon")?;
 
@@ -57,8 +91,8 @@ async fn request_response(data_dir: &Path, req: &Request) -> Result<Response> {
 // Public commands
 // ---------------------------------------------------------------------------
 
-pub async fn list(data_dir: &Path, json: bool) -> Result<()> {
-    let resp = request_response(data_dir, &Request::ListSessions).await?;
+pub async fn list(target: &Target, json: bool) -> Result<()> {
+    let resp = request_response(target, &Request::ListSessions).await?;
 
     match resp {
         Response::SessionList { sessions } => {
@@ -76,10 +110,10 @@ pub async fn list(data_dir: &Path, json: bool) -> Result<()> {
     Ok(())
 }
 
-pub async fn launch(data_dir: &Path, command: Vec<String>, working_dir: String) -> Result<()> {
+pub async fn launch(target: &Target, command: Vec<String>, working_dir: String) -> Result<()> {
     let display = command.join(" ");
     let resp = request_response(
-        data_dir,
+        target,
         &Request::Launch {
             command,
             working_dir,
@@ -97,13 +131,13 @@ pub async fn launch(data_dir: &Path, command: Vec<String>, working_dir: String) 
     Ok(())
 }
 
-pub async fn attach(data_dir: &Path, id: Option<u32>) -> Result<()> {
+pub async fn attach(target: &Target, id: Option<u32>) -> Result<()> {
     // Auto-select session if ID not provided
     let (id, auto_selected) = if let Some(id) = id {
         (id, false)
     } else {
         // List all sessions
-        let resp = request_response(data_dir, &Request::ListSessions).await?;
+        let resp = request_response(target, &Request::ListSessions).await?;
         match resp {
             Response::SessionList { sessions } => {
                 // Filter for running unattached sessions
@@ -129,14 +163,13 @@ pub async fn attach(data_dir: &Path, id: Option<u32>) -> Result<()> {
         }
     };
 
-    let stream = connect(data_dir).await?;
-    let (mut reader, mut writer) = stream.into_split();
+    let (mut reader, mut writer) = target.connect().await?;
 
     // Request attach
-    send_request(&mut writer, &Request::Attach { id }).await?;
+    writer.send_request(&Request::Attach { id }).await?;
 
     // Read response
-    let frame = read_frame(&mut reader).await?.context("unexpected EOF")?;
+    let frame = reader.read_frame().await?.context("unexpected EOF")?;
     let resp = match frame {
         Frame::Control(payload) => protocol::parse_response(&payload)?,
         _ => bail!("unexpected frame"),
@@ -159,7 +192,7 @@ pub async fn attach(data_dir: &Path, id: Option<u32>) -> Result<()> {
 
     // Send initial terminal size
     if let Ok((cols, rows)) = terminal_size() {
-        send_request(&mut writer, &Request::Resize { cols, rows }).await?;
+        writer.send_request(&Request::Resize { cols, rows }).await?;
     }
 
     // Set up SIGWINCH handler
@@ -173,7 +206,7 @@ pub async fn attach(data_dir: &Path, id: Option<u32>) -> Result<()> {
     loop {
         tokio::select! {
             // Read from daemon (PTY output) → write to stdout
-            frame = read_frame(&mut reader) => {
+            frame = reader.read_frame() => {
                 match frame? {
                     Some(Frame::Data(bytes)) => {
                         stdout.write_all(&bytes).await?;
@@ -212,19 +245,19 @@ pub async fn attach(data_dir: &Path, id: Option<u32>) -> Result<()> {
                 }
                 let (should_detach, forward) = detach.feed_buf(&input_buf[..n]);
                 if should_detach {
-                    send_request(&mut writer, &Request::Detach).await?;
+                    writer.send_request(&Request::Detach).await?;
                     // Wait for detach confirmation
                     continue;
                 }
                 if !forward.is_empty() {
-                    send_data(&mut writer, &forward).await?;
+                    writer.send_data(&forward).await?;
                 }
             }
 
             // Terminal resize
             _ = winch.recv() => {
                 if let Ok((cols, rows)) = terminal_size() {
-                    send_request(&mut writer, &Request::Resize { cols, rows }).await?;
+                    writer.send_request(&Request::Resize { cols, rows }).await?;
                 }
             }
         }
@@ -233,8 +266,8 @@ pub async fn attach(data_dir: &Path, id: Option<u32>) -> Result<()> {
     Ok(())
 }
 
-pub async fn kill(data_dir: &Path, id: u32) -> Result<()> {
-    let resp = request_response(data_dir, &Request::Kill { id }).await?;
+pub async fn kill(target: &Target, id: u32) -> Result<()> {
+    let resp = request_response(target, &Request::Kill { id }).await?;
     match resp {
         Response::Killed { id } => println!("Session {id} killed."),
         Response::Error { message } => bail!("{}", format_error(&message)),
@@ -243,8 +276,8 @@ pub async fn kill(data_dir: &Path, id: u32) -> Result<()> {
     Ok(())
 }
 
-pub async fn kill_all(data_dir: &Path) -> Result<()> {
-    let resp = request_response(data_dir, &Request::KillAll).await?;
+pub async fn kill_all(target: &Target) -> Result<()> {
+    let resp = request_response(target, &Request::KillAll).await?;
     match resp {
         Response::KilledAll { count } => println!("Killed {count} session(s)."),
         Response::Error { message } => bail!("{}", format_error(&message)),
@@ -253,16 +286,17 @@ pub async fn kill_all(data_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-pub async fn logs(data_dir: &Path, id: u32, follow: bool, tail: Option<usize>) -> Result<()> {
-    let stream = connect(data_dir).await?;
-    let (mut reader, mut writer) = stream.into_split();
+pub async fn logs(target: &Target, id: u32, follow: bool, tail: Option<usize>) -> Result<()> {
+    let (mut reader, mut writer) = target.connect().await?;
 
-    send_request(&mut writer, &Request::Logs { id, follow, tail }).await?;
+    writer
+        .send_request(&Request::Logs { id, follow, tail })
+        .await?;
 
     let mut stdout = tokio::io::stdout();
 
     loop {
-        let frame = read_frame(&mut reader).await?;
+        let frame = reader.read_frame().await?;
         match frame {
             Some(Frame::Control(payload)) => {
                 let resp = protocol::parse_response(&payload)?;
@@ -289,7 +323,7 @@ pub async fn logs(data_dir: &Path, id: u32, follow: bool, tail: Option<usize>) -
 }
 
 pub async fn send_input(
-    data_dir: &Path,
+    target: &Target,
     id: u32,
     input: Option<String>,
     stdin: bool,
@@ -314,7 +348,7 @@ pub async fn send_input(
         data.push(b'\n');
     }
 
-    let resp = request_response(data_dir, &Request::SendInput { id, data }).await?;
+    let resp = request_response(target, &Request::SendInput { id, data }).await?;
 
     match resp {
         Response::InputSent { id, bytes } => {
@@ -327,25 +361,22 @@ pub async fn send_input(
 }
 
 pub async fn watch_session(
-    data_dir: &Path,
+    target: &Target,
     id: u32,
     tail: Option<usize>,
     no_history: bool,
     timeout: Option<u64>,
 ) -> Result<()> {
-    let stream = connect(data_dir).await?;
-    let (mut reader, mut writer) = stream.into_split();
+    let (mut reader, mut writer) = target.connect().await?;
 
     // Send watch request
-    send_request(
-        &mut writer,
-        &Request::WatchSession {
+    writer
+        .send_request(&Request::WatchSession {
             id,
             include_history: !no_history,
             history_lines: tail,
-        },
-    )
-    .await?;
+        })
+        .await?;
 
     let mut stdout = tokio::io::stdout();
 
@@ -360,7 +391,7 @@ pub async fn watch_session(
 
     loop {
         tokio::select! {
-            frame = read_frame(&mut reader) => {
+            frame = reader.read_frame() => {
                 match frame? {
                     Some(Frame::Control(payload)) => {
                         let resp = protocol::parse_response(&payload)?;
@@ -394,8 +425,8 @@ pub async fn watch_session(
     Ok(())
 }
 
-pub async fn get_status(data_dir: &Path, id: u32, json: bool) -> Result<()> {
-    let resp = request_response(data_dir, &Request::GetStatus { id }).await?;
+pub async fn get_status(target: &Target, id: u32, json: bool) -> Result<()> {
+    let resp = request_response(target, &Request::GetStatus { id }).await?;
 
     match resp {
         Response::SessionStatus { info, output_size } => {

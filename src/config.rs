@@ -96,7 +96,13 @@ impl Config {
             Self::default()
         };
 
-        // Override external_url from env if not set in config
+        // Override daemon config from env vars
+        if let Ok(name) = std::env::var("CODEWIRE_DAEMON_NAME") {
+            config.daemon.name = name;
+        }
+        if config.daemon.listen.is_none() {
+            config.daemon.listen = std::env::var("CODEWIRE_LISTEN").ok();
+        }
         if config.daemon.external_url.is_none() {
             config.daemon.external_url = std::env::var("CODEWIRE_EXTERNAL_URL").ok();
         }
