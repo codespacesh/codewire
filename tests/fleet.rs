@@ -1283,22 +1283,19 @@ async fn test_docker_compose_real_claude() {
                 match frame.unwrap() {
                     Some(Frame::Control(payload)) => {
                         let resp: Response = protocol::parse_response(&payload).unwrap();
-                        match resp {
-                            Response::WatchUpdate { output, done, .. } => {
-                                if let Some(text) = output {
-                                    eprint!("{}", text);
-                                    all_output.push_str(&text);
-                                }
-                                if done {
-                                    eprintln!("\n[Claude session completed]");
-                                    break;
-                                }
-                                if all_output.contains("CODEWIRE_TEST_OK") {
-                                    eprintln!("\n[Found CODEWIRE_TEST_OK in output]");
-                                    break;
-                                }
+                        if let Response::WatchUpdate { output, done, .. } = resp {
+                            if let Some(text) = output {
+                                eprint!("{}", text);
+                                all_output.push_str(&text);
                             }
-                            _ => {}
+                            if done {
+                                eprintln!("\n[Claude session completed]");
+                                break;
+                            }
+                            if all_output.contains("CODEWIRE_TEST_OK") {
+                                eprintln!("\n[Found CODEWIRE_TEST_OK in output]");
+                                break;
+                            }
                         }
                     }
                     Some(Frame::Data(_)) => {}
