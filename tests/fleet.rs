@@ -859,6 +859,165 @@ async fn test_node_to_node_communication() {
     .await;
 }
 
+/// Helper: connect via WS, watch session until expected text appears or timeout.
+async fn watch_for_output(port: u16, token: &str, id: u32, expected: &str, timeout_secs: u64) -> String {
+    let url = format!("ws://127.0.0.1:{}/ws?token={}", port, token);
+    let (ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+    let (ws_writer, ws_reader) = ws.split();
+    let mut reader = FrameReader::WsClient(ws_reader);
+    let mut writer = FrameWriter::WsClient(ws_writer);
+
+    writer
+        .send_request(&Request::WatchSession {
+            id,
+            include_history: true,
+            history_lines: None,
+        })
+        .await
+        .unwrap();
+
+    let mut all_output = String::new();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout_secs);
+
+    loop {
+        tokio::select! {
+            frame = reader.read_frame() => {
+                match frame.unwrap() {
+                    Some(Frame::Control(payload)) => {
+                        let resp: Response = protocol::parse_response(&payload).unwrap();
+                        if let Response::WatchUpdate { output, done, .. } = resp {
+                            if let Some(text) = output {
+                                all_output.push_str(&text);
+                            }
+                            if done || all_output.contains(expected) {
+                                break;
+                            }
+                        }
+                    }
+                    Some(Frame::Data(_)) => {}
+                    None => break,
+                }
+            }
+            _ = tokio::time::sleep_until(deadline) => {
+                panic!("Timed out waiting for '{}'. Got:\n{}", expected, all_output);
+            }
+        }
+    }
+
+    all_output
+}
+
+/// 3 sessions pass a message round-robin: A→B→C→A.
+/// Each session runs bash that reads stdin and echoes with a prefix.
+/// Coordinator uses SendInput + WatchSession to route between them.
+#[tokio::test]
+async fn test_session_round_robin() {
+    let _client = require_nats().await;
+
+    let dir = temp_dir("rr");
+    let (_sock, port) = start_fleet_daemon(&dir, "round-robin").await;
+    let token = std::fs::read_to_string(dir.join("token")).unwrap();
+    let client = connect_nats(&nats_config()).await.unwrap();
+
+    // Launch 3 sessions — each reads stdin and echoes with a prefix
+    let sessions = ["A", "B", "C"];
+    let mut ids = Vec::new();
+    for label in &sessions {
+        let req = FleetRequest::Launch {
+            command: vec![
+                "bash".into(),
+                "-c".into(),
+                format!(
+                    "while IFS= read -r line; do echo '{}:'\"$line\"; done",
+                    label
+                ),
+            ],
+            working_dir: "/tmp".to_string(),
+        };
+        let resp = fleet_request(&client, "round-robin", &req, Duration::from_secs(5))
+            .await
+            .unwrap();
+        match resp {
+            FleetResponse::Launched { id, .. } => ids.push(id),
+            other => panic!("expected Launched, got: {:?}", other),
+        }
+    }
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // Send "HELLO" to session A via NATS
+    let send = FleetRequest::SendInput {
+        id: ids[0],
+        data: b"HELLO\n".to_vec(),
+    };
+    fleet_request(&client, "round-robin", &send, Duration::from_secs(5))
+        .await
+        .unwrap();
+
+    // Watch A's output via WS, get "A:HELLO"
+    let output_a = watch_for_output(port, &token, ids[0], "A:HELLO", 5).await;
+    assert!(output_a.contains("A:HELLO"), "expected A:HELLO, got: {}", output_a);
+
+    // Send A's output line to session B
+    let a_line = output_a.lines().find(|l| l.contains("A:HELLO")).unwrap().trim();
+    let send = FleetRequest::SendInput {
+        id: ids[1],
+        data: format!("{}\n", a_line).into_bytes(),
+    };
+    fleet_request(&client, "round-robin", &send, Duration::from_secs(5))
+        .await
+        .unwrap();
+
+    // Watch B's output, get "B:A:HELLO"
+    let output_b = watch_for_output(port, &token, ids[1], "B:A:HELLO", 5).await;
+    assert!(output_b.contains("B:A:HELLO"), "expected B:A:HELLO, got: {}", output_b);
+
+    // Send B's output line to session C
+    let b_line = output_b.lines().find(|l| l.contains("B:A:HELLO")).unwrap().trim();
+    let send = FleetRequest::SendInput {
+        id: ids[2],
+        data: format!("{}\n", b_line).into_bytes(),
+    };
+    fleet_request(&client, "round-robin", &send, Duration::from_secs(5))
+        .await
+        .unwrap();
+
+    // Watch C's output, get "C:B:A:HELLO"
+    let output_c = watch_for_output(port, &token, ids[2], "C:B:A:HELLO", 5).await;
+    assert!(
+        output_c.contains("C:B:A:HELLO"),
+        "expected C:B:A:HELLO, got: {}",
+        output_c
+    );
+
+    // Full round-robin: send C's output back to A
+    let c_line = output_c.lines().find(|l| l.contains("C:B:A:HELLO")).unwrap().trim();
+    let send = FleetRequest::SendInput {
+        id: ids[0],
+        data: format!("{}\n", c_line).into_bytes(),
+    };
+    fleet_request(&client, "round-robin", &send, Duration::from_secs(5))
+        .await
+        .unwrap();
+
+    let output_final = watch_for_output(port, &token, ids[0], "A:C:B:A:HELLO", 5).await;
+    assert!(
+        output_final.contains("A:C:B:A:HELLO"),
+        "Expected round-robin chain A:C:B:A:HELLO, got: {}",
+        output_final
+    );
+
+    // Clean up
+    for id in &ids {
+        let _ = fleet_request(
+            &client,
+            "round-robin",
+            &FleetRequest::Kill { id: *id },
+            Duration::from_secs(5),
+        )
+        .await;
+    }
+}
+
 // ===========================================================================
 // Docker Compose e2e tests (requires `docker compose up -d`)
 // ===========================================================================
