@@ -113,6 +113,65 @@ pub struct SessionInfo {
 }
 
 // ---------------------------------------------------------------------------
+// Fleet protocol (JSON-over-NATS, separate from binary-framed Request/Response)
+// ---------------------------------------------------------------------------
+
+/// Daemon metadata advertised via NATS fleet discovery.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DaemonInfo {
+    pub name: String,
+    pub external_url: Option<String>,
+    pub sessions: Vec<SessionInfo>,
+    pub uptime_secs: u64,
+}
+
+/// Request sent over NATS to daemons.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum FleetRequest {
+    Discover,
+    ListSessions,
+    Launch {
+        command: Vec<String>,
+        working_dir: String,
+    },
+    Kill {
+        id: u32,
+    },
+    GetStatus {
+        id: u32,
+    },
+}
+
+/// Response from a daemon over NATS.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum FleetResponse {
+    DaemonInfo(DaemonInfo),
+    SessionList {
+        daemon: String,
+        sessions: Vec<SessionInfo>,
+    },
+    Launched {
+        daemon: String,
+        id: u32,
+    },
+    Killed {
+        daemon: String,
+        id: u32,
+    },
+    SessionStatus {
+        daemon: String,
+        info: SessionInfo,
+        output_size: u64,
+    },
+    Error {
+        daemon: String,
+        message: String,
+    },
+}
+
+// ---------------------------------------------------------------------------
 // Frames
 // ---------------------------------------------------------------------------
 
