@@ -1488,3 +1488,231 @@ async fn test_explicit_attach_still_works() {
     request_response(&sock, &Request::Kill { id: id1 }).await;
     request_response(&sock, &Request::Kill { id: id2 }).await;
 }
+
+// ---------------------------------------------------------------------------
+// WebSocket remote access tests
+// ---------------------------------------------------------------------------
+
+/// Find an available TCP port by binding to port 0.
+fn find_available_port() -> u16 {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.local_addr().unwrap().port()
+}
+
+/// Start a daemon with WebSocket enabled and return (sock_path, ws_port).
+async fn start_ws_test_daemon(data_dir: &Path) -> (PathBuf, u16) {
+    let port = find_available_port();
+
+    // Write config with WebSocket enabled
+    std::fs::write(
+        data_dir.join("config.toml"),
+        format!("[daemon]\nlisten = \"127.0.0.1:{}\"\n", port),
+    )
+    .unwrap();
+
+    let sock_path = start_test_daemon(data_dir).await;
+
+    // Wait for the WebSocket server to be ready
+    for _ in 0..50 {
+        if tokio::net::TcpStream::connect(format!("127.0.0.1:{}", port))
+            .await
+            .is_ok()
+        {
+            return (sock_path, port);
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    panic!("WebSocket server did not start on port {}", port);
+}
+
+/// Helper: send a request via WebSocket and read one response.
+async fn ws_request_response(port: u16, token: &str, req: &Request) -> Response {
+    use codewire::connection::{FrameReader, FrameWriter};
+    use futures::StreamExt;
+    use tokio_tungstenite::connect_async;
+
+    let url = format!("ws://127.0.0.1:{}/ws?token={}", port, token);
+    let (ws, _) = connect_async(&url).await.unwrap();
+    let (ws_writer, ws_reader) = ws.split();
+    let mut reader = FrameReader::WsClient(ws_reader);
+    let mut writer = FrameWriter::WsClient(ws_writer);
+
+    writer.send_request(req).await.unwrap();
+    let frame = reader.read_frame().await.unwrap().unwrap();
+    match frame {
+        Frame::Control(payload) => protocol::parse_response(&payload).unwrap(),
+        _ => panic!("expected control frame"),
+    }
+}
+
+#[tokio::test]
+async fn test_ws_list_sessions() {
+    let dir = temp_dir("ws-list");
+    let (sock, port) = start_ws_test_daemon(&dir).await;
+
+    let token = std::fs::read_to_string(dir.join("token")).unwrap();
+
+    // Launch a session via Unix socket
+    let resp = request_response(
+        &sock,
+        &Request::Launch {
+            command: vec!["bash".into(), "-c".into(), "sleep 30".into()],
+            working_dir: "/tmp".into(),
+        },
+    )
+    .await;
+
+    let id = match resp {
+        Response::Launched { id } => id,
+        other => panic!("expected Launched, got: {other:?}"),
+    };
+
+    // List sessions via WebSocket
+    let resp = ws_request_response(port, &token, &Request::ListSessions).await;
+    match resp {
+        Response::SessionList { sessions } => {
+            assert_eq!(sessions.len(), 1);
+            assert_eq!(sessions[0].id, id);
+        }
+        other => panic!("expected SessionList, got: {other:?}"),
+    }
+
+    // Clean up
+    request_response(&sock, &Request::Kill { id }).await;
+}
+
+#[tokio::test]
+async fn test_ws_launch_and_kill() {
+    let dir = temp_dir("ws-launch-kill");
+    let (_sock, port) = start_ws_test_daemon(&dir).await;
+
+    let token = std::fs::read_to_string(dir.join("token")).unwrap();
+
+    // Launch session via WebSocket
+    let resp = ws_request_response(
+        port,
+        &token,
+        &Request::Launch {
+            command: vec!["bash".into(), "-c".into(), "sleep 30".into()],
+            working_dir: "/tmp".into(),
+        },
+    )
+    .await;
+
+    let id = match resp {
+        Response::Launched { id } => id,
+        other => panic!("expected Launched, got: {other:?}"),
+    };
+
+    // Kill session via WebSocket
+    let resp = ws_request_response(port, &token, &Request::Kill { id }).await;
+    match resp {
+        Response::Killed { id: killed_id } => assert_eq!(killed_id, id),
+        other => panic!("expected Killed, got: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn test_ws_auth_rejection() {
+    let dir = temp_dir("ws-auth-reject");
+    let (_sock, port) = start_ws_test_daemon(&dir).await;
+
+    // Try connecting with wrong token — should get HTTP 401 (connection fails)
+    let url = format!("ws://127.0.0.1:{}/ws?token=wrong-token", port);
+    let result = tokio_tungstenite::connect_async(&url).await;
+    assert!(result.is_err(), "expected connection to fail with bad token");
+}
+
+#[tokio::test]
+async fn test_ws_attach_and_receive_output() {
+    let dir = temp_dir("ws-attach");
+    let (sock, port) = start_ws_test_daemon(&dir).await;
+
+    let token = std::fs::read_to_string(dir.join("token")).unwrap();
+
+    // Launch a session that produces output periodically (so we can attach and still see some)
+    let resp = request_response(
+        &sock,
+        &Request::Launch {
+            command: vec![
+                "bash".into(),
+                "-c".into(),
+                "for i in 1 2 3; do echo WS_ATTACH_$i; sleep 1; done".into(),
+            ],
+            working_dir: "/tmp".into(),
+        },
+    )
+    .await;
+
+    let id = match resp {
+        Response::Launched { id } => id,
+        other => panic!("expected Launched, got: {other:?}"),
+    };
+
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    // Attach via WebSocket
+    use codewire::connection::{FrameReader, FrameWriter};
+    use futures::StreamExt;
+
+    let url = format!("ws://127.0.0.1:{}/ws?token={}", port, token);
+    let (ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+    let (ws_writer, ws_reader) = ws.split();
+    let mut reader = FrameReader::WsClient(ws_reader);
+    let mut writer = FrameWriter::WsClient(ws_writer);
+
+    writer
+        .send_request(&Request::Attach { id })
+        .await
+        .unwrap();
+
+    // Read attached confirmation
+    let frame = reader.read_frame().await.unwrap().unwrap();
+    match frame {
+        Frame::Control(payload) => {
+            let resp = protocol::parse_response(&payload).unwrap();
+            assert!(
+                matches!(resp, Response::Attached { .. }),
+                "expected Attached, got: {resp:?}"
+            );
+        }
+        _ => panic!("expected control frame"),
+    }
+
+    // Read output data — should eventually see "WS_ATTACH_3"
+    let mut collected = Vec::new();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+
+    loop {
+        tokio::select! {
+            frame = reader.read_frame() => {
+                match frame.unwrap() {
+                    Some(Frame::Data(bytes)) => {
+                        collected.extend_from_slice(&bytes);
+                        let output = String::from_utf8_lossy(&collected);
+                        if output.contains("WS_ATTACH_3") {
+                            break;
+                        }
+                    }
+                    Some(Frame::Control(payload)) => {
+                        let resp = protocol::parse_response(&payload).unwrap();
+                        match resp {
+                            Response::Error { message } if message.contains("completed") => break,
+                            _ => {}
+                        }
+                    }
+                    None => panic!("connection closed before receiving output"),
+                }
+            }
+            _ = tokio::time::sleep_until(deadline) => {
+                panic!("timeout waiting for output, got: {}", String::from_utf8_lossy(&collected));
+            }
+        }
+    }
+
+    // Detach
+    writer.send_request(&Request::Detach).await.unwrap();
+
+    // Clean up
+    request_response(&sock, &Request::Kill { id }).await;
+}
