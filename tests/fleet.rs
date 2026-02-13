@@ -664,7 +664,14 @@ async fn test_e2e_nats_launch_ws_attach() {
     let mut reader = FrameReader::WsClient(ws_reader);
     let mut writer = FrameWriter::WsClient(ws_writer);
 
-    writer.send_request(&Request::Attach { id }).await.unwrap();
+    writer
+        .send_request(&Request::Attach {
+            id,
+            include_history: true,
+            history_lines: None,
+        })
+        .await
+        .unwrap();
 
     // Read Attached response
     let frame = reader.read_frame().await.unwrap().unwrap();

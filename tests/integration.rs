@@ -292,9 +292,16 @@ async fn test_attach_and_receive_output() {
     let stream = UnixStream::connect(&sock).await.unwrap();
     let (mut reader, mut writer) = stream.into_split();
 
-    send_request(&mut writer, &Request::Attach { id })
-        .await
-        .unwrap();
+    send_request(
+        &mut writer,
+        &Request::Attach {
+            id,
+            include_history: true,
+            history_lines: None,
+        },
+    )
+    .await
+    .unwrap();
 
     // Read attach confirmation
     let frame = read_frame(&mut reader).await.unwrap().unwrap();
@@ -378,9 +385,16 @@ async fn test_attach_send_input() {
     let stream = UnixStream::connect(&sock).await.unwrap();
     let (mut reader, mut writer) = stream.into_split();
 
-    send_request(&mut writer, &Request::Attach { id })
-        .await
-        .unwrap();
+    send_request(
+        &mut writer,
+        &Request::Attach {
+            id,
+            include_history: true,
+            history_lines: None,
+        },
+    )
+    .await
+    .unwrap();
 
     // Read attach confirmation
     let frame = read_frame(&mut reader).await.unwrap().unwrap();
@@ -453,9 +467,16 @@ async fn test_detach_from_attach() {
     let stream = UnixStream::connect(&sock).await.unwrap();
     let (mut reader, mut writer) = stream.into_split();
 
-    send_request(&mut writer, &Request::Attach { id })
-        .await
-        .unwrap();
+    send_request(
+        &mut writer,
+        &Request::Attach {
+            id,
+            include_history: true,
+            history_lines: None,
+        },
+    )
+    .await
+    .unwrap();
 
     let frame = read_frame(&mut reader).await.unwrap().unwrap();
     match frame {
@@ -505,7 +526,15 @@ async fn test_attach_nonexistent_session() {
     let dir = temp_dir("attach-noexist");
     let sock = start_test_daemon(&dir).await;
 
-    let resp = request_response(&sock, &Request::Attach { id: 9999 }).await;
+    let resp = request_response(
+        &sock,
+        &Request::Attach {
+            id: 9999,
+            include_history: true,
+            history_lines: None,
+        },
+    )
+    .await;
     match resp {
         Response::Error { message } => {
             assert!(
@@ -541,9 +570,16 @@ async fn test_resize_during_attach() {
     let stream = UnixStream::connect(&sock).await.unwrap();
     let (mut reader, mut writer) = stream.into_split();
 
-    send_request(&mut writer, &Request::Attach { id })
-        .await
-        .unwrap();
+    send_request(
+        &mut writer,
+        &Request::Attach {
+            id,
+            include_history: true,
+            history_lines: None,
+        },
+    )
+    .await
+    .unwrap();
     let _ = read_frame(&mut reader).await.unwrap(); // Attached response
 
     // Send resize — should not error
@@ -602,17 +638,31 @@ async fn test_multiple_attachments() {
     // Attach first client
     let stream1 = UnixStream::connect(&sock).await.unwrap();
     let (mut reader1, mut writer1) = stream1.into_split();
-    send_request(&mut writer1, &Request::Attach { id })
-        .await
-        .unwrap();
+    send_request(
+        &mut writer1,
+        &Request::Attach {
+            id,
+            include_history: true,
+            history_lines: None,
+        },
+    )
+    .await
+    .unwrap();
     let _ = read_frame(&mut reader1).await.unwrap(); // Attached response
 
     // Attach second client (should succeed with new multi-attach support)
     let stream2 = UnixStream::connect(&sock).await.unwrap();
     let (mut reader2, mut writer2) = stream2.into_split();
-    send_request(&mut writer2, &Request::Attach { id })
-        .await
-        .unwrap();
+    send_request(
+        &mut writer2,
+        &Request::Attach {
+            id,
+            include_history: true,
+            history_lines: None,
+        },
+    )
+    .await
+    .unwrap();
     let frame = read_frame(&mut reader2).await.unwrap().unwrap();
     match frame {
         Frame::Control(payload) => {
@@ -963,9 +1013,16 @@ async fn test_concurrent_list_and_attach() {
                 // Quick attach and detach
                 let stream = UnixStream::connect(&sock).await.unwrap();
                 let (mut reader, mut writer) = stream.into_split();
-                send_request(&mut writer, &Request::Attach { id })
-                    .await
-                    .unwrap();
+                send_request(
+                    &mut writer,
+                    &Request::Attach {
+                        id,
+                        include_history: true,
+                        history_lines: None,
+                    },
+                )
+                .await
+                .unwrap();
                 let _resp = read_frame(&mut reader).await.unwrap();
                 send_request(&mut writer, &Request::Detach).await.unwrap();
             })
@@ -1145,7 +1202,15 @@ async fn test_auto_attach_single_session() {
     assert_eq!(auto_id, id, "should auto-select the single running session");
 
     // Attach to the auto-selected session
-    let resp = request_response(&sock, &Request::Attach { id: auto_id }).await;
+    let resp = request_response(
+        &sock,
+        &Request::Attach {
+            id: auto_id,
+            include_history: true,
+            history_lines: None,
+        },
+    )
+    .await;
     match resp {
         Response::Attached { id: attached_id } => assert_eq!(attached_id, id),
         other => panic!("expected Attached, got: {other:?}"),
@@ -1269,9 +1334,16 @@ async fn test_auto_attach_skips_attached() {
     // Attach to first session (keep connection alive)
     let stream1 = UnixStream::connect(&sock).await.unwrap();
     let (mut reader1, mut writer1) = stream1.into_split();
-    send_request(&mut writer1, &Request::Attach { id: id1 })
-        .await
-        .unwrap();
+    send_request(
+        &mut writer1,
+        &Request::Attach {
+            id: id1,
+            include_history: true,
+            history_lines: None,
+        },
+    )
+    .await
+    .unwrap();
     let _ = read_frame(&mut reader1).await.unwrap(); // Attached response
 
     // Small delay to ensure attach state is updated
@@ -1410,9 +1482,16 @@ async fn test_auto_attach_no_candidates() {
     // Attach to it
     let stream = UnixStream::connect(&sock).await.unwrap();
     let (mut reader, mut writer) = stream.into_split();
-    send_request(&mut writer, &Request::Attach { id })
-        .await
-        .unwrap();
+    send_request(
+        &mut writer,
+        &Request::Attach {
+            id,
+            include_history: true,
+            history_lines: None,
+        },
+    )
+    .await
+    .unwrap();
     let _ = read_frame(&mut reader).await.unwrap();
 
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -1473,7 +1552,15 @@ async fn test_explicit_attach_still_works() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     // Explicitly attach to second session (not the oldest)
-    let resp = request_response(&sock, &Request::Attach { id: id2 }).await;
+    let resp = request_response(
+        &sock,
+        &Request::Attach {
+            id: id2,
+            include_history: true,
+            history_lines: None,
+        },
+    )
+    .await;
     match resp {
         Response::Attached { id: attached_id } => {
             assert_eq!(
@@ -1664,7 +1751,14 @@ async fn test_ws_attach_and_receive_output() {
     let mut reader = FrameReader::WsClient(ws_reader);
     let mut writer = FrameWriter::WsClient(ws_writer);
 
-    writer.send_request(&Request::Attach { id }).await.unwrap();
+    writer
+        .send_request(&Request::Attach {
+            id,
+            include_history: true,
+            history_lines: None,
+        })
+        .await
+        .unwrap();
 
     // Read attached confirmation
     let frame = reader.read_frame().await.unwrap().unwrap();

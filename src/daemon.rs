@@ -223,11 +223,35 @@ async fn handle_client(
             }
         }
 
-        Request::Attach { id } => {
+        Request::Attach {
+            id,
+            include_history,
+            history_lines,
+        } => {
             let attach_result = manager.attach(id);
             match attach_result {
                 Ok((mut broadcast_rx, pty_input_tx, mut status_rx)) => {
                     writer.send_response(&Response::Attached { id }).await?;
+
+                    // Replay historical output before streaming live data
+                    if include_history {
+                        if let Ok(log_path) = manager.log_path(id) {
+                            if log_path.exists() {
+                                let content = std::fs::read(&log_path).unwrap_or_default();
+                                let data = if let Some(n) = history_lines {
+                                    let text = String::from_utf8_lossy(&content);
+                                    let lines: Vec<&str> = text.lines().collect();
+                                    let start = lines.len().saturating_sub(n);
+                                    lines[start..].join("\n").into_bytes()
+                                } else {
+                                    content
+                                };
+                                if !data.is_empty() {
+                                    writer.send_data(&data).await?;
+                                }
+                            }
+                        }
+                    }
 
                     // Bridge: PTY output → client, client input → PTY
                     let detached = handle_attach_session(
