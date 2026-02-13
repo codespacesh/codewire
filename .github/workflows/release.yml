@@ -117,3 +117,91 @@ jobs:
             --title "${{ github.ref_name }}" \
             --generate-notes \
             artifacts/*
+
+  update-homebrew:
+    name: Update Homebrew Formula
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Download SHA256SUMS from release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download ${{ github.ref_name }} \
+            --repo ${{ github.repository }} \
+            --pattern SHA256SUMS \
+            --output SHA256SUMS
+
+      - name: Update formula
+        run: |
+          python3 - <<'PYEOF'
+          import os, re
+
+          # Parse checksums from SHA256SUMS file
+          checksums = {}
+          with open("SHA256SUMS") as f:
+              for line in f:
+                  sha, name = line.strip().split(None, 1)
+                  m = re.search(r'((?:aarch64|x86_64)-[^\s]+)', name)
+                  if m:
+                      checksums[m.group(1)] = sha
+
+          expected = [
+              "aarch64-apple-darwin",
+              "x86_64-apple-darwin",
+              "aarch64-unknown-linux-gnu",
+              "x86_64-unknown-linux-musl",
+          ]
+          for target in expected:
+              sha = checksums.get(target, "")
+              if len(sha) != 64:
+                  raise SystemExit(f"ERROR: Invalid or missing checksum for {target}: '{sha}'")
+
+          # Read and update formula
+          version = os.environ["GITHUB_REF_NAME"].lstrip("v")
+          formula_path = "Formula/codewire.rb"
+          with open(formula_path, "r") as f:
+              lines = f.readlines()
+
+          new_lines = []
+          current_target = None
+
+          for line in lines:
+              if re.match(r'\s*version\s+"', line):
+                  line = re.sub(r'version\s+"[^"]+"', f'version "{version}"', line)
+
+              url_match = re.search(r'cw-v[^"]*-((?:aarch64|x86_64)-[^"]+)', line)
+              if url_match:
+                  current_target = url_match.group(1)
+
+              if current_target and re.match(r'\s*sha256\s+"', line):
+                  if current_target in checksums:
+                      line = re.sub(
+                          r'sha256\s+"[0-9a-f]{64}"',
+                          f'sha256 "{checksums[current_target]}"',
+                          line,
+                      )
+                  current_target = None
+
+              new_lines.append(line)
+
+          with open(formula_path, "w") as f:
+              f.writelines(new_lines)
+
+          print(f"Updated formula to version {version}")
+          for target in expected:
+              print(f"  {target}: {checksums[target]}")
+          PYEOF
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/codewire.rb
+          git diff --cached --quiet && { echo "No changes to commit"; exit 0; }
+          git commit -m "brew: update codewire to ${{ github.ref_name }}"
+          git push origin main
