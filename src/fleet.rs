@@ -136,6 +136,17 @@ async fn handle_message(
                 message: e.to_string(),
             },
         },
+        FleetRequest::SendInput { id, data } => match manager.send_input(id, data) {
+            Ok(bytes) => FleetResponse::InputSent {
+                daemon: name.clone(),
+                id,
+                bytes,
+            },
+            Err(e) => FleetResponse::Error {
+                daemon: name.clone(),
+                message: e.to_string(),
+            },
+        },
     };
 
     if let Some(reply) = msg.reply {
