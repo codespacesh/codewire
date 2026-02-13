@@ -341,6 +341,20 @@ cw fleet attach gpu-box:1
 - NATS never carries binary PTY data
 - Nodes heartbeat every 30 seconds on `cw.fleet.heartbeat`
 
+#### NATS Subjects
+
+| Subject | Direction | Purpose |
+|---------|-----------|---------|
+| `cw.fleet.discover` | Broadcast | Discovery — all nodes reply with `DaemonInfo` |
+| `cw.fleet.heartbeat` | Publish | Nodes publish `DaemonInfo` every 30s |
+| `cw.<node>.list` | Request-reply | List sessions on a node |
+| `cw.<node>.launch` | Request-reply | Launch session on a node |
+| `cw.<node>.kill` | Request-reply | Kill session on a node |
+| `cw.<node>.status` | Request-reply | Get session status on a node |
+| `cw.<node>.send` | Request-reply | Send input to session on a node |
+
+All messages are JSON-encoded `FleetRequest`/`FleetResponse` (see `src/protocol.rs`). Binary PTY data never travels over NATS.
+
 ### Communication Model
 
 Fleet > Node > Session
