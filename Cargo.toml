@@ -35,7 +35,11 @@ axum = { version = "0.8", features = ["ws"], optional = true }
 tokio-tungstenite = { version = "0.26", optional = true, features = ["rustls-tls-native-roots"] }
 futures = { version = "0.3", optional = true }
 
+# Optional: NATS fleet discovery
+async-nats = { version = "0.38", optional = true }
+
 [features]
 default = ["ws"]
 mcp = []
 ws = ["dep:axum", "dep:tokio-tungstenite", "dep:futures"]
+nats = ["dep:async-nats", "ws"]
