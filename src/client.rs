@@ -131,7 +131,7 @@ pub async fn launch(target: &Target, command: Vec<String>, working_dir: String) 
     Ok(())
 }
 
-pub async fn attach(target: &Target, id: Option<u32>) -> Result<()> {
+pub async fn attach(target: &Target, id: Option<u32>, no_history: bool) -> Result<()> {
     // Auto-select session if ID not provided
     let (id, auto_selected) = if let Some(id) = id {
         (id, false)
@@ -166,7 +166,13 @@ pub async fn attach(target: &Target, id: Option<u32>) -> Result<()> {
     let (mut reader, mut writer) = target.connect().await?;
 
     // Request attach
-    writer.send_request(&Request::Attach { id }).await?;
+    writer
+        .send_request(&Request::Attach {
+            id,
+            include_history: !no_history,
+            history_lines: None,
+        })
+        .await?;
 
     // Read response
     let frame = reader.read_frame().await?.context("unexpected EOF")?;

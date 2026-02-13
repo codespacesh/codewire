@@ -13,6 +13,10 @@ const MAX_PAYLOAD: u32 = 16 * 1024 * 1024;
 // Control messages (JSON-encoded)
 // ---------------------------------------------------------------------------
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum Request {
@@ -23,6 +27,10 @@ pub enum Request {
     },
     Attach {
         id: u32,
+        #[serde(default = "default_true")]
+        include_history: bool,
+        #[serde(default)]
+        history_lines: Option<usize>,
     },
     Detach,
     Kill {

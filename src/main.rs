@@ -84,6 +84,10 @@ enum Commands {
     Attach {
         /// Session ID (omit to auto-select oldest unattached session)
         id: Option<u32>,
+
+        /// Don't replay output history on attach
+        #[arg(long)]
+        no_history: bool,
     },
 
     /// Kill a session
@@ -315,11 +319,11 @@ async fn main() -> Result<()> {
             client::list(&target, json).await
         }
 
-        Commands::Attach { id } => {
+        Commands::Attach { id, no_history } => {
             if is_local {
                 ensure_daemon(&dir).await?;
             }
-            client::attach(&target, id).await
+            client::attach(&target, id, no_history).await
         }
 
         Commands::Kill { id, all } => {

@@ -242,5 +242,5 @@ pub async fn handle_fleet_attach(
         token,
     };
 
-    crate::client::attach(&ws_target, Some(session_id)).await
+    crate::client::attach(&ws_target, Some(session_id), false).await
 }
