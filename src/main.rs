@@ -5,6 +5,7 @@ mod connection;
 mod daemon;
 mod protocol;
 mod session;
+mod status_bar;
 mod terminal;
 
 #[cfg(feature = "nats")]
@@ -62,8 +63,9 @@ enum Commands {
     /// Stop the daemon
     Stop,
 
-    /// Launch a new session: cw launch [--dir <dir>] -- <command> [args...]
-    Launch {
+    /// Run a new session: cw run [--dir <dir>] -- <command> [args...]
+    #[command(alias = "launch")]
+    Run {
         /// Working directory (defaults to current dir)
         #[arg(long, short)]
         dir: Option<String>,
@@ -297,7 +299,7 @@ async fn main() -> Result<()> {
             }
         }
 
-        Commands::Launch {
+        Commands::Run {
             dir: work_dir,
             command,
         } => {
@@ -309,7 +311,7 @@ async fn main() -> Result<()> {
                     .map(|p| p.display().to_string())
                     .unwrap_or_else(|_| ".".to_string())
             });
-            client::launch(&target, command, work_dir).await
+            client::run(&target, command, work_dir).await
         }
 
         Commands::List { json } => {

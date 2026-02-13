@@ -1,10 +1,12 @@
 use std::path::PathBuf;
+use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::connection::{FrameReader, FrameWriter};
 use crate::protocol::{self, Frame, Request, Response, SessionInfo};
+use crate::status_bar::StatusBar;
 use crate::terminal::{resize_signal, terminal_size, DetachDetector, RawModeGuard};
 
 // ---------------------------------------------------------------------------
@@ -110,7 +112,7 @@ pub async fn list(target: &Target, json: bool) -> Result<()> {
     Ok(())
 }
 
-pub async fn launch(target: &Target, command: Vec<String>, working_dir: String) -> Result<()> {
+pub async fn run(target: &Target, command: Vec<String>, working_dir: String) -> Result<()> {
     let display = command.join(" ");
     let resp = request_response(
         target,
@@ -196,16 +198,34 @@ pub async fn attach(target: &Target, id: Option<u32>, no_history: bool) -> Resul
     // Enter raw mode
     let _guard = RawModeGuard::enable()?;
 
-    // Send initial terminal size
-    if let Ok((cols, rows)) = terminal_size() {
-        writer.send_request(&Request::Resize { cols, rows }).await?;
-    }
+    // Set up status bar
+    let mut stdout = tokio::io::stdout();
+    let mut status_bar = if let Ok((cols, rows)) = terminal_size() {
+        let bar = StatusBar::new(id, cols, rows);
+        let setup = bar.setup();
+        if !setup.is_empty() {
+            stdout.write_all(&setup).await?;
+            stdout.flush().await?;
+        }
+        // Send reduced PTY size to daemon
+        let (pty_cols, pty_rows) = bar.pty_size();
+        writer
+            .send_request(&Request::Resize {
+                cols: pty_cols,
+                rows: pty_rows,
+            })
+            .await?;
+        bar
+    } else {
+        StatusBar::new(id, 80, 24)
+    };
 
     // Set up SIGWINCH handler
     let mut winch = resize_signal()?;
+    let mut tick = tokio::time::interval(Duration::from_secs(10));
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     let mut stdin = tokio::io::stdin();
-    let mut stdout = tokio::io::stdout();
     let mut detach = DetachDetector::new();
     let mut input_buf = [0u8; 4096];
 
@@ -222,23 +242,29 @@ pub async fn attach(target: &Target, id: Option<u32>, no_history: bool) -> Resul
                         let resp = protocol::parse_response(&payload)?;
                         match resp {
                             Response::Detached => {
+                                stdout.write_all(&status_bar.teardown()).await?;
+                                stdout.flush().await?;
                                 drop(_guard);
                                 eprintln!("\r\n[cw] detached from session {id}");
-                                return Ok(());
+                                std::process::exit(0);
                             }
                             Response::Error { message } => {
+                                stdout.write_all(&status_bar.teardown()).await?;
+                                stdout.flush().await?;
                                 drop(_guard);
                                 eprintln!("\r\n[cw] session ended: {message}");
-                                return Ok(());
+                                std::process::exit(0);
                             }
                             _ => {}
                         }
                     }
                     None => {
                         // Daemon disconnected
+                        stdout.write_all(&status_bar.teardown()).await?;
+                        stdout.flush().await?;
                         drop(_guard);
                         eprintln!("\r\n[cw] connection lost");
-                        return Ok(());
+                        std::process::exit(1);
                     }
                 }
             }
@@ -263,7 +289,20 @@ pub async fn attach(target: &Target, id: Option<u32>, no_history: bool) -> Resul
             // Terminal resize
             _ = winch.recv() => {
                 if let Ok((cols, rows)) = terminal_size() {
-                    writer.send_request(&Request::Resize { cols, rows }).await?;
+                    let resize_seq = status_bar.resize(cols, rows);
+                    stdout.write_all(&resize_seq).await?;
+                    stdout.flush().await?;
+                    let (pty_cols, pty_rows) = status_bar.pty_size();
+                    writer.send_request(&Request::Resize { cols: pty_cols, rows: pty_rows }).await?;
+                }
+            }
+
+            // Tick: redraw status bar to update age counter
+            _ = tick.tick() => {
+                let draw = status_bar.draw();
+                if !draw.is_empty() {
+                    stdout.write_all(&draw).await?;
+                    stdout.flush().await?;
                 }
             }
         }

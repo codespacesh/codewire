@@ -1810,3 +1810,301 @@ async fn test_ws_attach_and_receive_output() {
     // Clean up
     request_response(&sock, &Request::Kill { id }).await;
 }
+
+// ---------------------------------------------------------------------------
+// Cursor / terminal mode restore on detach
+// ---------------------------------------------------------------------------
+
+/// Verify that after a child process hides the cursor, the StatusBar teardown
+/// (used by the client on detach) emits \x1b[?25h to make it visible again.
+#[tokio::test]
+async fn test_cursor_restored_after_detach() {
+    use codewire::status_bar::StatusBar;
+
+    let dir = temp_dir("cursor-restore");
+    let sock = start_test_daemon(&dir).await;
+
+    // Launch a session that hides the cursor (like Claude Code does)
+    let resp = request_response(
+        &sock,
+        &Request::Launch {
+            command: vec![
+                "bash".into(),
+                "-c".into(),
+                "printf '\\033[?25l'; printf 'CURSOR_HIDDEN\\n'; sleep 30".into(),
+            ],
+            working_dir: "/tmp".to_string(),
+        },
+    )
+    .await;
+
+    let id = match resp {
+        Response::Launched { id } => id,
+        other => panic!("expected Launched, got: {other:?}"),
+    };
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Attach and read output until we see the cursor-hide sequence
+    let stream = UnixStream::connect(&sock).await.unwrap();
+    let (mut reader, mut writer) = stream.into_split();
+
+    send_request(
+        &mut writer,
+        &Request::Attach {
+            id,
+            include_history: true,
+            history_lines: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let frame = read_frame(&mut reader).await.unwrap().unwrap();
+    match frame {
+        Frame::Control(payload) => {
+            let resp = protocol::parse_response(&payload).unwrap();
+            assert!(matches!(resp, Response::Attached { .. }));
+        }
+        _ => panic!("expected control frame"),
+    }
+
+    // Read PTY output until we see the marker
+    let mut pty_output = Vec::new();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        tokio::select! {
+            frame = read_frame(&mut reader) => {
+                if let Ok(Some(Frame::Data(bytes))) = frame {
+                    pty_output.extend_from_slice(&bytes);
+                    if String::from_utf8_lossy(&pty_output).contains("CURSOR_HIDDEN") {
+                        break;
+                    }
+                }
+            }
+            _ = tokio::time::sleep_until(deadline) => {
+                panic!(
+                    "timeout waiting for CURSOR_HIDDEN, got: {:?}",
+                    String::from_utf8_lossy(&pty_output)
+                );
+            }
+        }
+    }
+
+    // Verify the child did hide the cursor
+    assert!(
+        pty_output.windows(6).any(|w| w == b"\x1b[?25l"),
+        "PTY output should contain cursor-hide sequence"
+    );
+
+    // Detach
+    send_request(&mut writer, &Request::Detach).await.unwrap();
+    let frame = read_frame(&mut reader).await.unwrap().unwrap();
+    match frame {
+        Frame::Control(payload) => {
+            let resp = protocol::parse_response(&payload).unwrap();
+            assert!(
+                matches!(resp, Response::Detached),
+                "expected Detached, got: {resp:?}"
+            );
+        }
+        _ => panic!("expected control frame for Detached"),
+    }
+
+    // The client creates a StatusBar and calls teardown() on detach.
+    // Verify that teardown output contains cursor-show and all mode resets.
+    let bar = StatusBar::new(id, 80, 24);
+    let teardown = String::from_utf8(bar.teardown()).unwrap();
+
+    assert!(
+        teardown.contains("\x1b[?25h"),
+        "teardown must show cursor (\\x1b[?25h)"
+    );
+    assert!(
+        teardown.contains("\x1b[<u"),
+        "teardown must pop Kitty keyboard mode"
+    );
+    assert!(
+        teardown.contains("\x1b[?1004l"),
+        "teardown must disable focus events"
+    );
+    assert!(
+        teardown.contains("\x1b[?1000l"),
+        "teardown must disable mouse tracking"
+    );
+    assert!(
+        teardown.contains("\x1b[?1006l"),
+        "teardown must disable SGR mouse encoding"
+    );
+
+    // Session should still be running after detach
+    let resp = request_response(&sock, &Request::ListSessions).await;
+    match resp {
+        Response::SessionList { sessions } => {
+            let s = sessions.iter().find(|s| s.id == id).unwrap();
+            assert_eq!(s.status, "running");
+        }
+        other => panic!("expected SessionList, got: {other:?}"),
+    }
+
+    // Clean up
+    request_response(&sock, &Request::Kill { id }).await;
+}
+
+// ---------------------------------------------------------------------------
+// Kitty keyboard protocol detach test
+// ---------------------------------------------------------------------------
+
+/// End-to-end test: launch a process that enables Kitty keyboard protocol,
+/// verify the escape sequences appear in PTY output, then prove the
+/// DetachDetector recognises the Kitty encoding of Ctrl+B d.
+///
+/// This test simulates what happens when Claude Code (or any crossterm/ratatui
+/// app) runs inside a codewire session:
+///   1. The process enables Kitty keyboard protocol by writing \x1b[>1u
+///   2. A Kitty-aware terminal encodes Ctrl+B as \x1b[98;5u (not 0x02)
+///   3. The DetachDetector must recognise this and trigger detach
+#[tokio::test]
+async fn test_detach_with_kitty_keyboard_protocol() {
+    use codewire::terminal::DetachDetector;
+
+    let dir = temp_dir("kitty-detach");
+    let sock = start_test_daemon(&dir).await;
+
+    // Launch a session that enables Kitty keyboard protocol, focus events,
+    // and mouse tracking — exactly what crossterm/ratatui does.
+    let resp = request_response(
+        &sock,
+        &Request::Launch {
+            command: vec![
+                "bash".into(),
+                "-c".into(),
+                // Enable Kitty keyboard protocol (flag 1 = disambiguate)
+                // Enable focus events
+                // Enable mouse tracking (SGR mode)
+                // Then keep running
+                concat!(
+                    "printf '\\033[>1u';\n",       // Kitty keyboard protocol
+                    "printf '\\033[?1004h';\n",     // Focus event reporting
+                    "printf '\\033[?1000h';\n",     // Mouse tracking
+                    "printf '\\033[?1006h';\n",     // SGR mouse encoding
+                    "printf 'KITTY_READY\\n';\n",   // Marker
+                    "sleep 30"
+                )
+                .into(),
+            ],
+            working_dir: "/tmp".to_string(),
+        },
+    )
+    .await;
+
+    let id = match resp {
+        Response::Launched { id } => id,
+        other => panic!("expected Launched, got: {other:?}"),
+    };
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Attach and read output — verify the Kitty escape sequences are present
+    let stream = UnixStream::connect(&sock).await.unwrap();
+    let (mut reader, mut writer) = stream.into_split();
+
+    send_request(
+        &mut writer,
+        &Request::Attach {
+            id,
+            include_history: true,
+            history_lines: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let frame = read_frame(&mut reader).await.unwrap().unwrap();
+    match frame {
+        Frame::Control(payload) => {
+            let resp = protocol::parse_response(&payload).unwrap();
+            assert!(matches!(resp, Response::Attached { .. }));
+        }
+        _ => panic!("expected control frame"),
+    }
+
+    // Collect PTY output until we see our marker
+    let mut pty_output = Vec::new();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        tokio::select! {
+            frame = read_frame(&mut reader) => {
+                if let Ok(Some(Frame::Data(bytes))) = frame {
+                    pty_output.extend_from_slice(&bytes);
+                    if String::from_utf8_lossy(&pty_output).contains("KITTY_READY") {
+                        break;
+                    }
+                }
+            }
+            _ = tokio::time::sleep_until(deadline) => {
+                panic!(
+                    "timeout waiting for KITTY_READY, got: {:?}",
+                    String::from_utf8_lossy(&pty_output)
+                );
+            }
+        }
+    }
+
+    // Verify the process enabled Kitty keyboard protocol
+    let output_str = String::from_utf8_lossy(&pty_output);
+    assert!(
+        pty_output.windows(4).any(|w| w == b"\x1b[>1"),
+        "PTY output should contain Kitty keyboard enable sequence, got bytes: {:?}\nAs text: {}",
+        &pty_output[..pty_output.len().min(200)],
+        &output_str[..output_str.len().min(200)]
+    );
+
+    // Now test the DetachDetector with the EXACT bytes a Kitty-enabled terminal
+    // would send when the user presses Ctrl+B then 'd'.
+    //
+    // Per the Kitty spec (https://sw.kovidgoyal.net/kitty/keyboard-protocol/):
+    //   Ctrl+B = CSI 98 ; 5 u  (codepoint 98='b', modifier 5=1+Ctrl)
+    //   'd'    = raw 0x64      (unmodified keys sent as-is with flag 1)
+    let mut detector = DetachDetector::new();
+    let (detach, _fwd) = detector.feed_buf(b"\x1b[98;5ud");
+    assert!(
+        detach,
+        "DetachDetector must recognise Kitty Ctrl+B (\\x1b[98;5u) + raw 'd'"
+    );
+
+    // Also test with fully Kitty-encoded 'd' (when "report all keys" flag 8 is active)
+    //   'd' = CSI 100 ; 1 u  (codepoint 100='d', modifier 1=none)
+    let mut detector2 = DetachDetector::new();
+    let (detach2, _fwd2) = detector2.feed_buf(b"\x1b[98;5u\x1b[100;1u");
+    assert!(
+        detach2,
+        "DetachDetector must recognise Kitty Ctrl+B + Kitty 'd' (\\x1b[100;1u)"
+    );
+
+    // And test with interleaved focus events (common when switching windows)
+    let mut detector3 = DetachDetector::new();
+    let (detach3, fwd3) = detector3.feed_buf(b"\x1b[98;5u\x1b[I\x1b[100;1u");
+    assert!(
+        detach3,
+        "DetachDetector must handle focus event between Ctrl+B and 'd'"
+    );
+    assert_eq!(
+        fwd3, b"\x1b[I",
+        "focus event should be forwarded"
+    );
+
+    // Verify the OLD encoding (codepoint 2) does NOT trigger detach —
+    // no real terminal sends this
+    let mut detector_old = DetachDetector::new();
+    let (detach_old, _) = detector_old.feed_buf(b"\x1b[2;5ud");
+    assert!(
+        !detach_old,
+        "codepoint 2 is NOT valid Kitty Ctrl+B (should be 98)"
+    );
+
+    // Clean up
+    send_request(&mut writer, &Request::Detach).await.unwrap();
+    let _ = read_frame(&mut reader).await;
+    request_response(&sock, &Request::Kill { id }).await;
+}

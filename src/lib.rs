@@ -5,6 +5,7 @@ pub mod connection;
 pub mod daemon;
 pub mod protocol;
 pub mod session;
+pub mod status_bar;
 pub mod terminal;
 
 #[cfg(feature = "nats")]
