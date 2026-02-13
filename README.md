@@ -320,7 +320,37 @@ cw fleet attach gpu-box:1
 - **NATS** = control plane (discovery, commands — JSON messages)
 - **WSS** = data plane (PTY attach/streaming — binary frames)
 - NATS never carries binary PTY data
-- Daemons heartbeat every 30 seconds on `cw.fleet.heartbeat`
+- Nodes heartbeat every 30 seconds on `cw.fleet.heartbeat`
+
+### Communication Model
+
+Fleet > Node > Session
+
+- **Fleet**: All nodes connected via NATS
+- **Node**: A `cw` process on one machine
+- **Session**: A PTY process (Claude, shell, etc.)
+
+#### Session-to-session (same node)
+
+```bash
+cw send <id> "hello"       # Inject input into a session's stdin
+cw watch <id>              # Stream a session's stdout
+```
+
+#### Session-to-session (across nodes, via NATS)
+
+```bash
+cw fleet send <node>:<id> "hello"    # Inject input via NATS
+cw fleet attach <node>:<id>          # Stream output via WSS
+```
+
+#### Node-to-node
+
+```bash
+cw fleet list                            # Discover all nodes
+cw fleet launch --on <node> -- <cmd>     # Launch remotely
+cw fleet kill <node>:<id>                # Kill remotely
+```
 
 ### Local Development
 
