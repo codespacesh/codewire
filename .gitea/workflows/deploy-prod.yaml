@@ -1,0 +1,42 @@
+name: Deploy Prod
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Version tag to deploy'
+        required: true
+        type: string
+
+jobs:
+  deploy:
+    name: Deploy to Prod
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Configure kubectl
+        run: |
+          TOKEN=$(cat ${APP_TOKEN_PATH})
+          kubectl config set-cluster app --server="${APP_K8S_SERVER}" --insecure-skip-tls-verify=true
+          kubectl config set-credentials ci-deployer --token="$TOKEN"
+          kubectl config set-context app --cluster=app --user=ci-deployer
+          kubectl config use-context app
+
+      - name: Deploy with Kustomize
+        run: |
+          cd deployments/k8s/overlays/production
+          DEPLOY_TAG="${{ inputs.tag }}"
+          kustomize edit set image \
+            git.noel.sh/codespace/codewire.sh=git.noel.sh/codespace/codewire.sh:${DEPLOY_TAG}
+          kubectl apply -k .
+
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deployment/codewire-docs -n codewire-prod --timeout=300s
+
+      - name: Verify deployment
+        run: |
+          kubectl get pods -n codewire-prod -l app.kubernetes.io/name=codewire

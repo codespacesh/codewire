@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: codewire-docs
+  namespace: codewire-prod
+  labels:
+    app.kubernetes.io/name: codewire
+    app.kubernetes.io/component: docs
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: codewire
+      app.kubernetes.io/component: docs
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: codewire
+        app.kubernetes.io/component: docs
+    spec:
+      imagePullSecrets:
+        - name: gitea-registry
+      containers:
+        - name: docs
+          image: git.noel.sh/codespace/codewire.sh:latest
+          ports:
+            - containerPort: 80
+              name: http
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
