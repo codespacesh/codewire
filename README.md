@@ -260,18 +260,29 @@ Communication between client and daemon uses a frame-based binary protocol over 
         └── output.log
 ```
 
+### Configuration
+
+All settings via `~/.codewire/config.toml` or environment variables:
+
+```toml
+[daemon]
+name = "my-node"                    # CODEWIRE_DAEMON_NAME — node name for fleet
+listen = "0.0.0.0:9100"             # CODEWIRE_LISTEN — WebSocket listener address
+external_url = "wss://host/ws"      # CODEWIRE_EXTERNAL_URL — advertised URL for fleet attach
+
+[nats]
+url = "nats://nats.example.com:4222"   # CODEWIRE_NATS_URL
+token = "secret"                        # CODEWIRE_NATS_TOKEN
+creds_file = "~/.codewire/fleet.creds"  # CODEWIRE_NATS_CREDS
+```
+
+When no config file exists, codewire runs with defaults (Unix socket only, no WS, no fleet).
+
 ## Remote Access (WebSocket)
 
-Connect to a codewire daemon running on a remote machine over WebSocket:
+Enable WebSocket access by setting `listen` in [Configuration](#configuration), then start the daemon:
 
 ```bash
-# On the remote machine: start daemon with WS listener
-cat >> ~/.codewire/config.toml << 'EOF'
-[daemon]
-listen = "0.0.0.0:9100"
-EOF
-cw daemon
-
 # On your local machine: save the remote server
 cw server add my-server ws://remote-host:9100 --token <token>
 
@@ -292,27 +303,7 @@ cargo build --features nats
 
 > **Note:** Fleet commands require building with `--features nats`. Pre-built release binaries do not include fleet support.
 
-### Configuration
-
-```toml
-# ~/.codewire/config.toml
-[daemon]
-name = "gpu-box"
-listen = "0.0.0.0:9100"
-external_url = "wss://9100--gpu.coder.codespace.sh/ws"
-
-[nats]
-url = "nats://nats.example.com:4222"
-creds_file = "~/.codewire/fleet.creds"
-```
-
-Or via environment variables (zero-config in codespace.sh workspaces):
-
-```bash
-export CODEWIRE_NATS_URL="nats://nats.example.com:4222"
-export CODEWIRE_NATS_CREDS="~/.codewire/fleet.creds"
-export CODEWIRE_EXTERNAL_URL="wss://9100--myworkspace.coder.codespace.sh/ws"
-```
+See [Configuration](#configuration) for all config options. Fleet requires at minimum `[nats] url`.
 
 ### Fleet Commands
 
