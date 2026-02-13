@@ -117,6 +117,7 @@ pub struct SessionInfo {
 // ---------------------------------------------------------------------------
 
 /// Daemon metadata advertised via NATS fleet discovery.
+#[cfg(feature = "nats")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DaemonInfo {
     pub name: String,
@@ -126,6 +127,7 @@ pub struct DaemonInfo {
 }
 
 /// Request sent over NATS to daemons.
+#[cfg(feature = "nats")]
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum FleetRequest {
@@ -148,6 +150,7 @@ pub enum FleetRequest {
 }
 
 /// Response from a daemon over NATS.
+#[cfg(feature = "nats")]
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum FleetResponse {
@@ -247,16 +250,18 @@ pub async fn read_frame<R: AsyncRead + Unpin>(reader: &mut R) -> Result<Option<F
 }
 
 // ---------------------------------------------------------------------------
-// Convenience helpers
+// Convenience helpers (used by integration tests and MCP server)
 // ---------------------------------------------------------------------------
 
+#[allow(dead_code)]
 pub async fn send_request<W: AsyncWrite + Unpin>(writer: &mut W, req: &Request) -> Result<()> {
     let frame = Frame::control(req)?;
     write_frame(writer, &frame).await
 }
 
-pub async fn send_response<W: AsyncWrite + Unpin>(writer: &mut W, resp: &Response) -> Result<()> {
-    let frame = Frame::control(resp)?;
+#[allow(dead_code)]
+pub async fn send_data<W: AsyncWrite + Unpin>(writer: &mut W, bytes: &[u8]) -> Result<()> {
+    let frame = Frame::Data(bytes.to_vec());
     write_frame(writer, &frame).await
 }
 
@@ -266,9 +271,4 @@ pub fn parse_request(payload: &[u8]) -> Result<Request> {
 
 pub fn parse_response(payload: &[u8]) -> Result<Response> {
     serde_json::from_slice(payload).context("parsing response")
-}
-
-pub async fn send_data<W: AsyncWrite + Unpin>(writer: &mut W, bytes: &[u8]) -> Result<()> {
-    let frame = Frame::Data(bytes.to_vec());
-    write_frame(writer, &frame).await
 }

@@ -52,9 +52,9 @@ jobs:
         shell: bash
         run: |
           if [ "${{ matrix.cross }}" = "true" ]; then
-            cross build --release --locked --target ${{ matrix.target }}
+            cross build --release --locked --all-features --target ${{ matrix.target }}
           else
-            cargo build --release --locked --target ${{ matrix.target }}
+            cargo build --release --locked --all-features --target ${{ matrix.target }}
           fi
 
       - name: Strip binary
@@ -72,11 +72,7 @@ jobs:
         shell: bash
         run: |
           VERSION=${GITHUB_REF_NAME}
-          if [[ "${{ matrix.target }}" == *"windows"* ]]; then
-            cp target/${{ matrix.target }}/release/cw.exe cw-${VERSION}-${{ matrix.target }}.exe
-          else
-            cp target/${{ matrix.target }}/release/cw cw-${VERSION}-${{ matrix.target }}
-          fi
+          cp target/${{ matrix.target }}/release/cw cw-${VERSION}-${{ matrix.target }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

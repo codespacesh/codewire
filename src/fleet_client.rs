@@ -66,31 +66,6 @@ pub async fn fleet_request(
     serde_json::from_slice(&msg.payload).context("parsing fleet response")
 }
 
-/// Display fleet discovery results as a table.
-pub fn print_fleet_table(daemons: &[DaemonInfo]) {
-    if daemons.is_empty() {
-        println!("No nodes discovered.");
-        return;
-    }
-
-    println!(
-        "{:<20} {:>8}  {:>8}  {}",
-        "NODE", "SESSIONS", "UPTIME", "URL"
-    );
-    println!("{}", "-".repeat(72));
-    for d in daemons {
-        let uptime = format_uptime(d.uptime_secs);
-        let url = d.external_url.as_deref().unwrap_or("-");
-        println!(
-            "{:<20} {:>8}  {:>8}  {}",
-            d.name,
-            d.sessions.len(),
-            uptime,
-            url
-        );
-    }
-}
-
 /// Display fleet discovery results with session details.
 pub fn print_fleet_detail(daemons: &[DaemonInfo]) {
     if daemons.is_empty() {
