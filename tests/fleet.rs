@@ -743,3 +743,359 @@ async fn test_e2e_fleet_error_response() {
 
     assert!(matches!(resp, FleetResponse::Error { .. }));
 }
+
+// ===========================================================================
+// Node-to-node and multi-session communication tests
+// ===========================================================================
+
+/// Two nodes discover each other and exchange commands via NATS.
+#[tokio::test]
+async fn test_node_to_node_communication() {
+    let _client = require_nats().await;
+
+    let dir_a = temp_dir("n2n-a");
+    let dir_b = temp_dir("n2n-b");
+    let (_sock_a, _port_a) = start_fleet_daemon(&dir_a, "node-alpha").await;
+    let (_sock_b, _port_b) = start_fleet_daemon(&dir_b, "node-beta").await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let client = connect_nats(&nats_config()).await.unwrap();
+
+    // Both nodes visible via fleet discover
+    let daemons = discover_fleet(&client, Duration::from_secs(3)).await.unwrap();
+    let names: Vec<&str> = daemons.iter().map(|d| d.name.as_str()).collect();
+    assert!(names.contains(&"node-alpha"), "missing node-alpha: {:?}", names);
+    assert!(names.contains(&"node-beta"), "missing node-beta: {:?}", names);
+
+    // Launch a session on node-alpha from node-beta's perspective
+    let req = FleetRequest::Launch {
+        command: vec!["cat".into()],
+        working_dir: "/tmp".to_string(),
+    };
+    let resp = fleet_request(&client, "node-alpha", &req, Duration::from_secs(5))
+        .await
+        .unwrap();
+    let id_a = match resp {
+        FleetResponse::Launched { id, .. } => id,
+        other => panic!("expected Launched, got: {:?}", other),
+    };
+
+    // Launch a session on node-beta
+    let resp = fleet_request(&client, "node-beta", &req, Duration::from_secs(5))
+        .await
+        .unwrap();
+    let id_b = match resp {
+        FleetResponse::Launched { id, .. } => id,
+        other => panic!("expected Launched, got: {:?}", other),
+    };
+
+    // Send input to node-alpha's session via NATS
+    let send_req = FleetRequest::SendInput {
+        id: id_a,
+        data: b"hello from beta\n".to_vec(),
+    };
+    let resp = fleet_request(&client, "node-alpha", &send_req, Duration::from_secs(5))
+        .await
+        .unwrap();
+    assert!(matches!(resp, FleetResponse::InputSent { .. }));
+
+    // Send input to node-beta's session via NATS
+    let send_req = FleetRequest::SendInput {
+        id: id_b,
+        data: b"hello from alpha\n".to_vec(),
+    };
+    let resp = fleet_request(&client, "node-beta", &send_req, Duration::from_secs(5))
+        .await
+        .unwrap();
+    assert!(matches!(resp, FleetResponse::InputSent { .. }));
+
+    // Verify both sessions received the input (check status/output)
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let status_a = fleet_request(
+        &client,
+        "node-alpha",
+        &FleetRequest::GetStatus { id: id_a },
+        Duration::from_secs(5),
+    )
+    .await
+    .unwrap();
+    match status_a {
+        FleetResponse::SessionStatus { output_size, .. } => {
+            assert!(output_size > 0, "node-alpha session should have output");
+        }
+        other => panic!("expected SessionStatus, got: {:?}", other),
+    }
+
+    let status_b = fleet_request(
+        &client,
+        "node-beta",
+        &FleetRequest::GetStatus { id: id_b },
+        Duration::from_secs(5),
+    )
+    .await
+    .unwrap();
+    match status_b {
+        FleetResponse::SessionStatus { output_size, .. } => {
+            assert!(output_size > 0, "node-beta session should have output");
+        }
+        other => panic!("expected SessionStatus, got: {:?}", other),
+    }
+
+    // Clean up
+    let _ = fleet_request(
+        &client,
+        "node-alpha",
+        &FleetRequest::Kill { id: id_a },
+        Duration::from_secs(5),
+    )
+    .await;
+    let _ = fleet_request(
+        &client,
+        "node-beta",
+        &FleetRequest::Kill { id: id_b },
+        Duration::from_secs(5),
+    )
+    .await;
+}
+
+// ===========================================================================
+// Docker Compose e2e tests (requires `docker compose up -d`)
+// ===========================================================================
+// These tests connect to the containerized codewire daemon running in Docker
+// Compose. The daemon has Claude Code installed and is connected to NATS.
+//
+// Prerequisites:
+//   1. Copy .env.example to .env and set ANTHROPIC_API_KEY
+//   2. docker compose up -d --build
+//   3. cargo test --features nats -- docker_compose --nocapture
+//
+// The container uses a known auth token: "test-token-for-e2e"
+
+const DOCKER_COMPOSE_DAEMON: &str = "docker-test";
+const DOCKER_COMPOSE_TOKEN: &str = "test-token-for-e2e";
+const DOCKER_COMPOSE_WS_PORT: u16 = 9100;
+
+/// Check if docker-compose stack is running by trying to discover the daemon.
+async fn require_docker_compose() -> async_nats::Client {
+    let client = require_nats().await;
+
+    // Try to discover the docker-compose daemon
+    let daemons = discover_fleet(&client, Duration::from_secs(3)).await.unwrap();
+    let found = daemons.iter().any(|d| d.name == DOCKER_COMPOSE_DAEMON);
+    if !found {
+        eprintln!(
+            "Docker Compose daemon '{}' not found. Run: docker compose up -d --build",
+            DOCKER_COMPOSE_DAEMON
+        );
+        std::process::exit(0);
+    }
+
+    client
+}
+
+/// Docker Compose e2e: discover containerized daemon via NATS
+#[tokio::test]
+async fn test_docker_compose_discover() {
+    let client = require_docker_compose().await;
+
+    let daemons = discover_fleet(&client, Duration::from_secs(3)).await.unwrap();
+    let daemon = daemons.iter().find(|d| d.name == DOCKER_COMPOSE_DAEMON).unwrap();
+
+    assert_eq!(daemon.name, DOCKER_COMPOSE_DAEMON);
+    assert!(daemon.external_url.is_some());
+    eprintln!("Discovered daemon: {} (url: {:?})", daemon.name, daemon.external_url);
+}
+
+/// Docker Compose e2e: launch a command via NATS, watch output via WS
+#[tokio::test]
+async fn test_docker_compose_launch_and_watch() {
+    let client = require_docker_compose().await;
+
+    // Launch a command on the containerized daemon via NATS.
+    // Use bash -c with repeated output so the session lives long enough for WS to connect.
+    let req = FleetRequest::Launch {
+        command: vec![
+            "bash".into(),
+            "-c".into(),
+            "for i in 1 2 3 4 5; do echo HELLO_FROM_CONTAINER; sleep 1; done".into(),
+        ],
+        working_dir: "/tmp".to_string(),
+    };
+    let resp = fleet_request(&client, DOCKER_COMPOSE_DAEMON, &req, Duration::from_secs(10))
+        .await
+        .unwrap();
+    let id = match resp {
+        FleetResponse::Launched { id, .. } => id,
+        other => panic!("expected Launched, got: {:?}", other),
+    };
+    eprintln!("Launched session {} on container", id);
+
+    // Connect via WS to the container and watch the session
+    let url = format!(
+        "ws://127.0.0.1:{}/ws?token={}",
+        DOCKER_COMPOSE_WS_PORT, DOCKER_COMPOSE_TOKEN
+    );
+    let (ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+    let (ws_writer, ws_reader) = ws.split();
+    let mut reader = FrameReader::WsClient(ws_reader);
+    let mut writer = FrameWriter::WsClient(ws_writer);
+
+    writer
+        .send_request(&Request::WatchSession {
+            id,
+            include_history: true,
+            history_lines: None,
+        })
+        .await
+        .unwrap();
+
+    let mut all_output = String::new();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+
+    loop {
+        tokio::select! {
+            frame = reader.read_frame() => {
+                match frame.unwrap() {
+                    Some(Frame::Control(payload)) => {
+                        let resp: Response = protocol::parse_response(&payload).unwrap();
+                        if let Response::WatchUpdate { output, done, .. } = resp {
+                            if let Some(text) = output {
+                                all_output.push_str(&text);
+                            }
+                            if done || all_output.contains("HELLO_FROM_CONTAINER") {
+                                break;
+                            }
+                        }
+                    }
+                    Some(Frame::Data(_)) => {}
+                    None => break,
+                }
+            }
+            _ = tokio::time::sleep_until(deadline) => {
+                panic!("Timed out. Output so far:\n{}", all_output);
+            }
+        }
+    }
+
+    assert!(
+        all_output.contains("HELLO_FROM_CONTAINER"),
+        "Expected HELLO_FROM_CONTAINER, got:\n{}",
+        all_output
+    );
+    eprintln!("Got expected output from container via NATS launch + WS watch");
+}
+
+/// Docker Compose e2e: real Claude session via NATS fleet.
+/// Launches `claude -p` on the containerized daemon, watches output via WS.
+///
+/// Run with: set -a && source .env && set +a && cargo test --features nats -- test_docker_compose_real_claude --nocapture
+#[tokio::test]
+async fn test_docker_compose_real_claude() {
+    if std::env::var("ANTHROPIC_API_KEY").is_err()
+        && std::env::var("ANTHROPIC_AUTH_TOKEN").is_err()
+    {
+        eprintln!("ANTHROPIC_API_KEY not set, skipping real Claude test");
+        return;
+    }
+
+    let client = require_docker_compose().await;
+
+    // Launch claude on the containerized daemon via NATS
+    let req = FleetRequest::Launch {
+        command: vec![
+            "claude".into(),
+            "-p".into(),
+            "respond with exactly this text and nothing else: CODEWIRE_TEST_OK".into(),
+            "--dangerously-skip-permissions".into(),
+        ],
+        working_dir: "/tmp".to_string(),
+    };
+    let resp = fleet_request(&client, DOCKER_COMPOSE_DAEMON, &req, Duration::from_secs(10))
+        .await
+        .unwrap();
+    let id = match resp {
+        FleetResponse::Launched { id, .. } => {
+            eprintln!("Launched real Claude session {} on container", id);
+            id
+        }
+        FleetResponse::Error { message, .. } => {
+            panic!("Failed to launch Claude: {}", message);
+        }
+        other => panic!("expected Launched, got: {:?}", other),
+    };
+
+    // Watch via WS from host → container
+    let url = format!(
+        "ws://127.0.0.1:{}/ws?token={}",
+        DOCKER_COMPOSE_WS_PORT, DOCKER_COMPOSE_TOKEN
+    );
+    let (ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+    let (ws_writer, ws_reader) = ws.split();
+    let mut reader = FrameReader::WsClient(ws_reader);
+    let mut writer = FrameWriter::WsClient(ws_writer);
+
+    writer
+        .send_request(&Request::WatchSession {
+            id,
+            include_history: true,
+            history_lines: None,
+        })
+        .await
+        .unwrap();
+
+    let mut all_output = String::new();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
+
+    loop {
+        tokio::select! {
+            frame = reader.read_frame() => {
+                match frame.unwrap() {
+                    Some(Frame::Control(payload)) => {
+                        let resp: Response = protocol::parse_response(&payload).unwrap();
+                        match resp {
+                            Response::WatchUpdate { output, done, .. } => {
+                                if let Some(text) = output {
+                                    eprint!("{}", text);
+                                    all_output.push_str(&text);
+                                }
+                                if done {
+                                    eprintln!("\n[Claude session completed]");
+                                    break;
+                                }
+                                if all_output.contains("CODEWIRE_TEST_OK") {
+                                    eprintln!("\n[Found CODEWIRE_TEST_OK in output]");
+                                    break;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    Some(Frame::Data(_)) => {}
+                    None => break,
+                }
+            }
+            _ = tokio::time::sleep_until(deadline) => {
+                panic!(
+                    "Claude session timed out after 120s. Output so far:\n{}",
+                    all_output
+                );
+            }
+        }
+    }
+
+    assert!(
+        all_output.contains("CODEWIRE_TEST_OK"),
+        "Expected CODEWIRE_TEST_OK in Claude output, got:\n{}",
+        all_output
+    );
+
+    // Clean up
+    let _ = fleet_request(
+        &client,
+        DOCKER_COMPOSE_DAEMON,
+        &FleetRequest::Kill { id },
+        Duration::from_secs(5),
+    )
+    .await;
+}
