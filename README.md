@@ -552,135 +552,30 @@ codewire_send_input(session_id=1, input="Tests ready, please integrate\n")
 codewire_read_session_output(session_id=1, tail=100)
 ```
 
-## LLM-Friendly Development
-
-Codewire is designed to be developed BY LLMs, FOR LLMs. We provide a comprehensive Claude Code skill that makes contributing easy.
-
-### Quick Start for LLM Development
-
-```bash
-# Install the codewire-dev skill
-curl -fsSL https://raw.githubusercontent.com/sonica/codewire/main/.claude/skills/install.sh | bash
-
-# Or if you're in the repo
-./.claude/skills/install.sh
-```
-
-**Usage in Claude Code:**
-```
-Use the codewire-dev skill to implement new features
-```
-
-The skill provides:
-- ✅ Project structure overview
-- ✅ Step-by-step command implementation guide
-- ✅ Testing patterns and conventions
-- ✅ Coder CLI integration examples
-- ✅ Common pitfalls and how to avoid them
-- ✅ Quick reference commands
-
-### Key LLM Development Principles
-
-**1. Test-Driven:** Always run tests before and after changes
-```bash
-make test-all  # Runs unit, integration, and CLI tests
-```
-
-**2. Short Test Names:** Unix socket paths have length limits
-```rust
-// ❌ BAD
-let dir = temp_dir("auto-attach-skip-completed");
-
-// ✅ GOOD
-let dir = temp_dir("auto-skip-done");
-```
-
-**3. Add Integration Tests:** Every feature needs an end-to-end test
-```rust
-#[tokio::test]
-async fn test_new_feature() {
-    let dir = temp_dir("new-feat");
-    let sock = start_test_daemon(&dir).await;
-    // Test implementation
-}
-```
-
-**4. Manual CLI Testing:** Use the automated script
-```bash
-./tests/manual_test.sh ./target/release/cw
-```
-
-### Integration with Coder
-
-Codewire + Coder = Perfect remote development. The skill includes comprehensive examples:
-
-```bash
-# Launch long-running build on remote Coder workspace
-coder ssh myworkspace -- cw launch -- cargo build --release
-
-# Monitor from local machine
-coder ssh myworkspace -- cw watch 1
-
-# Attach interactively
-coder ssh myworkspace -t -- cw attach
-```
-
-See the [codewire-dev skill](.claude/skills/codewire-dev.md) for complete Coder integration patterns.
-
-### Development Workflow
-
-```bash
-# 1. Run existing tests
-make test
-
-# 2. Make your changes
-# - CLI: src/main.rs
-# - Client: src/client.rs
-# - Protocol: src/protocol.rs
-# - Daemon: src/daemon.rs
-
-# 3. Add integration test
-# tests/integration.rs
-
-# 4. Run full test suite
-make test-all
-
-# 5. Manual verification
-./tests/manual_test.sh
-
-# 6. Format and lint
-cargo fmt
-cargo clippy --all-targets --all-features
-```
-
-### Quick Reference
-
-```bash
-# Full test suite
-make test-all
-
-# Build release
-make build
-
-# Install locally
-make install
-
-# Clean everything
-make clean
-```
-
-## Development
+## Contributing
 
 ```bash
 # Build
 cargo build
+cargo build --features nats       # With fleet support
+cargo build --features mcp        # With MCP support
 
-# Run tests (unit + integration)
-cargo test
+# Run tests
+cargo test                                    # Unit + integration
+cargo test --features nats --test fleet       # Fleet tests (requires NATS)
+
+# Format and lint
+cargo fmt
+cargo clippy --all-targets --all-features
+
+# Manual CLI test
+./tests/manual_test.sh ./target/release/cw
 
 # Run with logging
 RUST_LOG=codewire=debug cw daemon
 ```
+
+A comprehensive [codewire-dev skill](.claude/skills/codewire-dev.md) is available for Claude Code with project structure, implementation guides, and testing conventions.
 
 ## Security
 
