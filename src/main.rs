@@ -163,10 +163,53 @@ enum Commands {
     #[cfg(feature = "mcp")]
     McpServer,
 
+    /// Fleet discovery and remote management via NATS
+    #[cfg(feature = "nats")]
+    Fleet {
+        #[command(subcommand)]
+        action: FleetAction,
+    },
+
     /// Manage remote server connections
     Server {
         #[command(subcommand)]
         action: ServerAction,
+    },
+}
+
+#[cfg(feature = "nats")]
+#[derive(Subcommand)]
+enum FleetAction {
+    /// List all daemons and their sessions across the fleet
+    List {
+        /// Discovery timeout in seconds
+        #[arg(long, default_value = "2")]
+        timeout: u64,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Attach to a remote session: cw fleet attach <daemon>:<session_id>
+    Attach {
+        /// Target in <daemon>:<session_id> format
+        target: String,
+    },
+    /// Launch a session on a specific daemon
+    Launch {
+        /// Daemon name to launch on
+        #[arg(long)]
+        on: String,
+        /// Working directory on the remote daemon
+        #[arg(long, short)]
+        dir: Option<String>,
+        /// Command and arguments
+        #[arg(trailing_var_arg = true, num_args = 1..)]
+        command: Vec<String>,
+    },
+    /// Kill a remote session: cw fleet kill <daemon>:<session_id>
+    Kill {
+        /// Target in <daemon>:<session_id> format
+        target: String,
     },
 }
 
@@ -330,7 +373,37 @@ async fn main() -> Result<()> {
             mcp_server::run_mcp_server(dir).await
         }
 
+        #[cfg(feature = "nats")]
+        Commands::Fleet { action } => handle_fleet_action(action, &dir).await,
+
         Commands::Server { action } => handle_server_action(action, &dir),
+    }
+}
+
+#[cfg(feature = "nats")]
+async fn handle_fleet_action(action: FleetAction, data_dir: &std::path::Path) -> Result<()> {
+    let config = config::Config::load(data_dir)?;
+    let nats_config = config
+        .nats
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!(
+            "NATS not configured. Set CODEWIRE_NATS_URL or add [nats] to ~/.codewire/config.toml"
+        ))?;
+
+    match action {
+        FleetAction::List { timeout, json } => {
+            fleet_client::handle_fleet_list(nats_config, timeout, json).await
+        }
+        FleetAction::Attach { target } => {
+            fleet_client::handle_fleet_attach(nats_config, data_dir, &target).await
+        }
+        FleetAction::Launch { on, dir, command } => {
+            let working_dir = dir.unwrap_or_else(|| ".".to_string());
+            fleet_client::handle_fleet_launch(nats_config, &on, command, working_dir).await
+        }
+        FleetAction::Kill { target } => {
+            fleet_client::handle_fleet_kill(nats_config, &target).await
+        }
     }
 }
 
