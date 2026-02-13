@@ -323,7 +323,7 @@ cw fleet attach gpu-box:1
 
 ```bash
 # Start NATS + Caddy (for TLS)
-docker compose -f docker-compose.fleet.yml up -d
+docker compose up -d
 
 # Configure and start daemon
 export CODEWIRE_NATS_URL="nats://127.0.0.1:4222"
