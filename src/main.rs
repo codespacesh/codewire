@@ -206,10 +206,17 @@ enum FleetAction {
         #[arg(trailing_var_arg = true, num_args = 1..)]
         command: Vec<String>,
     },
-    /// Kill a remote session: cw fleet kill <daemon>:<session_id>
+    /// Kill a remote session: cw fleet kill <node>:<session_id>
     Kill {
-        /// Target in <daemon>:<session_id> format
+        /// Target in <node>:<session_id> format
         target: String,
+    },
+    /// Send input to a remote session: cw fleet send <node>:<session_id> <text>
+    Send {
+        /// Target in <node>:<session_id> format
+        target: String,
+        /// Text to send
+        input: String,
     },
 }
 
@@ -403,6 +410,9 @@ async fn handle_fleet_action(action: FleetAction, data_dir: &std::path::Path) ->
         }
         FleetAction::Kill { target } => {
             fleet_client::handle_fleet_kill(nats_config, &target).await
+        }
+        FleetAction::Send { target, input } => {
+            fleet_client::handle_fleet_send_input(nats_config, &target, input.into_bytes()).await
         }
     }
 }

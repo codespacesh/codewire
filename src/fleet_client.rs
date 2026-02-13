@@ -53,6 +53,7 @@ pub async fn fleet_request(
         FleetRequest::Launch { .. } => format!("cw.{}.launch", daemon_name),
         FleetRequest::Kill { .. } => format!("cw.{}.kill", daemon_name),
         FleetRequest::GetStatus { .. } => format!("cw.{}.status", daemon_name),
+        FleetRequest::SendInput { .. } => format!("cw.{}.send", daemon_name),
         FleetRequest::Discover => "cw.fleet.discover".to_string(),
     };
 
@@ -199,6 +200,27 @@ pub async fn handle_fleet_kill(nats_config: &NatsConfig, target: &str) -> Result
     }
 
     Ok(())
+}
+
+/// Handle the `cw fleet send <node>:<id> <text>` command.
+pub async fn handle_fleet_send_input(
+    nats_config: &NatsConfig,
+    target: &str,
+    data: Vec<u8>,
+) -> Result<()> {
+    let (daemon_name, id) = parse_fleet_target(target)?;
+    let client = connect_nats(nats_config).await?;
+    let req = FleetRequest::SendInput { id, data };
+    let resp = fleet_request(&client, daemon_name, &req, Duration::from_secs(10)).await?;
+
+    match resp {
+        FleetResponse::InputSent { bytes, .. } => {
+            println!("Sent {} bytes to {}:{}", bytes, daemon_name, id);
+            Ok(())
+        }
+        FleetResponse::Error { message, .. } => bail!("{}", message),
+        other => bail!("Unexpected response: {:?}", other),
+    }
 }
 
 /// Handle the `cw fleet attach <daemon>:<id>` command.

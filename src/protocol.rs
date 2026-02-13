@@ -141,6 +141,10 @@ pub enum FleetRequest {
     GetStatus {
         id: u32,
     },
+    SendInput {
+        id: u32,
+        data: Vec<u8>,
+    },
 }
 
 /// Response from a daemon over NATS.
@@ -164,6 +168,11 @@ pub enum FleetResponse {
         daemon: String,
         info: SessionInfo,
         output_size: u64,
+    },
+    InputSent {
+        daemon: String,
+        id: u32,
+        bytes: usize,
     },
     Error {
         daemon: String,
