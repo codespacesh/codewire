@@ -1,8 +1,16 @@
+mod auth;
 mod client;
+mod config;
+mod connection;
 mod daemon;
 mod protocol;
 mod session;
 mod terminal;
+
+#[cfg(feature = "nats")]
+mod fleet;
+#[cfg(feature = "nats")]
+mod fleet_client;
 
 #[cfg(feature = "mcp")]
 mod mcp_server;
@@ -31,6 +39,14 @@ fn dirs_path() -> Option<PathBuf> {
 #[derive(Parser)]
 #[command(name = "cw", about = "Persistent process server for AI coding agents")]
 struct Cli {
+    /// Connect to a remote server (name from servers.toml or ws://host:port)
+    #[arg(long, short, global = true)]
+    server: Option<String>,
+
+    /// Auth token for remote server (overrides saved token)
+    #[arg(long, global = true)]
+    token: Option<String>,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -146,6 +162,33 @@ enum Commands {
     /// Start MCP (Model Context Protocol) server
     #[cfg(feature = "mcp")]
     McpServer,
+
+    /// Manage remote server connections
+    Server {
+        #[command(subcommand)]
+        action: ServerAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum ServerAction {
+    /// Add a remote server
+    Add {
+        /// Server name (for later reference)
+        name: String,
+        /// WebSocket URL (e.g. ws://host:9100)
+        url: String,
+        /// Auth token
+        #[arg(long)]
+        token: String,
+    },
+    /// Remove a saved server
+    Remove {
+        /// Server name
+        name: String,
+    },
+    /// List saved servers
+    List,
 }
 
 #[tokio::main]
@@ -153,6 +196,8 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     let dir = data_dir();
+    let target = resolve_target(&cli, &dir)?;
+    let is_local = matches!(target, client::Target::Local(_));
 
     match cli.command {
         Commands::Daemon | Commands::Start => {
@@ -202,39 +247,49 @@ async fn main() -> Result<()> {
             dir: work_dir,
             command,
         } => {
-            ensure_daemon(&dir).await?;
+            if is_local {
+                ensure_daemon(&dir).await?;
+            }
             let work_dir = work_dir.unwrap_or_else(|| {
                 std::env::current_dir()
                     .map(|p| p.display().to_string())
                     .unwrap_or_else(|_| ".".to_string())
             });
-            client::launch(&dir, command, work_dir).await
+            client::launch(&target, command, work_dir).await
         }
 
         Commands::List { json } => {
-            ensure_daemon(&dir).await?;
-            client::list(&dir, json).await
+            if is_local {
+                ensure_daemon(&dir).await?;
+            }
+            client::list(&target, json).await
         }
 
         Commands::Attach { id } => {
-            ensure_daemon(&dir).await?;
-            client::attach(&dir, id).await
+            if is_local {
+                ensure_daemon(&dir).await?;
+            }
+            client::attach(&target, id).await
         }
 
         Commands::Kill { id, all } => {
-            ensure_daemon(&dir).await?;
+            if is_local {
+                ensure_daemon(&dir).await?;
+            }
             if all {
-                client::kill_all(&dir).await
+                client::kill_all(&target).await
             } else if let Some(id) = id {
-                client::kill(&dir, id).await
+                client::kill(&target, id).await
             } else {
                 bail!("Must specify either a session ID or --all to kill all sessions.\nUsage: cw kill <ID> or cw kill --all")
             }
         }
 
         Commands::Logs { id, follow, tail } => {
-            ensure_daemon(&dir).await?;
-            client::logs(&dir, id, follow, tail).await
+            if is_local {
+                ensure_daemon(&dir).await?;
+            }
+            client::logs(&target, id, follow, tail).await
         }
 
         Commands::Send {
@@ -244,8 +299,10 @@ async fn main() -> Result<()> {
             file,
             no_newline,
         } => {
-            ensure_daemon(&dir).await?;
-            client::send_input(&dir, id, input, stdin, file, no_newline).await
+            if is_local {
+                ensure_daemon(&dir).await?;
+            }
+            client::send_input(&target, id, input, stdin, file, no_newline).await
         }
 
         Commands::Watch {
@@ -254,19 +311,93 @@ async fn main() -> Result<()> {
             no_history,
             timeout,
         } => {
-            ensure_daemon(&dir).await?;
-            client::watch_session(&dir, id, tail, no_history, timeout).await
+            if is_local {
+                ensure_daemon(&dir).await?;
+            }
+            client::watch_session(&target, id, tail, no_history, timeout).await
         }
 
         Commands::Status { id, json } => {
-            ensure_daemon(&dir).await?;
-            client::get_status(&dir, id, json).await
+            if is_local {
+                ensure_daemon(&dir).await?;
+            }
+            client::get_status(&target, id, json).await
         }
 
         #[cfg(feature = "mcp")]
         Commands::McpServer => {
             ensure_daemon(&dir).await?;
             mcp_server::run_mcp_server(dir).await
+        }
+
+        Commands::Server { action } => handle_server_action(action, &dir),
+    }
+}
+
+/// Resolve connection target from CLI args.
+fn resolve_target(cli: &Cli, data_dir: &std::path::Path) -> Result<client::Target> {
+    match &cli.server {
+        None => Ok(client::Target::Local(data_dir.to_path_buf())),
+        Some(server) => {
+            // Check if it's a saved server name
+            let servers = config::ServersConfig::load(data_dir)?;
+            if let Some(entry) = servers.servers.get(server) {
+                let token = cli.token.clone().unwrap_or_else(|| entry.token.clone());
+                Ok(client::Target::Remote {
+                    url: entry.url.clone(),
+                    token,
+                })
+            } else {
+                // Treat as URL or host:port
+                let token = cli
+                    .token
+                    .clone()
+                    .ok_or_else(|| anyhow::anyhow!("--token required for ad-hoc server"))?;
+                let url = if server.starts_with("ws://") || server.starts_with("wss://") {
+                    server.clone()
+                } else {
+                    format!("ws://{}", server)
+                };
+                Ok(client::Target::Remote { url, token })
+            }
+        }
+    }
+}
+
+/// Handle server management subcommands.
+fn handle_server_action(action: ServerAction, data_dir: &std::path::Path) -> Result<()> {
+    match action {
+        ServerAction::Add { name, url, token } => {
+            let mut servers = config::ServersConfig::load(data_dir)?;
+            servers
+                .servers
+                .insert(name.clone(), config::ServerEntry { url, token });
+            servers.save(data_dir)?;
+            println!("Server '{}' saved.", name);
+            Ok(())
+        }
+        ServerAction::Remove { name } => {
+            let mut servers = config::ServersConfig::load(data_dir)?;
+            if servers.servers.remove(&name).is_some() {
+                servers.save(data_dir)?;
+                println!("Server '{}' removed.", name);
+            } else {
+                println!("Server '{}' not found.", name);
+            }
+            Ok(())
+        }
+        ServerAction::List => {
+            let servers = config::ServersConfig::load(data_dir)?;
+            if servers.servers.is_empty() {
+                println!("No saved servers.");
+            } else {
+                println!("{:<15} URL", "NAME");
+                println!("{}", "-".repeat(50));
+                for (name, entry) in &servers.servers {
+                    println!("{:<15} {}", name, entry.url);
+                }
+            }
+            Ok(())
         }
     }
 }
