@@ -1,0 +1,4 @@
+localhost {
+	# Reverse proxy WebSocket connections to codewire daemon
+	reverse_proxy /ws* host.docker.internal:9100
+}
