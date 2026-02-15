@@ -22,7 +22,7 @@ services:
     ports:
       - "9100:9100"
     environment:
-      - CODEWIRE_DAEMON_NAME=docker-test
+      - CODEWIRE_NODE_NAME=docker-test
       - CODEWIRE_LISTEN=0.0.0.0:9100
       - CODEWIRE_NATS_URL=nats://nats:4222
       - CODEWIRE_TOKEN=test-token-for-e2e

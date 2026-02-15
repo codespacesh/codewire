@@ -46,7 +46,7 @@ else
 fi
 echo
 
-# Stop daemon
+# Stop node
 $BIN stop 2>/dev/null || true
 
 echo "=== All manual tests passed! ==="

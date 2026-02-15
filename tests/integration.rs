@@ -1,6 +1,6 @@
 //! End-to-end integration tests for codewire.
 //!
-//! These tests start a daemon, launch sessions using `bash -c` instead of `claude`,
+//! These tests start a node, launch sessions using `bash -c` instead of `claude`,
 //! and verify the full lifecycle: launch, list, attach, detach, kill, and logs.
 
 use std::path::{Path, PathBuf};
@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use tokio::net::UnixStream;
 
-use codewire::daemon::Daemon;
+use codewire::node::Node;
 use codewire::protocol::{self, read_frame, send_data, send_request, Frame, Request, Response};
 
 /// Create a temp dir for a test and return its path.
@@ -34,13 +34,13 @@ async fn request_response(sock_path: &PathBuf, req: &Request) -> Response {
     }
 }
 
-/// Start a daemon in a background task.
-async fn start_test_daemon(data_dir: &Path) -> PathBuf {
-    let daemon = Daemon::new(data_dir).unwrap();
+/// Start a node in a background task.
+async fn start_test_node(data_dir: &Path) -> PathBuf {
+    let node = Node::new(data_dir).unwrap();
 
     let sock_path = data_dir.join("server.sock");
     tokio::spawn(async move {
-        daemon.run().await.unwrap();
+        node.run().await.unwrap();
     });
 
     // Wait for socket to appear
@@ -50,13 +50,13 @@ async fn start_test_daemon(data_dir: &Path) -> PathBuf {
             return sock_path;
         }
     }
-    panic!("daemon failed to start");
+    panic!("node failed to start");
 }
 
 #[tokio::test]
 async fn test_launch_and_list() {
     let dir = temp_dir("launch-list");
-    let sock = start_test_daemon(&dir).await;
+    let sock = start_test_node(&dir).await;
 
     // Launch a session
     let resp = request_response(
@@ -102,7 +102,7 @@ async fn test_launch_and_list() {
 #[tokio::test]
 async fn test_kill_session() {
     let dir = temp_dir("kill");
-    let sock = start_test_daemon(&dir).await;
+    let sock = start_test_node(&dir).await;
 
     // Launch
     let resp = request_response(
@@ -149,7 +149,7 @@ async fn test_kill_session() {
 #[tokio::test]
 async fn test_kill_all() {
     let dir = temp_dir("kill-all");
-    let sock = start_test_daemon(&dir).await;
+    let sock = start_test_node(&dir).await;
 
     // Launch two sessions
     request_response(
@@ -181,7 +181,7 @@ async fn test_kill_all() {
 #[tokio::test]
 async fn test_session_completes_naturally() {
     let dir = temp_dir("complete");
-    let sock = start_test_daemon(&dir).await;
+    let sock = start_test_node(&dir).await;
 
     // Launch a session that exits quickly
     let resp = request_response(
@@ -217,7 +217,7 @@ async fn test_session_completes_naturally() {
 #[tokio::test]
 async fn test_logs() {
     let dir = temp_dir("logs");
-    let sock = start_test_daemon(&dir).await;
+    let sock = start_test_node(&dir).await;
 
     // Launch a session that outputs something
     let resp = request_response(
@@ -266,7 +266,7 @@ async fn test_logs() {
 #[tokio::test]
 async fn test_attach_and_receive_output() {
     let dir = temp_dir("attach");
-    let sock = start_test_daemon(&dir).await;
+    let sock = start_test_node(&dir).await;
 
     // Launch a session that outputs periodically
     let resp = request_response(
@@ -363,7 +363,7 @@ async fn test_attach_and_receive_output() {
 #[tokio::test]
 async fn test_attach_send_input() {
     let dir = temp_dir("input");
-    let sock = start_test_daemon(&dir).await;
+    let sock = start_test_node(&dir).await;
 
     // Launch an interactive bash session (cat will echo stdin to stdout)
     let resp = request_response(
@@ -445,7 +445,7 @@ async fn test_attach_send_input() {
 #[tokio::test]
 async fn test_detach_from_attach() {
     let dir = temp_dir("detach");
-    let sock = start_test_daemon(&dir).await;
+    let sock = start_test_node(&dir).await;
 
     // Launch a long-running session
     let resp = request_response(
@@ -524,7 +524,7 @@ async fn test_detach_from_attach() {
 #[tokio::test]
 async fn test_attach_nonexistent_session() {
     let dir = temp_dir("attach-noexist");
-    let sock = start_test_daemon(&dir).await;
+    let sock = start_test_node(&dir).await;
 
     let resp = request_response(
         &sock,
@@ -549,7 +549,7 @@ async fn test_attach_nonexistent_session() {
 #[tokio::test]
 async fn test_resize_during_attach() {
     let dir = temp_dir("resize");
-    let sock = start_test_daemon(&dir).await;
+    let sock = start_test_node(&dir).await;
 
     let resp = request_response(
         &sock,
@@ -613,7 +613,7 @@ async fn test_resize_during_attach() {
 #[tokio::test]
 async fn test_multiple_attachments() {
     let dir = temp_dir("multi-attach");
-    let sock = start_test_daemon(&dir).await;
+    let sock = start_test_node(&dir).await;
 
     // Launch a session that outputs periodically
     let resp = request_response(
@@ -717,7 +717,7 @@ async fn test_multiple_attachments() {
 #[tokio::test]
 async fn test_send_input_cross_session() {
     let dir = temp_dir("cross-input");
-    let sock = start_test_daemon(&dir).await;
+    let sock = start_test_node(&dir).await;
 
     // Launch an interactive session (cat echoes input)
     let resp = request_response(
@@ -785,7 +785,7 @@ async fn test_send_input_cross_session() {
 #[tokio::test]
 async fn test_get_session_status() {
     let dir = temp_dir("status");
-    let sock = start_test_daemon(&dir).await;
+    let sock = start_test_node(&dir).await;
 
     // Launch a session
     let resp = request_response(
@@ -831,7 +831,7 @@ async fn test_get_session_status() {
 #[tokio::test]
 async fn test_watch_session() {
     let dir = temp_dir("watch");
-    let sock = start_test_daemon(&dir).await;
+    let sock = start_test_node(&dir).await;
 
     // Launch a session that outputs periodically
     let resp = request_response(
@@ -910,7 +910,7 @@ async fn test_watch_session() {
 #[tokio::test]
 async fn test_supervisor_pattern() {
     let dir = temp_dir("supervisor");
-    let sock = start_test_daemon(&dir).await;
+    let sock = start_test_node(&dir).await;
 
     // Launch two worker sessions
     let resp1 = request_response(
@@ -974,7 +974,7 @@ async fn test_supervisor_pattern() {
 #[tokio::test]
 async fn test_concurrent_list_and_attach() {
     let dir = temp_dir("concurrent_list_attach");
-    let sock = start_test_daemon(&dir).await;
+    let sock = start_test_node(&dir).await;
 
     // Launch 3 sessions
     let mut ids = Vec::new();
@@ -1052,7 +1052,7 @@ async fn test_concurrent_list_and_attach() {
 #[tokio::test]
 async fn test_event_driven_persistence() {
     let dir = temp_dir("evt_persist");
-    let sock = start_test_daemon(&dir).await;
+    let sock = start_test_node(&dir).await;
 
     let sessions_json = dir.join("sessions.json");
 
@@ -1121,8 +1121,8 @@ async fn test_corrupt_sessions_json_recovery() {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(&sessions_json, "invalid json{[[").unwrap();
 
-    // Start daemon - should recover gracefully
-    let sock = start_test_daemon(&dir).await;
+    // Start node - should recover gracefully
+    let sock = start_test_node(&dir).await;
 
     // Should start with empty session list (corrupt file ignored)
     let resp = request_response(&sock, &Request::ListSessions).await;
@@ -1146,7 +1146,7 @@ async fn test_corrupt_sessions_json_recovery() {
 
     assert_eq!(backup_files.len(), 1, "corrupt file should be backed up");
 
-    // Daemon should be functional - launch a new session
+    // Node should be functional - launch a new session
     let resp = request_response(
         &sock,
         &Request::Launch {
@@ -1166,7 +1166,7 @@ async fn test_corrupt_sessions_json_recovery() {
 #[tokio::test]
 async fn test_auto_attach_single_session() {
     let dir = temp_dir("auto-attach-single");
-    let sock = start_test_daemon(&dir).await;
+    let sock = start_test_node(&dir).await;
 
     // Launch a single session
     let resp = request_response(
@@ -1223,7 +1223,7 @@ async fn test_auto_attach_single_session() {
 #[tokio::test]
 async fn test_auto_attach_oldest_session() {
     let dir = temp_dir("auto-attach-oldest");
-    let sock = start_test_daemon(&dir).await;
+    let sock = start_test_node(&dir).await;
 
     // Launch three sessions with delays to ensure different timestamps
     let resp1 = request_response(
@@ -1298,7 +1298,7 @@ async fn test_auto_attach_oldest_session() {
 #[tokio::test]
 async fn test_auto_attach_skips_attached() {
     let dir = temp_dir("auto-skip-att");
-    let sock = start_test_daemon(&dir).await;
+    let sock = start_test_node(&dir).await;
 
     // Launch two sessions
     let resp1 = request_response(
@@ -1379,7 +1379,7 @@ async fn test_auto_attach_skips_attached() {
 #[tokio::test]
 async fn test_auto_attach_skips_completed() {
     let dir = temp_dir("auto-skip-done");
-    let sock = start_test_daemon(&dir).await;
+    let sock = start_test_node(&dir).await;
 
     // Launch a session that completes quickly
     let resp1 = request_response(
@@ -1445,7 +1445,7 @@ async fn test_auto_attach_skips_completed() {
 #[tokio::test]
 async fn test_auto_attach_no_candidates() {
     let dir = temp_dir("auto-no-cand");
-    let sock = start_test_daemon(&dir).await;
+    let sock = start_test_node(&dir).await;
 
     // No sessions at all - test the error case
     let list_resp = request_response(&sock, &Request::ListSessions).await;
@@ -1518,7 +1518,7 @@ async fn test_auto_attach_no_candidates() {
 #[tokio::test]
 async fn test_explicit_attach_still_works() {
     let dir = temp_dir("explicit-attach");
-    let sock = start_test_daemon(&dir).await;
+    let sock = start_test_node(&dir).await;
 
     // Launch two sessions
     let resp1 = request_response(
@@ -1586,18 +1586,18 @@ fn find_available_port() -> u16 {
     listener.local_addr().unwrap().port()
 }
 
-/// Start a daemon with WebSocket enabled and return (sock_path, ws_port).
-async fn start_ws_test_daemon(data_dir: &Path) -> (PathBuf, u16) {
+/// Start a node with WebSocket enabled and return (sock_path, ws_port).
+async fn start_ws_test_node(data_dir: &Path) -> (PathBuf, u16) {
     let port = find_available_port();
 
     // Write config with WebSocket enabled
     std::fs::write(
         data_dir.join("config.toml"),
-        format!("[daemon]\nlisten = \"127.0.0.1:{}\"\n", port),
+        format!("[node]\nlisten = \"127.0.0.1:{}\"\n", port),
     )
     .unwrap();
 
-    let sock_path = start_test_daemon(data_dir).await;
+    let sock_path = start_test_node(data_dir).await;
 
     // Wait for the WebSocket server to be ready
     for _ in 0..50 {
@@ -1635,7 +1635,7 @@ async fn ws_request_response(port: u16, token: &str, req: &Request) -> Response 
 #[tokio::test]
 async fn test_ws_list_sessions() {
     let dir = temp_dir("ws-list");
-    let (sock, port) = start_ws_test_daemon(&dir).await;
+    let (sock, port) = start_ws_test_node(&dir).await;
 
     let token = std::fs::read_to_string(dir.join("token")).unwrap();
 
@@ -1671,7 +1671,7 @@ async fn test_ws_list_sessions() {
 #[tokio::test]
 async fn test_ws_launch_and_kill() {
     let dir = temp_dir("ws-launch-kill");
-    let (_sock, port) = start_ws_test_daemon(&dir).await;
+    let (_sock, port) = start_ws_test_node(&dir).await;
 
     let token = std::fs::read_to_string(dir.join("token")).unwrap();
 
@@ -1702,7 +1702,7 @@ async fn test_ws_launch_and_kill() {
 #[tokio::test]
 async fn test_ws_auth_rejection() {
     let dir = temp_dir("ws-auth-reject");
-    let (_sock, port) = start_ws_test_daemon(&dir).await;
+    let (_sock, port) = start_ws_test_node(&dir).await;
 
     // Try connecting with wrong token — should get HTTP 401 (connection fails)
     let url = format!("ws://127.0.0.1:{}/ws?token=wrong-token", port);
@@ -1716,7 +1716,7 @@ async fn test_ws_auth_rejection() {
 #[tokio::test]
 async fn test_ws_attach_and_receive_output() {
     let dir = temp_dir("ws-attach");
-    let (sock, port) = start_ws_test_daemon(&dir).await;
+    let (sock, port) = start_ws_test_node(&dir).await;
 
     let token = std::fs::read_to_string(dir.join("token")).unwrap();
 
@@ -1822,7 +1822,7 @@ async fn test_cursor_restored_after_detach() {
     use codewire::status_bar::StatusBar;
 
     let dir = temp_dir("cursor-restore");
-    let sock = start_test_daemon(&dir).await;
+    let sock = start_test_node(&dir).await;
 
     // Launch a session that hides the cursor (like Claude Code does)
     let resp = request_response(
@@ -1969,7 +1969,7 @@ async fn test_detach_with_kitty_keyboard_protocol() {
     use codewire::terminal::DetachDetector;
 
     let dir = temp_dir("kitty-detach");
-    let sock = start_test_daemon(&dir).await;
+    let sock = start_test_node(&dir).await;
 
     // Launch a session that enables Kitty keyboard protocol, focus events,
     // and mouse tracking — exactly what crossterm/ratatui does.

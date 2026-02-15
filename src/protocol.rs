@@ -124,17 +124,17 @@ pub struct SessionInfo {
 // Fleet protocol (JSON-over-NATS, separate from binary-framed Request/Response)
 // ---------------------------------------------------------------------------
 
-/// Daemon metadata advertised via NATS fleet discovery.
+/// Node metadata advertised via NATS fleet discovery.
 #[cfg(feature = "nats")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DaemonInfo {
+pub struct NodeInfo {
     pub name: String,
     pub external_url: Option<String>,
     pub sessions: Vec<SessionInfo>,
     pub uptime_secs: u64,
 }
 
-/// Request sent over NATS to daemons.
+/// Request sent over NATS to nodes.
 #[cfg(feature = "nats")]
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -157,36 +157,36 @@ pub enum FleetRequest {
     },
 }
 
-/// Response from a daemon over NATS.
+/// Response from a node over NATS.
 #[cfg(feature = "nats")]
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum FleetResponse {
-    DaemonInfo(DaemonInfo),
+    NodeInfo(NodeInfo),
     SessionList {
-        daemon: String,
+        node: String,
         sessions: Vec<SessionInfo>,
     },
     Launched {
-        daemon: String,
+        node: String,
         id: u32,
     },
     Killed {
-        daemon: String,
+        node: String,
         id: u32,
     },
     SessionStatus {
-        daemon: String,
+        node: String,
         info: SessionInfo,
         output_size: u64,
     },
     InputSent {
-        daemon: String,
+        node: String,
         id: u32,
         bytes: usize,
     },
     Error {
-        daemon: String,
+        node: String,
         message: String,
     },
 }

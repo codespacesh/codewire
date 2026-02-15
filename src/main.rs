@@ -2,7 +2,7 @@ mod auth;
 mod client;
 mod config;
 mod connection;
-mod daemon;
+mod node;
 mod protocol;
 mod session;
 mod status_bar;
@@ -54,13 +54,14 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Start the daemon (usually auto-started)
-    Daemon,
+    /// Start the node (usually auto-started)
+    #[command(alias = "daemon")]
+    Node,
 
-    /// Start the daemon (alias for daemon)
+    /// Start the node (alias for node)
     Start,
 
-    /// Stop the daemon
+    /// Stop the node
     Stop,
 
     /// Run a new session: cw run [--dir <dir>] -- <command> [args...]
@@ -256,45 +257,46 @@ async fn main() -> Result<()> {
     let is_local = matches!(target, client::Target::Local(_));
 
     match cli.command {
-        Commands::Daemon | Commands::Start => {
+        Commands::Node | Commands::Start => {
             tracing_subscriber::fmt()
                 .with_env_filter(
                     EnvFilter::from_default_env().add_directive("codewire=info".parse()?),
                 )
                 .init();
 
-            let daemon = daemon::Daemon::new(&dir)?;
-            daemon.run().await
+            let node = node::Node::new(&dir)?;
+            node.run().await
         }
 
         Commands::Stop => {
-            let pid_file = dir.join("daemon.pid");
+            // "node.pid" replaces the former "daemon.pid"
+            let pid_file = dir.join("node.pid");
             if !pid_file.exists() {
-                eprintln!("Daemon is not running (no PID file found)");
+                eprintln!("Node is not running (no PID file found)");
                 return Ok(());
             }
 
-            let pid_str = std::fs::read_to_string(&pid_file).context("reading daemon PID file")?;
-            let pid: i32 = pid_str.trim().parse().context("parsing daemon PID")?;
+            let pid_str = std::fs::read_to_string(&pid_file).context("reading node PID file")?;
+            let pid: i32 = pid_str.trim().parse().context("parsing node PID")?;
 
-            // Send SIGTERM to daemon
+            // Send SIGTERM to node
             use nix::sys::signal::{kill, Signal};
             use nix::unistd::Pid;
 
             match kill(Pid::from_raw(pid), Signal::SIGTERM) {
                 Ok(()) => {
-                    eprintln!("Daemon stopped (PID {})", pid);
+                    eprintln!("Node stopped (PID {})", pid);
                     // Clean up PID file
                     let _ = std::fs::remove_file(&pid_file);
                     Ok(())
                 }
                 Err(nix::errno::Errno::ESRCH) => {
-                    eprintln!("Daemon is not running (stale PID file)");
+                    eprintln!("Node is not running (stale PID file)");
                     let _ = std::fs::remove_file(&pid_file);
                     Ok(())
                 }
                 Err(e) => {
-                    bail!("Failed to stop daemon: {}", e)
+                    bail!("Failed to stop node: {}", e)
                 }
             }
         }
@@ -304,7 +306,7 @@ async fn main() -> Result<()> {
             command,
         } => {
             if is_local {
-                ensure_daemon(&dir).await?;
+                ensure_node(&dir).await?;
             }
             let work_dir = work_dir.unwrap_or_else(|| {
                 std::env::current_dir()
@@ -316,21 +318,21 @@ async fn main() -> Result<()> {
 
         Commands::List { json } => {
             if is_local {
-                ensure_daemon(&dir).await?;
+                ensure_node(&dir).await?;
             }
             client::list(&target, json).await
         }
 
         Commands::Attach { id, no_history } => {
             if is_local {
-                ensure_daemon(&dir).await?;
+                ensure_node(&dir).await?;
             }
             client::attach(&target, id, no_history).await
         }
 
         Commands::Kill { id, all } => {
             if is_local {
-                ensure_daemon(&dir).await?;
+                ensure_node(&dir).await?;
             }
             if all {
                 client::kill_all(&target).await
@@ -343,7 +345,7 @@ async fn main() -> Result<()> {
 
         Commands::Logs { id, follow, tail } => {
             if is_local {
-                ensure_daemon(&dir).await?;
+                ensure_node(&dir).await?;
             }
             client::logs(&target, id, follow, tail).await
         }
@@ -356,7 +358,7 @@ async fn main() -> Result<()> {
             no_newline,
         } => {
             if is_local {
-                ensure_daemon(&dir).await?;
+                ensure_node(&dir).await?;
             }
             client::send_input(&target, id, input, stdin, file, no_newline).await
         }
@@ -368,21 +370,21 @@ async fn main() -> Result<()> {
             timeout,
         } => {
             if is_local {
-                ensure_daemon(&dir).await?;
+                ensure_node(&dir).await?;
             }
             client::watch_session(&target, id, tail, no_history, timeout).await
         }
 
         Commands::Status { id, json } => {
             if is_local {
-                ensure_daemon(&dir).await?;
+                ensure_node(&dir).await?;
             }
             client::get_status(&target, id, json).await
         }
 
         #[cfg(feature = "mcp")]
         Commands::McpServer => {
-            ensure_daemon(&dir).await?;
+            ensure_node(&dir).await?;
             mcp_server::run_mcp_server(dir).await
         }
 
@@ -488,12 +490,12 @@ fn handle_server_action(action: ServerAction, data_dir: &std::path::Path) -> Res
     }
 }
 
-/// Ensure the daemon is running, starting it if necessary.
-async fn ensure_daemon(data_dir: &PathBuf) -> Result<()> {
+/// Ensure the node is running, starting it if necessary.
+async fn ensure_node(data_dir: &PathBuf) -> Result<()> {
     let sock = data_dir.join("server.sock");
-    let _pid_file = data_dir.join("daemon.pid");
+    let _pid_file = data_dir.join("node.pid");
 
-    // Check if daemon is already running
+    // Check if node is already running
     if sock.exists() {
         // Try connecting
         if tokio::net::UnixStream::connect(&sock).await.is_ok() {
@@ -503,19 +505,19 @@ async fn ensure_daemon(data_dir: &PathBuf) -> Result<()> {
         let _ = std::fs::remove_file(&sock);
     }
 
-    // Start daemon in background
+    // Start node in background
     std::fs::create_dir_all(data_dir)?;
 
     let exe = std::env::current_exe().context("finding current executable")?;
     let child = std::process::Command::new(exe)
-        .arg("daemon")
+        .arg("node")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn()
-        .context("spawning daemon")?;
+        .context("spawning node")?;
 
-    eprintln!("[cw] daemon started (pid {})", child.id());
+    eprintln!("[cw] node started (pid {})", child.id());
 
     // Wait for socket to appear
     for _ in 0..50 {
@@ -525,5 +527,5 @@ async fn ensure_daemon(data_dir: &PathBuf) -> Result<()> {
         }
     }
 
-    bail!("daemon failed to start (socket not available after 5s)")
+    bail!("node failed to start (socket not available after 5s)")
 }

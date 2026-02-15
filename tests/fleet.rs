@@ -10,9 +10,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use codewire::config::{validate_daemon_name, DaemonConfig, NatsConfig};
+use codewire::config::{validate_node_name, NodeConfig, NatsConfig};
 use codewire::connection::{FrameReader, FrameWriter};
-use codewire::daemon::Daemon;
+use codewire::node::Node;
 use codewire::fleet::connect_nats;
 use codewire::fleet_client::{discover_fleet, fleet_request, parse_fleet_target};
 use codewire::protocol::{self, FleetRequest, FleetResponse, Frame, Request, Response};
@@ -50,8 +50,8 @@ fn temp_dir(name: &str) -> PathBuf {
     dir
 }
 
-fn test_daemon_config(name: &str) -> DaemonConfig {
-    DaemonConfig {
+fn test_node_config(name: &str) -> NodeConfig {
+    NodeConfig {
         name: name.to_string(),
         listen: None,
         external_url: Some(format!("wss://{}.test.example.com/ws", name)),
@@ -64,15 +64,15 @@ fn find_available_port() -> u16 {
     listener.local_addr().unwrap().port()
 }
 
-/// Start a full daemon (Unix socket + WS + NATS fleet) and return (sock_path, ws_port).
-async fn start_fleet_daemon(data_dir: &Path, daemon_name: &str) -> (PathBuf, u16) {
+/// Start a full node (Unix socket + WS + NATS fleet) and return (sock_path, ws_port).
+async fn start_fleet_node(data_dir: &Path, node_name: &str) -> (PathBuf, u16) {
     let port = find_available_port();
     let nats = nats_config();
 
     // Write config with WS + NATS + fleet
     let config = format!(
-        r#"[daemon]
-name = "{daemon_name}"
+        r#"[node]
+name = "{node_name}"
 listen = "127.0.0.1:{port}"
 external_url = "ws://127.0.0.1:{port}/ws"
 
@@ -83,10 +83,10 @@ url = "{}"
     );
     std::fs::write(data_dir.join("config.toml"), config).unwrap();
 
-    let daemon = Daemon::new(data_dir).unwrap();
+    let node = Node::new(data_dir).unwrap();
     let sock_path = data_dir.join("server.sock");
     tokio::spawn(async move {
-        daemon.run().await.unwrap();
+        node.run().await.unwrap();
     });
 
     // Wait for Unix socket
@@ -152,41 +152,41 @@ async fn ws_request(port: u16, token: &str, req: &Request) -> Response {
 // ===========================================================================
 
 #[test]
-fn test_validate_daemon_name_valid() {
-    assert!(validate_daemon_name("my-daemon").is_ok());
-    assert!(validate_daemon_name("daemon_1").is_ok());
-    assert!(validate_daemon_name("gpu-box").is_ok());
-    assert!(validate_daemon_name("a").is_ok());
+fn test_validate_node_name_valid() {
+    assert!(validate_node_name("my-node").is_ok());
+    assert!(validate_node_name("node_1").is_ok());
+    assert!(validate_node_name("gpu-box").is_ok());
+    assert!(validate_node_name("a").is_ok());
 }
 
 #[test]
-fn test_validate_daemon_name_invalid() {
-    assert!(validate_daemon_name("").is_err());
-    assert!(validate_daemon_name("my.daemon").is_err());
-    assert!(validate_daemon_name("my daemon").is_err());
-    assert!(validate_daemon_name("my*daemon").is_err());
-    assert!(validate_daemon_name("my>daemon").is_err());
+fn test_validate_node_name_invalid() {
+    assert!(validate_node_name("").is_err());
+    assert!(validate_node_name("my.node").is_err());
+    assert!(validate_node_name("my node").is_err());
+    assert!(validate_node_name("my*node").is_err());
+    assert!(validate_node_name("my>node").is_err());
 }
 
 #[test]
 fn test_parse_fleet_target_valid() {
-    let (daemon, id) = parse_fleet_target("gpu-box:42").unwrap();
-    assert_eq!(daemon, "gpu-box");
+    let (node, id) = parse_fleet_target("gpu-box:42").unwrap();
+    assert_eq!(node, "gpu-box");
     assert_eq!(id, 42);
 }
 
 #[test]
 fn test_parse_fleet_target_invalid() {
     assert!(parse_fleet_target("no-colon").is_err());
-    assert!(parse_fleet_target("daemon:abc").is_err());
+    assert!(parse_fleet_target("node:abc").is_err());
 }
 
 // ===========================================================================
-// NATS fleet tests (standalone fleet module, no full daemon)
+// NATS fleet tests (standalone fleet module, no full node)
 // ===========================================================================
 
 #[tokio::test]
-async fn test_fleet_discover_two_daemons() {
+async fn test_fleet_discover_two_nodes() {
     let client = require_nats().await;
     let nats_config = nats_config();
 
@@ -198,8 +198,8 @@ async fn test_fleet_discover_two_daemons() {
     let (manager_b, _rx_b) = SessionManager::new(dir_b).unwrap();
     let manager_b = Arc::new(manager_b);
 
-    let config_a = test_daemon_config("e2e-disc-a");
-    let config_b = test_daemon_config("e2e-disc-b");
+    let config_a = test_node_config("e2e-disc-a");
+    let config_b = test_node_config("e2e-disc-b");
 
     let nats_a = nats_config.clone();
     let cfg_a = config_a.clone();
@@ -215,23 +215,23 @@ async fn test_fleet_discover_two_daemons() {
 
     tokio::time::sleep(Duration::from_millis(500)).await;
 
-    let daemons = discover_fleet(&client, Duration::from_secs(2))
+    let nodes = discover_fleet(&client, Duration::from_secs(2))
         .await
         .unwrap();
 
-    let names: Vec<&str> = daemons.iter().map(|d| d.name.as_str()).collect();
+    let names: Vec<&str> = nodes.iter().map(|d| d.name.as_str()).collect();
     assert!(
         names.contains(&"e2e-disc-a"),
-        "missing daemon A: {:?}",
+        "missing node A: {:?}",
         names
     );
     assert!(
         names.contains(&"e2e-disc-b"),
-        "missing daemon B: {:?}",
+        "missing node B: {:?}",
         names
     );
 
-    let a = daemons.iter().find(|d| d.name == "e2e-disc-a").unwrap();
+    let a = nodes.iter().find(|d| d.name == "e2e-disc-a").unwrap();
     assert_eq!(
         a.external_url.as_deref(),
         Some("wss://e2e-disc-a.test.example.com/ws")
@@ -249,7 +249,7 @@ async fn test_fleet_launch_and_list() {
     let dir = temp_dir("fleet-launch");
     let (manager, _rx) = SessionManager::new(dir).unwrap();
     let manager = Arc::new(manager);
-    let config = test_daemon_config("e2e-launcher");
+    let config = test_node_config("e2e-launcher");
 
     let nats_cfg = nats_config.clone();
     let cfg = config.clone();
@@ -269,8 +269,8 @@ async fn test_fleet_launch_and_list() {
         .unwrap();
 
     let session_id = match resp {
-        FleetResponse::Launched { daemon, id } => {
-            assert_eq!(daemon, "e2e-launcher");
+        FleetResponse::Launched { node, id } => {
+            assert_eq!(node, "e2e-launcher");
             id
         }
         other => panic!("expected Launched, got: {:?}", other),
@@ -287,8 +287,8 @@ async fn test_fleet_launch_and_list() {
     .unwrap();
 
     match resp {
-        FleetResponse::SessionList { daemon, sessions } => {
-            assert_eq!(daemon, "e2e-launcher");
+        FleetResponse::SessionList { node, sessions } => {
+            assert_eq!(node, "e2e-launcher");
             assert!(sessions.iter().any(|s| s.id == session_id));
         }
         other => panic!("expected SessionList, got: {:?}", other),
@@ -305,7 +305,7 @@ async fn test_fleet_kill_session() {
     let dir = temp_dir("fleet-kill");
     let (manager, _rx) = SessionManager::new(dir).unwrap();
     let manager = Arc::new(manager);
-    let config = test_daemon_config("e2e-killer");
+    let config = test_node_config("e2e-killer");
 
     let nats_cfg = nats_config.clone();
     let cfg = config.clone();
@@ -339,8 +339,8 @@ async fn test_fleet_kill_session() {
     .unwrap();
 
     match resp {
-        FleetResponse::Killed { daemon, id: killed } => {
-            assert_eq!(daemon, "e2e-killer");
+        FleetResponse::Killed { node, id: killed } => {
+            assert_eq!(node, "e2e-killer");
             assert_eq!(killed, id);
         }
         other => panic!("expected Killed, got: {:?}", other),
@@ -357,7 +357,7 @@ async fn test_fleet_get_status() {
     let dir = temp_dir("fleet-status");
     let (manager, _rx) = SessionManager::new(dir).unwrap();
     let manager = Arc::new(manager);
-    let config = test_daemon_config("e2e-status");
+    let config = test_node_config("e2e-status");
 
     let nats_cfg = nats_config.clone();
     let cfg = config.clone();
@@ -397,8 +397,8 @@ async fn test_fleet_get_status() {
     .unwrap();
 
     match resp {
-        FleetResponse::SessionStatus { daemon, info, .. } => {
-            assert_eq!(daemon, "e2e-status");
+        FleetResponse::SessionStatus { node, info, .. } => {
+            assert_eq!(node, "e2e-status");
             assert_eq!(info.id, id);
             assert_eq!(info.status, "running");
         }
@@ -409,28 +409,28 @@ async fn test_fleet_get_status() {
 }
 
 // ===========================================================================
-// E2E tests: Full daemon with WS + NATS (docker compose required)
+// E2E tests: Full node with WS + NATS (docker compose required)
 // ===========================================================================
 
-/// Full e2e: start a daemon with WS+NATS, discover via NATS, launch via NATS,
+/// Full e2e: start a node with WS+NATS, discover via NATS, launch via NATS,
 /// list via WS, verify sessions match across both planes.
 #[tokio::test]
 async fn test_e2e_nats_discover_ws_list() {
     let _client = require_nats().await;
 
     let dir = temp_dir("e2e-nats-ws");
-    let (sock, port) = start_fleet_daemon(&dir, "e2e-full").await;
+    let (sock, port) = start_fleet_node(&dir, "e2e-full").await;
     let token = std::fs::read_to_string(dir.join("token")).unwrap();
 
     // Discover via NATS
     let client = connect_nats(&nats_config()).await.unwrap();
-    let daemons = discover_fleet(&client, Duration::from_secs(2))
+    let nodes = discover_fleet(&client, Duration::from_secs(2))
         .await
         .unwrap();
-    let our_daemon = daemons.iter().find(|d| d.name == "e2e-full");
-    assert!(our_daemon.is_some(), "daemon not found via NATS discover");
+    let our_node = nodes.iter().find(|d| d.name == "e2e-full");
+    assert!(our_node.is_some(), "node not found via NATS discover");
     assert_eq!(
-        our_daemon.unwrap().external_url.as_deref(),
+        our_node.unwrap().external_url.as_deref(),
         Some(format!("ws://127.0.0.1:{}/ws", port).as_str())
     );
 
@@ -491,7 +491,7 @@ async fn test_e2e_ws_launch_nats_discover() {
     let _client = require_nats().await;
 
     let dir = temp_dir("e2e-ws-nats");
-    let (_sock, port) = start_fleet_daemon(&dir, "e2e-cross").await;
+    let (_sock, port) = start_fleet_node(&dir, "e2e-cross").await;
     let token = std::fs::read_to_string(dir.join("token")).unwrap();
 
     // Launch via WS
@@ -517,12 +517,12 @@ async fn test_e2e_ws_launch_nats_discover() {
 
     // Session should appear in NATS discover
     let client = connect_nats(&nats_config()).await.unwrap();
-    let daemons = discover_fleet(&client, Duration::from_secs(2))
+    let nodes = discover_fleet(&client, Duration::from_secs(2))
         .await
         .unwrap();
-    let daemon = daemons.iter().find(|d| d.name == "e2e-cross").unwrap();
+    let node = nodes.iter().find(|d| d.name == "e2e-cross").unwrap();
     assert!(
-        daemon.sessions.iter().any(|s| s.id == ws_id),
+        node.sessions.iter().any(|s| s.id == ws_id),
         "WS-launched session {} not visible in NATS discover",
         ws_id
     );
@@ -547,19 +547,19 @@ async fn test_e2e_ws_launch_nats_discover() {
     ws_request(port, &token, &Request::Kill { id: ws_id }).await;
 }
 
-/// Full e2e: two daemons, verify independent fleet discovery.
+/// Full e2e: two nodes, verify independent fleet discovery.
 #[tokio::test]
-async fn test_e2e_multi_daemon_fleet() {
+async fn test_e2e_multi_node_fleet() {
     let _client = require_nats().await;
 
     let dir_a = temp_dir("e2e-multi-a");
     let dir_b = temp_dir("e2e-multi-b");
-    let (_sock_a, port_a) = start_fleet_daemon(&dir_a, "e2e-alpha").await;
-    let (_sock_b, port_b) = start_fleet_daemon(&dir_b, "e2e-beta").await;
+    let (_sock_a, port_a) = start_fleet_node(&dir_a, "e2e-alpha").await;
+    let (_sock_b, port_b) = start_fleet_node(&dir_b, "e2e-beta").await;
     let token_a = std::fs::read_to_string(dir_a.join("token")).unwrap();
     let token_b = std::fs::read_to_string(dir_b.join("token")).unwrap();
 
-    // Launch on each daemon via WS
+    // Launch on each node via WS
     let resp_a = ws_request(
         port_a,
         &token_a,
@@ -592,12 +592,12 @@ async fn test_e2e_multi_daemon_fleet() {
 
     // Fleet discover should find both
     let client = connect_nats(&nats_config()).await.unwrap();
-    let daemons = discover_fleet(&client, Duration::from_secs(2))
+    let nodes = discover_fleet(&client, Duration::from_secs(2))
         .await
         .unwrap();
 
-    let alpha = daemons.iter().find(|d| d.name == "e2e-alpha");
-    let beta = daemons.iter().find(|d| d.name == "e2e-beta");
+    let alpha = nodes.iter().find(|d| d.name == "e2e-alpha");
+    let beta = nodes.iter().find(|d| d.name == "e2e-beta");
     assert!(alpha.is_some(), "alpha not found in fleet");
     assert!(beta.is_some(), "beta not found in fleet");
     assert!(alpha.unwrap().sessions.iter().any(|s| s.id == id_a));
@@ -634,7 +634,7 @@ async fn test_e2e_nats_launch_ws_attach() {
     let _client = require_nats().await;
 
     let dir = temp_dir("e2e-attach");
-    let (_sock, port) = start_fleet_daemon(&dir, "e2e-attach").await;
+    let (_sock, port) = start_fleet_node(&dir, "e2e-attach").await;
     let token = std::fs::read_to_string(dir.join("token")).unwrap();
 
     // Launch a session that waits, then produces output (so attach happens first)
@@ -732,7 +732,7 @@ async fn test_e2e_fleet_error_response() {
     let _client = require_nats().await;
 
     let dir = temp_dir("e2e-err");
-    let (_sock, _port) = start_fleet_daemon(&dir, "e2e-errors").await;
+    let (_sock, _port) = start_fleet_node(&dir, "e2e-errors").await;
 
     let client = connect_nats(&nats_config()).await.unwrap();
 
@@ -747,8 +747,8 @@ async fn test_e2e_fleet_error_response() {
     .unwrap();
 
     match resp {
-        FleetResponse::Error { daemon, message } => {
-            assert_eq!(daemon, "e2e-errors");
+        FleetResponse::Error { node, message } => {
+            assert_eq!(node, "e2e-errors");
             assert!(message.contains("99999") || message.to_lowercase().contains("not found"));
         }
         other => panic!("expected Error, got: {:?}", other),
@@ -778,17 +778,17 @@ async fn test_node_to_node_communication() {
 
     let dir_a = temp_dir("n2n-a");
     let dir_b = temp_dir("n2n-b");
-    let (_sock_a, _port_a) = start_fleet_daemon(&dir_a, "node-alpha").await;
-    let (_sock_b, _port_b) = start_fleet_daemon(&dir_b, "node-beta").await;
+    let (_sock_a, _port_a) = start_fleet_node(&dir_a, "node-alpha").await;
+    let (_sock_b, _port_b) = start_fleet_node(&dir_b, "node-beta").await;
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let client = connect_nats(&nats_config()).await.unwrap();
 
     // Both nodes visible via fleet discover
-    let daemons = discover_fleet(&client, Duration::from_secs(3))
+    let nodes = discover_fleet(&client, Duration::from_secs(3))
         .await
         .unwrap();
-    let names: Vec<&str> = daemons.iter().map(|d| d.name.as_str()).collect();
+    let names: Vec<&str> = nodes.iter().map(|d| d.name.as_str()).collect();
     assert!(
         names.contains(&"node-alpha"),
         "missing node-alpha: {:?}",
@@ -954,7 +954,7 @@ async fn test_session_round_robin() {
     let _client = require_nats().await;
 
     let dir = temp_dir("rr");
-    let (_sock, port) = start_fleet_daemon(&dir, "round-robin").await;
+    let (_sock, port) = start_fleet_node(&dir, "round-robin").await;
     let token = std::fs::read_to_string(dir.join("token")).unwrap();
     let client = connect_nats(&nats_config()).await.unwrap();
 
@@ -1080,8 +1080,8 @@ async fn test_session_round_robin() {
 // ===========================================================================
 // Docker Compose e2e tests (requires `docker compose up -d`)
 // ===========================================================================
-// These tests connect to the containerized codewire daemon running in Docker
-// Compose. The daemon has Claude Code installed and is connected to NATS.
+// These tests connect to the containerized codewire node running in Docker
+// Compose. The node has Claude Code installed and is connected to NATS.
 //
 // Prerequisites:
 //   1. Copy .env.example to .env and set ANTHROPIC_API_KEY
@@ -1090,23 +1090,23 @@ async fn test_session_round_robin() {
 //
 // The container uses a known auth token: "test-token-for-e2e"
 
-const DOCKER_COMPOSE_DAEMON: &str = "docker-test";
+const DOCKER_COMPOSE_NODE: &str = "docker-test";
 const DOCKER_COMPOSE_TOKEN: &str = "test-token-for-e2e";
 const DOCKER_COMPOSE_WS_PORT: u16 = 9100;
 
-/// Check if docker-compose stack is running by trying to discover the daemon.
+/// Check if docker-compose stack is running by trying to discover the node.
 async fn require_docker_compose() -> async_nats::Client {
     let client = require_nats().await;
 
-    // Try to discover the docker-compose daemon
-    let daemons = discover_fleet(&client, Duration::from_secs(3))
+    // Try to discover the docker-compose node
+    let nodes = discover_fleet(&client, Duration::from_secs(3))
         .await
         .unwrap();
-    let found = daemons.iter().any(|d| d.name == DOCKER_COMPOSE_DAEMON);
+    let found = nodes.iter().any(|d| d.name == DOCKER_COMPOSE_NODE);
     if !found {
         eprintln!(
-            "Docker Compose daemon '{}' not found. Run: docker compose up -d --build",
-            DOCKER_COMPOSE_DAEMON
+            "Docker Compose node '{}' not found. Run: docker compose up -d --build",
+            DOCKER_COMPOSE_NODE
         );
         std::process::exit(0);
     }
@@ -1114,24 +1114,24 @@ async fn require_docker_compose() -> async_nats::Client {
     client
 }
 
-/// Docker Compose e2e: discover containerized daemon via NATS
+/// Docker Compose e2e: discover containerized node via NATS
 #[tokio::test]
 async fn test_docker_compose_discover() {
     let client = require_docker_compose().await;
 
-    let daemons = discover_fleet(&client, Duration::from_secs(3))
+    let nodes = discover_fleet(&client, Duration::from_secs(3))
         .await
         .unwrap();
-    let daemon = daemons
+    let node = nodes
         .iter()
-        .find(|d| d.name == DOCKER_COMPOSE_DAEMON)
+        .find(|d| d.name == DOCKER_COMPOSE_NODE)
         .unwrap();
 
-    assert_eq!(daemon.name, DOCKER_COMPOSE_DAEMON);
-    assert!(daemon.external_url.is_some());
+    assert_eq!(node.name, DOCKER_COMPOSE_NODE);
+    assert!(node.external_url.is_some());
     eprintln!(
-        "Discovered daemon: {} (url: {:?})",
-        daemon.name, daemon.external_url
+        "Discovered node: {} (url: {:?})",
+        node.name, node.external_url
     );
 }
 
@@ -1140,7 +1140,7 @@ async fn test_docker_compose_discover() {
 async fn test_docker_compose_launch_and_watch() {
     let client = require_docker_compose().await;
 
-    // Launch a command on the containerized daemon via NATS.
+    // Launch a command on the containerized node via NATS.
     // Use bash -c with repeated output so the session lives long enough for WS to connect.
     let req = FleetRequest::Launch {
         command: vec![
@@ -1152,7 +1152,7 @@ async fn test_docker_compose_launch_and_watch() {
     };
     let resp = fleet_request(
         &client,
-        DOCKER_COMPOSE_DAEMON,
+        DOCKER_COMPOSE_NODE,
         &req,
         Duration::from_secs(10),
     )
@@ -1220,7 +1220,7 @@ async fn test_docker_compose_launch_and_watch() {
 }
 
 /// Docker Compose e2e: real Claude session via NATS fleet.
-/// Launches `claude -p` on the containerized daemon, watches output via WS.
+/// Launches `claude -p` on the containerized node, watches output via WS.
 ///
 /// Run with: set -a && source .env && set +a && cargo test --features nats -- test_docker_compose_real_claude --nocapture
 #[tokio::test]
@@ -1233,7 +1233,7 @@ async fn test_docker_compose_real_claude() {
 
     let client = require_docker_compose().await;
 
-    // Launch claude on the containerized daemon via NATS
+    // Launch claude on the containerized node via NATS
     let req = FleetRequest::Launch {
         command: vec![
             "claude".into(),
@@ -1245,7 +1245,7 @@ async fn test_docker_compose_real_claude() {
     };
     let resp = fleet_request(
         &client,
-        DOCKER_COMPOSE_DAEMON,
+        DOCKER_COMPOSE_NODE,
         &req,
         Duration::from_secs(10),
     )
@@ -1327,7 +1327,7 @@ async fn test_docker_compose_real_claude() {
     // Clean up
     let _ = fleet_request(
         &client,
-        DOCKER_COMPOSE_DAEMON,
+        DOCKER_COMPOSE_NODE,
         &FleetRequest::Kill { id },
         Duration::from_secs(5),
     )
@@ -1358,7 +1358,7 @@ async fn test_docker_compose_round_robin() {
         };
         let resp = fleet_request(
             &client,
-            DOCKER_COMPOSE_DAEMON,
+            DOCKER_COMPOSE_NODE,
             &req,
             Duration::from_secs(10),
         )
@@ -1381,7 +1381,7 @@ async fn test_docker_compose_round_robin() {
     };
     fleet_request(
         &client,
-        DOCKER_COMPOSE_DAEMON,
+        DOCKER_COMPOSE_NODE,
         &send,
         Duration::from_secs(5),
     )
@@ -1416,7 +1416,7 @@ async fn test_docker_compose_round_robin() {
     };
     fleet_request(
         &client,
-        DOCKER_COMPOSE_DAEMON,
+        DOCKER_COMPOSE_NODE,
         &send,
         Duration::from_secs(5),
     )
@@ -1451,7 +1451,7 @@ async fn test_docker_compose_round_robin() {
     };
     fleet_request(
         &client,
-        DOCKER_COMPOSE_DAEMON,
+        DOCKER_COMPOSE_NODE,
         &send,
         Duration::from_secs(5),
     )
@@ -1486,7 +1486,7 @@ async fn test_docker_compose_round_robin() {
     };
     fleet_request(
         &client,
-        DOCKER_COMPOSE_DAEMON,
+        DOCKER_COMPOSE_NODE,
         &send,
         Duration::from_secs(5),
     )
@@ -1512,7 +1512,7 @@ async fn test_docker_compose_round_robin() {
     for id in &ids {
         let _ = fleet_request(
             &client,
-            DOCKER_COMPOSE_DAEMON,
+            DOCKER_COMPOSE_NODE,
             &FleetRequest::Kill { id: *id },
             Duration::from_secs(5),
         )

@@ -21,4 +21,4 @@ ENV TERM=xterm-256color
 ENV HOME=/home/codewire
 
 ENTRYPOINT ["cw"]
-CMD ["daemon"]
+CMD ["node"]

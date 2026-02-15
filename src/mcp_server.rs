@@ -288,7 +288,7 @@ async fn handle_tool_call(data_dir: &std::path::Path, params: Option<Value>) -> 
 
     match name {
         "codewire_list_sessions" => {
-            let sessions = daemon_request(data_dir, &Request::ListSessions).await?;
+            let sessions = node_request(data_dir, &Request::ListSessions).await?;
             match sessions {
                 Response::SessionList { sessions } => {
                     let filter = arguments
@@ -326,7 +326,7 @@ async fn handle_tool_call(data_dir: &std::path::Path, params: Option<Value>) -> 
                 .and_then(|v| v.as_u64())
                 .unwrap_or(50000) as usize;
 
-            let resp = daemon_request(
+            let resp = node_request(
                 data_dir,
                 &Request::Logs {
                     id: session_id,
@@ -370,7 +370,7 @@ async fn handle_tool_call(data_dir: &std::path::Path, params: Option<Value>) -> 
                 data.push(b'\n');
             }
 
-            let resp = daemon_request(
+            let resp = node_request(
                 data_dir,
                 &Request::SendInput {
                     id: session_id,
@@ -427,7 +427,7 @@ async fn handle_tool_call(data_dir: &std::path::Path, params: Option<Value>) -> 
                 .ok_or_else(|| anyhow::anyhow!("missing session_id"))?
                 as u32;
 
-            let resp = daemon_request(data_dir, &Request::GetStatus { id: session_id }).await?;
+            let resp = node_request(data_dir, &Request::GetStatus { id: session_id }).await?;
 
             match resp {
                 Response::SessionStatus { info, output_size } => {
@@ -461,7 +461,7 @@ async fn handle_tool_call(data_dir: &std::path::Path, params: Option<Value>) -> 
                         .unwrap_or_else(|_| ".".to_string())
                 });
 
-            let resp = daemon_request(
+            let resp = node_request(
                 data_dir,
                 &Request::Launch {
                     command,
@@ -484,7 +484,7 @@ async fn handle_tool_call(data_dir: &std::path::Path, params: Option<Value>) -> 
                 .ok_or_else(|| anyhow::anyhow!("missing session_id"))?
                 as u32;
 
-            let resp = daemon_request(data_dir, &Request::Kill { id: session_id }).await?;
+            let resp = node_request(data_dir, &Request::Kill { id: session_id }).await?;
 
             match resp {
                 Response::Killed { id } => Ok(format!("Killed session {}", id)),
@@ -497,7 +497,7 @@ async fn handle_tool_call(data_dir: &std::path::Path, params: Option<Value>) -> 
     }
 }
 
-async fn daemon_request(data_dir: &std::path::Path, req: &Request) -> Result<Response> {
+async fn node_request(data_dir: &std::path::Path, req: &Request) -> Result<Response> {
     let sock = data_dir.join("server.sock");
     let stream = tokio::net::UnixStream::connect(&sock)
         .await
@@ -509,7 +509,7 @@ async fn daemon_request(data_dir: &std::path::Path, req: &Request) -> Result<Res
 
     let frame = crate::protocol::read_frame(&mut reader)
         .await?
-        .context("unexpected EOF from daemon")?;
+        .context("unexpected EOF from node")?;
 
     match frame {
         crate::protocol::Frame::Control(payload) => crate::protocol::parse_response(&payload),

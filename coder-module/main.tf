@@ -81,8 +81,8 @@ resource "coder_script" "codewire" {
     fi
 
     # Start the codewire daemon in the background
-    echo "Starting codewire daemon..."
-    cw daemon &
+    echo "Starting codewire node..."
+    cw node &
   EOT
   run_on_start = true
 }

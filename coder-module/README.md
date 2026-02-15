@@ -21,7 +21,7 @@ module "codewire" {
 ## What this module does
 
 1. Installs the `cw` binary via the official install script
-2. Starts the codewire daemon (`cw daemon`) on workspace start
+2. Starts the codewire node (`cw node`) on workspace start
 3. Adds a **Codewire** app button to the Coder dashboard that launches a new terminal session
 
 ## Variables

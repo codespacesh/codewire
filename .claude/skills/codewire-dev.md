@@ -15,7 +15,7 @@ codewire/
 ├── src/
 │   ├── main.rs       # CLI definition (clap)
 │   ├── client.rs     # Client commands (launch, attach, list, etc.)
-│   ├── daemon.rs     # Daemon server (session management)
+│   ├── node.rs       # Node server (session management)
 │   ├── protocol.rs   # Wire protocol (frames, requests, responses)
 │   ├── session.rs    # Session state machine
 │   └── terminal.rs   # PTY and raw mode handling
@@ -94,7 +94,7 @@ NewCommand { arg1: Type1, arg2: Type2 },
 NewCommandResult { data: String },
 ```
 
-4. **Add daemon handler** (`src/daemon.rs`):
+4. **Add node handler** (`src/node.rs`):
 ```rust
 Request::NewCommand { arg1, arg2 } => {
     // Implementation

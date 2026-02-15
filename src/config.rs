@@ -6,14 +6,14 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
     #[serde(default)]
-    pub daemon: DaemonConfig,
+    pub node: NodeConfig,
     #[serde(default)]
     pub nats: Option<NatsConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DaemonConfig {
-    /// Human-readable name for this daemon (used in fleet discovery).
+pub struct NodeConfig {
+    /// Human-readable name for this node (used in fleet discovery).
     #[serde(default = "default_name")]
     pub name: String,
     /// WebSocket listen address (e.g. "0.0.0.0:9100"). None = no WebSocket listener.
@@ -23,7 +23,7 @@ pub struct DaemonConfig {
     pub external_url: Option<String>,
 }
 
-impl Default for DaemonConfig {
+impl Default for NodeConfig {
     fn default() -> Self {
         Self {
             name: default_name(),
@@ -33,15 +33,15 @@ impl Default for DaemonConfig {
     }
 }
 
-/// Validate daemon name for use in NATS subjects (`.` is the NATS delimiter).
-pub fn validate_daemon_name(name: &str) -> Result<()> {
+/// Validate node name for use in NATS subjects (`.` is the NATS delimiter).
+pub fn validate_node_name(name: &str) -> Result<()> {
     if name.is_empty()
         || !name
             .chars()
             .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
     {
         bail!(
-            "daemon name must be non-empty and alphanumeric (with - or _), got: {:?}",
+            "node name must be non-empty and alphanumeric (with - or _), got: {:?}",
             name
         );
     }
@@ -96,15 +96,15 @@ impl Config {
             Self::default()
         };
 
-        // Override daemon config from env vars
-        if let Ok(name) = std::env::var("CODEWIRE_DAEMON_NAME") {
-            config.daemon.name = name;
+        // Override node config from env vars
+        if let Ok(name) = std::env::var("CODEWIRE_NODE_NAME") {
+            config.node.name = name;
         }
-        if config.daemon.listen.is_none() {
-            config.daemon.listen = std::env::var("CODEWIRE_LISTEN").ok();
+        if config.node.listen.is_none() {
+            config.node.listen = std::env::var("CODEWIRE_LISTEN").ok();
         }
-        if config.daemon.external_url.is_none() {
-            config.daemon.external_url = std::env::var("CODEWIRE_EXTERNAL_URL").ok();
+        if config.node.external_url.is_none() {
+            config.node.external_url = std::env::var("CODEWIRE_EXTERNAL_URL").ok();
         }
 
         // Auto-discover NATS from env vars / well-known paths
@@ -112,7 +112,7 @@ impl Config {
             config.nats = auto_discover_nats();
         }
 
-        validate_daemon_name(&config.daemon.name)?;
+        validate_node_name(&config.node.name)?;
 
         Ok(config)
     }
