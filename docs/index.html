@@ -313,15 +313,15 @@ td code{font-size:12px}
     </div>
   </div>
 
-  <h3>Daemon</h3>
+  <h3>Node</h3>
   <div class="cmd-group">
     <div class="cmd-entry">
-      <div class="cmd-sig">cw daemon</div>
-      <div class="cmd-desc">Start the daemon process. Usually auto-started on first CLI invocation.</div>
+      <div class="cmd-sig">cw node</div>
+      <div class="cmd-desc">Start the node process. Usually auto-started on first CLI invocation.</div>
     </div>
     <div class="cmd-entry">
       <div class="cmd-sig">cw stop</div>
-      <div class="cmd-desc">Stop the running daemon gracefully.</div>
+      <div class="cmd-desc">Stop the running node gracefully.</div>
     </div>
   </div>
 
@@ -378,11 +378,11 @@ td code{font-size:12px}
 <section id="architecture">
   <h2>Architecture</h2>
 
-  <h3>Daemon Architecture</h3>
-  <p>A single Rust binary acts as both daemon and CLI client. The daemon manages PTY sessions and keeps processes alive regardless of client connections.</p>
+  <h3>Node Architecture</h3>
+  <p>A single Rust binary acts as both node and CLI client. The node manages PTY sessions and keeps processes alive regardless of client connections.</p>
 
-<div class="diagram" role="img" aria-label="Daemon architecture diagram">
-                       <span class="hl">cw daemon</span>
+<div class="diagram" role="img" aria-label="Node architecture diagram">
+                       <span class="hl">cw node</span>
                   <span class="dim">~/.codewire/server.sock</span>
 
   +----------------------------------------------+
@@ -476,8 +476,8 @@ td code{font-size:12px}
 
   <h3>Config File</h3>
   <p>Located at <code>~/.codewire/config.toml</code></p>
-  <div class="code-block"><pre><code><span class="cmt"># Daemon settings</span>
-<span class="kw">[daemon]</span>
+  <div class="code-block"><pre><code><span class="cmt"># Node settings</span>
+<span class="kw">[node]</span>
 <span class="flag">name</span> = <span class="str">"my-node"</span>                    <span class="cmt"># Node name for fleet (alphanumeric, -, _)</span>
 <span class="flag">listen</span> = <span class="str">"0.0.0.0:9100"</span>             <span class="cmt"># WebSocket listener address</span>
 <span class="flag">external_url</span> = <span class="str">"wss://host/ws"</span>      <span class="cmt"># Advertised URL for fleet attach</span>
@@ -492,9 +492,9 @@ td code{font-size:12px}
   <table>
     <thead><tr><th>Variable</th><th>Overrides</th></tr></thead>
     <tbody>
-      <tr><td><code>CODEWIRE_DAEMON_NAME</code></td><td>daemon.name</td></tr>
-      <tr><td><code>CODEWIRE_LISTEN</code></td><td>daemon.listen</td></tr>
-      <tr><td><code>CODEWIRE_EXTERNAL_URL</code></td><td>daemon.external_url</td></tr>
+      <tr><td><code>CODEWIRE_NODE_NAME</code></td><td>node.name</td></tr>
+      <tr><td><code>CODEWIRE_LISTEN</code></td><td>node.listen</td></tr>
+      <tr><td><code>CODEWIRE_EXTERNAL_URL</code></td><td>node.external_url</td></tr>
       <tr><td><code>CODEWIRE_TOKEN</code></td><td>Auth token (for containers)</td></tr>
       <tr><td><code>CODEWIRE_NATS_URL</code></td><td>nats.url</td></tr>
       <tr><td><code>CODEWIRE_NATS_TOKEN</code></td><td>nats.token</td></tr>
@@ -507,7 +507,7 @@ td code{font-size:12px}
 <div class="diagram" role="img" aria-label="Data directory layout">
 ~/.codewire/
 |-- server.sock           <span class="dim"># Unix domain socket</span>
-|-- daemon.pid            <span class="dim"># Daemon PID file</span>
+|-- node.pid              <span class="dim"># Node PID file</span>
 |-- token                 <span class="dim"># Auth token (mode 0600)</span>
 |-- config.toml           <span class="dim"># Configuration</span>
 |-- servers.toml          <span class="dim"># Saved remote servers</span>
@@ -520,7 +520,7 @@ td code{font-size:12px}
 </div>
 
   <h3>Auto-Discovery</h3>
-  <p>If <code>/etc/codewire/nats.creds</code> exists (e.g. mounted by a Coder template), the daemon automatically configures NATS:</p>
+  <p>If <code>/etc/codewire/nats.creds</code> exists (e.g. mounted by a Coder template), the node automatically configures NATS:</p>
   <div class="code-block"><pre><code><span class="flag">url</span> = <span class="str">"nats://nats.codespace-system:4222"</span>
 <span class="flag">creds_file</span> = <span class="str">"/etc/codewire/nats.creds"</span></code></pre><button class="copy-btn" onclick="copySnippet(this)">copy</button></div>
 </section>
@@ -533,7 +533,7 @@ td code{font-size:12px}
   <h3>NATS Setup</h3>
   <p>Point each node at a shared NATS server. Each node advertises itself and responds to fleet commands.</p>
   <div class="code-block"><pre><code><span class="cmt"># On each node: ~/.codewire/config.toml</span>
-<span class="kw">[daemon]</span>
+<span class="kw">[node]</span>
 <span class="flag">name</span> = <span class="str">"gpu-box"</span>
 <span class="flag">listen</span> = <span class="str">"0.0.0.0:9100"</span>
 <span class="flag">external_url</span> = <span class="str">"wss://gpu-box.example.com/ws"</span>
