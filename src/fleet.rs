@@ -5,8 +5,8 @@ use anyhow::{Context, Result};
 use futures::StreamExt;
 use tracing::{info, warn};
 
-use crate::config::{DaemonConfig, NatsConfig};
-use crate::protocol::{DaemonInfo, FleetRequest, FleetResponse};
+use crate::config::{NodeConfig, NatsConfig};
+use crate::protocol::{NodeInfo, FleetRequest, FleetResponse};
 use crate::session::SessionManager;
 
 /// Connect to NATS using the provided config.
@@ -35,15 +35,15 @@ pub async fn connect_nats(config: &NatsConfig) -> Result<async_nats::Client> {
         .context("connecting to NATS")
 }
 
-/// Run the fleet integration (called from Daemon::run).
+/// Run the fleet integration (called from Node::run).
 pub async fn run_fleet(
     nats_config: &NatsConfig,
-    daemon_config: &DaemonConfig,
+    node_config: &NodeConfig,
     manager: Arc<SessionManager>,
 ) -> Result<()> {
     let client = connect_nats(nats_config).await?;
     let start_time = Instant::now();
-    let name = &daemon_config.name;
+    let name = &node_config.name;
 
     info!(name, "NATS fleet registered");
 
@@ -53,7 +53,7 @@ pub async fn run_fleet(
 
     // Spawn heartbeat
     let hb_client = client.clone();
-    let hb_config = daemon_config.clone();
+    let hb_config = node_config.clone();
     let hb_manager = manager.clone();
     tokio::spawn(async move {
         heartbeat_loop(hb_client, &hb_config, &hb_manager, start_time).await;
@@ -63,10 +63,10 @@ pub async fn run_fleet(
     loop {
         tokio::select! {
             Some(msg) = discover_sub.next() => {
-                handle_message(msg, daemon_config, &manager, start_time, &client).await;
+                handle_message(msg, node_config, &manager, start_time, &client).await;
             }
             Some(msg) = direct_sub.next() => {
-                handle_message(msg, daemon_config, &manager, start_time, &client).await;
+                handle_message(msg, node_config, &manager, start_time, &client).await;
             }
         }
     }
@@ -74,7 +74,7 @@ pub async fn run_fleet(
 
 async fn handle_message(
     msg: async_nats::Message,
-    daemon_config: &DaemonConfig,
+    node_config: &NodeConfig,
     manager: &Arc<SessionManager>,
     start_time: Instant,
     client: &async_nats::Client,
@@ -84,20 +84,20 @@ async fn handle_message(
         return;
     };
 
-    let name = &daemon_config.name;
+    let name = &node_config.name;
     let response = match req {
         FleetRequest::Discover | FleetRequest::ListSessions => {
             let sessions = manager.list();
             if matches!(req, FleetRequest::Discover) {
-                FleetResponse::DaemonInfo(DaemonInfo {
+                FleetResponse::NodeInfo(NodeInfo {
                     name: name.clone(),
-                    external_url: daemon_config.external_url.clone(),
+                    external_url: node_config.external_url.clone(),
                     sessions,
                     uptime_secs: start_time.elapsed().as_secs(),
                 })
             } else {
                 FleetResponse::SessionList {
-                    daemon: name.clone(),
+                    node: name.clone(),
                     sessions,
                 }
             }
@@ -107,43 +107,43 @@ async fn handle_message(
             working_dir,
         } => match manager.launch(command, working_dir) {
             Ok(id) => FleetResponse::Launched {
-                daemon: name.clone(),
+                node: name.clone(),
                 id,
             },
             Err(e) => FleetResponse::Error {
-                daemon: name.clone(),
+                node: name.clone(),
                 message: e.to_string(),
             },
         },
         FleetRequest::Kill { id } => match manager.kill(id) {
             Ok(()) => FleetResponse::Killed {
-                daemon: name.clone(),
+                node: name.clone(),
                 id,
             },
             Err(e) => FleetResponse::Error {
-                daemon: name.clone(),
+                node: name.clone(),
                 message: e.to_string(),
             },
         },
         FleetRequest::GetStatus { id } => match manager.get_status(id) {
             Ok((info, output_size)) => FleetResponse::SessionStatus {
-                daemon: name.clone(),
+                node: name.clone(),
                 info,
                 output_size,
             },
             Err(e) => FleetResponse::Error {
-                daemon: name.clone(),
+                node: name.clone(),
                 message: e.to_string(),
             },
         },
         FleetRequest::SendInput { id, data } => match manager.send_input(id, data) {
             Ok(bytes) => FleetResponse::InputSent {
-                daemon: name.clone(),
+                node: name.clone(),
                 id,
                 bytes,
             },
             Err(e) => FleetResponse::Error {
-                daemon: name.clone(),
+                node: name.clone(),
                 message: e.to_string(),
             },
         },
@@ -158,16 +158,16 @@ async fn handle_message(
 
 async fn heartbeat_loop(
     client: async_nats::Client,
-    daemon_config: &DaemonConfig,
+    node_config: &NodeConfig,
     manager: &Arc<SessionManager>,
     start_time: Instant,
 ) {
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
     loop {
         interval.tick().await;
-        let info = DaemonInfo {
-            name: daemon_config.name.clone(),
-            external_url: daemon_config.external_url.clone(),
+        let info = NodeInfo {
+            name: node_config.name.clone(),
+            external_url: node_config.external_url.clone(),
             sessions: manager.list(),
             uptime_secs: start_time.elapsed().as_secs(),
         };

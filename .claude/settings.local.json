@@ -54,7 +54,17 @@
       "Bash(./scripts/atmos-run:*)",
       "Bash(KUBECONFIG=/Users/noel/src/sonica/infra/kubeconfig-app.yaml kubectl rollout status:*)",
       "Bash(git stash:*)",
-      "Bash(git pull:*)"
+      "Bash(git pull:*)",
+      "Bash(git remote add:*)",
+      "Bash(ssh:*)",
+      "Bash(KUBECONFIG=/Users/noel/src/sonica/infra/kubeconfig-app.yaml kubectl get pods:*)",
+      "Bash(KUBECONFIG=/Users/noel/src/sonica/infra/kubeconfig-app.yaml kubectl get pod:*)",
+      "Bash(dig:*)",
+      "Bash(./scripts/doppler-run kubectl:*)",
+      "Bash(KUBECONFIG=/Users/noel/src/sonica/infra/kubeconfig-app.yaml kubectl get:*)",
+      "Bash(KUBECONFIG=/Users/noel/src/sonica/infra/kubeconfig-app.yaml kubectl cluster-info:*)",
+      "Bash(ls:*)",
+      "Bash(./scripts/doppler-run atmos terraform show:*)"
     ]
   },
   "enableAllProjectMcpServers": true,

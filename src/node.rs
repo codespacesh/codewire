@@ -12,7 +12,7 @@ use crate::connection::{FrameReader, FrameWriter};
 use crate::protocol::{self, Frame, Request, Response};
 use crate::session::{SessionManager, SessionStatus};
 
-pub struct Daemon {
+pub struct Node {
     manager: Arc<SessionManager>,
     socket_path: PathBuf,
     pid_path: PathBuf,
@@ -20,7 +20,7 @@ pub struct Daemon {
     data_dir: PathBuf,
 }
 
-impl Daemon {
+impl Node {
     pub fn new(data_dir: &Path) -> Result<Self> {
         let config = Config::load(data_dir)?;
         let (manager, persist_rx) = SessionManager::new(data_dir.to_path_buf())?;
@@ -38,7 +38,7 @@ impl Daemon {
         Ok(Self {
             manager,
             socket_path: data_dir.join("server.sock"),
-            pid_path: data_dir.join("daemon.pid"),
+            pid_path: data_dir.join("node.pid"),
             config,
             data_dir: data_dir.to_path_buf(),
         })
@@ -55,11 +55,11 @@ impl Daemon {
 
         let listener = UnixListener::bind(&self.socket_path).context("binding Unix socket")?;
 
-        info!(path = %self.socket_path.display(), "daemon listening on Unix socket");
+        info!(path = %self.socket_path.display(), "node listening on Unix socket");
 
         // Start WebSocket listener if configured
         #[cfg(feature = "ws")]
-        if let Some(ref listen_addr) = self.config.daemon.listen {
+        if let Some(ref listen_addr) = self.config.node.listen {
             let manager = self.manager.clone();
             let data_dir = self.data_dir.clone();
             let addr = listen_addr.clone();
@@ -74,10 +74,10 @@ impl Daemon {
         #[cfg(feature = "nats")]
         if let Some(ref nats_config) = self.config.nats {
             let manager = self.manager.clone();
-            let daemon_config = self.config.daemon.clone();
+            let node_config = self.config.node.clone();
             let nats_cfg = nats_config.clone();
             tokio::spawn(async move {
-                if let Err(e) = crate::fleet::run_fleet(&nats_cfg, &daemon_config, manager).await {
+                if let Err(e) = crate::fleet::run_fleet(&nats_cfg, &node_config, manager).await {
                     error!(?e, "NATS fleet error");
                 }
             });
@@ -114,7 +114,7 @@ impl Daemon {
     }
 }
 
-impl Drop for Daemon {
+impl Drop for Node {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.socket_path);
         let _ = std::fs::remove_file(&self.pid_path);

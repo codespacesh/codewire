@@ -28,7 +28,7 @@ impl StatusBar {
         }
     }
 
-    /// Returns the PTY size to report to the daemon.
+    /// Returns the PTY size to report to the node.
     /// One row shorter when the status bar is enabled.
     pub fn pty_size(&self) -> (u16, u16) {
         if self.enabled {

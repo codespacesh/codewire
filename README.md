@@ -2,7 +2,7 @@
 
 Persistent process server for AI coding agents. Like tmux, but purpose-built for long-running LLM processes — with native terminal scrolling, copy/paste, and no weird key chords.
 
-Codewire runs as a daemon inside your development environment (e.g., a Coder workspace). You launch AI agent sessions with a prompt, and they keep running even if you disconnect. Reconnect anytime to pick up where you left off.
+Codewire runs as a background node inside your development environment (e.g., a Coder workspace). You launch AI agent sessions with a prompt, and they keep running even if you disconnect. Reconnect anytime to pick up where you left off.
 
 Works with any CLI-based AI agent: Claude Code, Aider, Goose, Codex, or anything else.
 
@@ -183,7 +183,7 @@ cw mcp-server
 
 See [MCP Integration](#mcp-integration) section below for details.
 
-### `cw start` / `cw daemon`
+### `cw start` / `cw node`
 
 Start the daemon manually. Usually you don't need this — the daemon auto-starts on first CLI invocation.
 
@@ -220,7 +220,7 @@ cw --server my-gpu attach 1
 
 Codewire is a single Rust binary (`cw`) that acts as both daemon and CLI client.
 
-**Daemon** (`cw daemon`): Listens on a Unix socket at `~/.codewire/server.sock`. Manages PTY sessions — each AI agent runs in its own pseudoterminal. The daemon owns the master side of each PTY and keeps processes alive regardless of client connections.
+**Node** (`cw node`): Listens on a Unix socket at `~/.codewire/server.sock`. Manages PTY sessions — each AI agent runs in its own pseudoterminal. The node owns the master side of each PTY and keeps processes alive regardless of client connections.
 
 **Client** (`cw launch`, `attach`, etc.): Connects to the daemon's Unix socket. When you attach, the client puts your terminal in raw mode and bridges your stdin/stdout directly to the PTY. Your terminal emulator handles all rendering — that's why scrolling and copy/paste work natively.
 
@@ -250,7 +250,7 @@ Communication between client and daemon uses a frame-based binary protocol over 
 ```
 ~/.codewire/
 ├── server.sock           # Unix domain socket
-├── daemon.pid            # Daemon PID file
+├── node.pid              # Node PID file
 ├── sessions.json         # Session metadata
 └── sessions/
     ├── 1/
@@ -264,8 +264,8 @@ Communication between client and daemon uses a frame-based binary protocol over 
 All settings via `~/.codewire/config.toml` or environment variables:
 
 ```toml
-[daemon]
-name = "my-node"                    # CODEWIRE_DAEMON_NAME — node name for fleet
+[node]
+name = "my-node"                    # CODEWIRE_NODE_NAME — node name for fleet
 listen = "0.0.0.0:9100"             # CODEWIRE_LISTEN — WebSocket listener address
 external_url = "wss://host/ws"      # CODEWIRE_EXTERNAL_URL — advertised URL for fleet attach
 
@@ -335,8 +335,8 @@ cw fleet attach gpu-box:1
 
 | Subject | Direction | Purpose |
 |---------|-----------|---------|
-| `cw.fleet.discover` | Broadcast | Discovery — all nodes reply with `DaemonInfo` |
-| `cw.fleet.heartbeat` | Publish | Nodes publish `DaemonInfo` every 30s |
+| `cw.fleet.discover` | Broadcast | Discovery — all nodes reply with `NodeInfo` |
+| `cw.fleet.heartbeat` | Publish | Nodes publish `NodeInfo` every 30s |
 | `cw.<node>.list` | Request-reply | List sessions on a node |
 | `cw.<node>.launch` | Request-reply | Launch session on a node |
 | `cw.<node>.kill` | Request-reply | Kill session on a node |
@@ -562,7 +562,7 @@ cargo clippy --all-targets --all-features
 ./tests/manual_test.sh ./target/release/cw
 
 # Run with logging
-RUST_LOG=codewire=debug cw daemon
+RUST_LOG=codewire=debug cw node
 ```
 
 A comprehensive [codewire-dev skill](.claude/skills/codewire-dev.md) is available for Claude Code with project structure, implementation guides, and testing conventions.

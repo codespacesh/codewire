@@ -10,10 +10,10 @@ use crate::status_bar::StatusBar;
 use crate::terminal::{resize_signal, terminal_size, DetachDetector, RawModeGuard};
 
 // ---------------------------------------------------------------------------
-// Connection target — local daemon or remote server
+// Connection target — local node or remote server
 // ---------------------------------------------------------------------------
 
-/// Where to connect — local daemon or remote server.
+/// Where to connect — local node or remote server.
 #[derive(Clone)]
 pub enum Target {
     Local(PathBuf),
@@ -30,7 +30,7 @@ impl Target {
                     .await
                     .with_context(|| {
                         format!(
-                            "Failed to connect to CodeWire daemon at {}\nThe daemon may not be running. It should auto-start on first command.",
+                            "Failed to connect to CodeWire node at {}\nThe node may not be running. It should auto-start on first command.",
                             sock.display()
                         )
                     })?;
@@ -81,7 +81,7 @@ async fn request_response(target: &Target, req: &Request) -> Result<Response> {
     let frame = reader
         .read_frame()
         .await?
-        .context("unexpected EOF from daemon")?;
+        .context("unexpected EOF from node")?;
 
     match frame {
         Frame::Control(payload) => protocol::parse_response(&payload),
@@ -207,7 +207,7 @@ pub async fn attach(target: &Target, id: Option<u32>, no_history: bool) -> Resul
             stdout.write_all(&setup).await?;
             stdout.flush().await?;
         }
-        // Send reduced PTY size to daemon
+        // Send reduced PTY size to node
         let (pty_cols, pty_rows) = bar.pty_size();
         writer
             .send_request(&Request::Resize {
@@ -231,7 +231,7 @@ pub async fn attach(target: &Target, id: Option<u32>, no_history: bool) -> Resul
 
     loop {
         tokio::select! {
-            // Read from daemon (PTY output) → write to stdout
+            // Read from node (PTY output) → write to stdout
             frame = reader.read_frame() => {
                 match frame? {
                     Some(Frame::Data(bytes)) => {
@@ -259,7 +259,7 @@ pub async fn attach(target: &Target, id: Option<u32>, no_history: bool) -> Resul
                         }
                     }
                     None => {
-                        // Daemon disconnected
+                        // Node disconnected
                         stdout.write_all(&status_bar.teardown()).await?;
                         stdout.flush().await?;
                         drop(_guard);
@@ -269,7 +269,7 @@ pub async fn attach(target: &Target, id: Option<u32>, no_history: bool) -> Resul
                 }
             }
 
-            // Read from stdin → send to daemon (PTY input)
+            // Read from stdin → send to node (PTY input)
             n = stdin.read(&mut input_buf) => {
                 let n = n?;
                 if n == 0 {
