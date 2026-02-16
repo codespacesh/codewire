@@ -32,33 +32,17 @@ curl -fsSL .../install.sh | bash -s -- --version v0.1.0
 curl -fsSL .../install.sh | bash -s -- --prefix ~/.local
 ```
 
-### Manual install with verification
-
-```bash
-# Download binary, checksums, and signature
-VERSION=v0.1.0
-TARGET=aarch64-apple-darwin  # or x86_64-apple-darwin, x86_64-unknown-linux-musl, aarch64-unknown-linux-gnu
-curl -fsSL -O "https://github.com/codespacesh/codewire/releases/download/${VERSION}/cw-${VERSION}-${TARGET}"
-curl -fsSL -O "https://github.com/codespacesh/codewire/releases/download/${VERSION}/SHA256SUMS"
-curl -fsSL -O "https://github.com/codespacesh/codewire/releases/download/${VERSION}/SHA256SUMS.asc"
-
-# Verify GPG signature
-curl -fsSL https://raw.githubusercontent.com/codespacesh/codewire/main/GPG_PUBLIC_KEY.asc | gpg --import
-gpg --verify SHA256SUMS.asc SHA256SUMS
-
-# Verify checksum
-sha256sum --check --ignore-missing SHA256SUMS  # Linux
-shasum -a 256 --check --ignore-missing SHA256SUMS  # macOS
-
-# Install
-chmod +x "cw-${VERSION}-${TARGET}"
-sudo mv "cw-${VERSION}-${TARGET}" /usr/local/bin/cw
-```
-
 ### Build from source
 
 ```bash
-cargo install --path .
+go build -o cw ./cmd/cw
+sudo mv cw /usr/local/bin/cw
+```
+
+Or use `make`:
+
+```bash
+make install
 ```
 
 ## Quick Start
@@ -171,13 +155,9 @@ cw status 1 --json              # JSON output
 
 ### `cw mcp-server`
 
-Start an MCP (Model Context Protocol) server for programmatic access. Compile with `--features mcp` flag.
+Start an MCP (Model Context Protocol) server for programmatic access.
 
 ```bash
-# Build with MCP support
-cargo build --release --features mcp
-
-# Start MCP server
 cw mcp-server
 ```
 
@@ -218,9 +198,9 @@ cw --server my-gpu attach 1
 
 ## How It Works
 
-Codewire is a single Rust binary (`cw`) that acts as both daemon and CLI client.
+Codewire is a single Go binary (`cw`) that acts as both daemon and CLI client.
 
-**Node** (`cw node`): Listens on a Unix socket at `~/.codewire/server.sock`. Manages PTY sessions — each AI agent runs in its own pseudoterminal. The node owns the master side of each PTY and keeps processes alive regardless of client connections.
+**Node** (`cw node`): Listens on a Unix socket at `~/.codewire/codewire.sock`. Manages PTY sessions — each AI agent runs in its own pseudoterminal. The node owns the master side of each PTY and keeps processes alive regardless of client connections.
 
 **Client** (`cw launch`, `attach`, etc.): Connects to the daemon's Unix socket. When you attach, the client puts your terminal in raw mode and bridges your stdin/stdout directly to the PTY. Your terminal emulator handles all rendering — that's why scrolling and copy/paste work natively.
 
@@ -249,8 +229,11 @@ Communication between client and daemon uses a frame-based binary protocol over 
 
 ```
 ~/.codewire/
-├── server.sock           # Unix domain socket
-├── node.pid              # Node PID file
+├── codewire.sock         # Unix domain socket
+├── codewire.pid          # Node PID file
+├── token                 # Auth token
+├── config.toml           # Configuration (optional)
+├── servers.toml          # Saved remote servers (optional)
 ├── sessions.json         # Session metadata
 └── sessions/
     ├── 1/
@@ -294,13 +277,7 @@ WSS (TLS) is supported automatically — use `wss://` URLs for connections throu
 
 ## Fleet Discovery (NATS)
 
-Discover and manage codewire daemons across multiple machines using NATS as the control plane. Build with the `nats` feature:
-
-```bash
-cargo build --features nats
-```
-
-> **Note:** When building from source, fleet commands require `--features nats`. Pre-built release binaries include all features.
+Discover and manage codewire daemons across multiple machines using NATS as the control plane. Fleet support is built into the binary — no feature flags needed.
 
 See [Configuration](#configuration) for all config options. Fleet requires at minimum `[nats] url`.
 
@@ -343,7 +320,7 @@ cw fleet attach gpu-box:1
 | `cw.<node>.status` | Request-reply | Get session status on a node |
 | `cw.<node>.send` | Request-reply | Send input to session on a node |
 
-All messages are JSON-encoded `FleetRequest`/`FleetResponse` (see `src/protocol.rs`). Binary PTY data never travels over NATS.
+All messages are JSON-encoded `FleetRequest`/`FleetResponse` (see `internal/protocol/fleet_messages.go`). Binary PTY data never travels over NATS.
 
 ### Communication Model
 
@@ -395,9 +372,6 @@ CODEWIRE_NATS_URL=nats://127.0.0.1:4222 cw fleet list
 
 # Launch a session on the container
 CODEWIRE_NATS_URL=nats://127.0.0.1:4222 cw fleet launch --on docker-test -- echo hello
-
-# Run fleet tests
-cargo test --features nats --test fleet
 
 # Tear down
 docker compose down
@@ -470,13 +444,7 @@ cw status 1
 
 ## MCP Integration
 
-CodeWire provides an MCP (Model Context Protocol) server for programmatic access from AI agents like Claude Code.
-
-### Building with MCP Support
-
-```bash
-cargo build --release --features mcp
-```
+CodeWire provides an MCP (Model Context Protocol) server for programmatic access from AI agents like Claude Code. MCP support is built into the binary — no feature flags needed.
 
 ### Available MCP Tools
 
@@ -546,26 +514,23 @@ codewire_read_session_output(session_id=1, tail=100)
 
 ```bash
 # Build
-cargo build
-cargo build --features nats       # With fleet support
-cargo build --features mcp        # With MCP support
+make build
 
-# Run tests
-cargo test                                    # Unit + integration
-cargo test --features nats --test fleet       # Fleet tests (requires NATS)
+# Run unit tests
+make test
 
-# Format and lint
-cargo fmt
-cargo clippy --all-targets --all-features
+# Run all tests (unit + integration)
+go test ./internal/... ./tests/... -timeout 120s
+
+# Lint
+make lint
 
 # Manual CLI test
-./tests/manual_test.sh ./target/release/cw
+make test-manual
 
-# Run with logging
-RUST_LOG=codewire=debug cw node
+# Run with debug logging
+cw node  # slog outputs to stderr by default
 ```
-
-A comprehensive [codewire-dev skill](.claude/skills/codewire-dev.md) is available for Claude Code with project structure, implementation guides, and testing conventions.
 
 ## Security
 
