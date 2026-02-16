@@ -442,73 +442,43 @@ cw send 1 "/help"
 cw status 1
 ```
 
-## MCP Integration
+## Claude Code Integration
 
-CodeWire provides an MCP (Model Context Protocol) server for programmatic access from AI agents like Claude Code. MCP support is built into the binary — no feature flags needed.
+### Skill (recommended)
 
-### Available MCP Tools
+Install the codewire skill so Claude Code knows how to use `cw` for session management:
 
-The MCP server exposes these tools:
-
-| Tool | Description | Key Parameters |
-|------|-------------|----------------|
-| `codewire_list_sessions` | Discover sessions | `status_filter: "all"\|"running"\|"completed"` |
-| `codewire_read_session_output` | Read output snapshot | `session_id, tail?, max_chars?` |
-| `codewire_send_input` | Send input to session | `session_id, input, auto_newline?` |
-| `codewire_watch_session` | Monitor session (time-bounded) | `session_id, include_history?, history_lines?, max_duration_seconds?` |
-| `codewire_get_session_status` | Get detailed status | `session_id` |
-| `codewire_launch_session` | Launch new session | `command, working_dir?` |
-| `codewire_kill_session` | Terminate session | `session_id` |
-
-### Using from Claude Code
-
-Add CodeWire MCP server to your Claude Code configuration:
-
-```json
-{
-  "mcpServers": {
-    "codewire": {
-      "command": "/path/to/cw",
-      "args": ["mcp-server"]
-    }
-  }
-}
+```bash
+curl -fsSL https://raw.githubusercontent.com/codespacesh/codewire/main/.claude/skills/install.sh | bash
 ```
 
-Then use the tools in your prompts:
+This installs two skills to `~/.claude/skills/`:
+- **codewire** — teaches Claude Code to launch, monitor, and coordinate sessions
+- **codewire-dev** — development workflow for contributing to the codewire codebase
 
+### MCP Server (optional)
+
+For programmatic tool access, add CodeWire as an MCP server:
+
+```bash
+# User-level (available in all projects)
+claude mcp add --scope user codewire -- cw mcp-server
+
+# Or project-level
+claude mcp add codewire -- cw mcp-server
 ```
-Use codewire_list_sessions to see what agents are running.
-Use codewire_watch_session(session_id=1) to monitor progress.
-Use codewire_send_input(session_id=1, input="Status update?\n") to communicate.
-```
 
-### Example: Multi-Agent Workflow
+This exposes 7 tools:
 
-```python
-# Supervisor agent workflow via MCP
-
-# 1. Launch worker sessions
-codewire_launch_session(command=["claude", "-p", "implement feature X"])
-# Returns: session_id=1
-
-codewire_launch_session(command=["claude", "-p", "write tests"])
-# Returns: session_id=2
-
-# 2. Monitor progress
-codewire_watch_session(session_id=1, max_duration_seconds=30)
-# Returns: output stream for 30 seconds
-
-# 3. Check status
-codewire_get_session_status(session_id=1)
-# Returns: detailed status, PID, output size
-
-# 4. Send coordination messages
-codewire_send_input(session_id=1, input="Tests ready, please integrate\n")
-
-# 5. Read results
-codewire_read_session_output(session_id=1, tail=100)
-```
+| Tool | Description |
+|------|-------------|
+| `codewire_launch_session` | Launch new session |
+| `codewire_list_sessions` | List sessions (filter by status) |
+| `codewire_read_session_output` | Read output snapshot |
+| `codewire_send_input` | Send input to a session |
+| `codewire_watch_session` | Monitor session (time-bounded) |
+| `codewire_get_session_status` | Get detailed status |
+| `codewire_kill_session` | Terminate session |
 
 ## Contributing
 
