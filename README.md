@@ -48,7 +48,7 @@ make install
 ## Quick Start
 
 ```bash
-# Launch a Claude Code session (daemon auto-starts)
+# Launch a session (node auto-starts)
 cw launch -- claude -p "fix the auth bug in login.ts"
 
 # Use a different AI agent
@@ -224,7 +224,7 @@ See [MCP Integration](#mcp-integration) section below for details.
 
 ### `cw start` / `cw node`
 
-Start the daemon manually. Usually you don't need this — the daemon auto-starts on first CLI invocation.
+Start the node manually. Usually you don't need this — the node auto-starts on first CLI invocation.
 
 ```bash
 cw start
@@ -232,7 +232,7 @@ cw start
 
 ### `cw stop`
 
-Stop the running daemon gracefully.
+Stop the running node gracefully.
 
 ```bash
 cw stop
@@ -257,11 +257,11 @@ cw --server my-gpu attach 1
 
 ## How It Works
 
-Codewire is a single Go binary (`cw`) that acts as both daemon and CLI client.
+Codewire is a single Go binary (`cw`) that acts as both node and CLI client.
 
 **Node** (`cw node`): Listens on a Unix socket at `~/.codewire/codewire.sock`. Manages PTY sessions — each AI agent runs in its own pseudoterminal. The node owns the master side of each PTY and keeps processes alive regardless of client connections.
 
-**Client** (`cw launch`, `attach`, etc.): Connects to the daemon's Unix socket. When you attach, the client puts your terminal in raw mode and bridges your stdin/stdout directly to the PTY. Your terminal emulator handles all rendering — that's why scrolling and copy/paste work natively.
+**Client** (`cw launch`, `attach`, etc.): Connects to the node's Unix socket. When you attach, the client puts your terminal in raw mode and bridges your stdin/stdout directly to the PTY. Your terminal emulator handles all rendering — that's why scrolling and copy/paste work natively.
 
 **Logs**: All PTY output is teed to `~/.codewire/sessions/<id>/output.log` so you can review what happened while disconnected.
 
@@ -278,7 +278,7 @@ cw launch -- codex "refactor auth"                 # Codex
 
 ### Wire Protocol
 
-Communication between client and daemon uses a frame-based binary protocol over the Unix socket:
+Communication between client and node uses a frame-based binary protocol over the Unix socket:
 
 - Frame format: `[type: u8][length: u32 BE][payload]`
 - Type `0x00`: Control messages (JSON) — launch, list, attach, detach, kill, resize

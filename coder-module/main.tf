@@ -80,7 +80,7 @@ resource "coder_script" "codewire" {
       coder exp mcp configure claude-code ${var.folder}
     fi
 
-    # Start the codewire daemon in the background
+    # Start the codewire node in the background
     echo "Starting codewire node..."
     cw node &
   EOT

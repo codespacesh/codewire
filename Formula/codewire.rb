@@ -54,7 +54,7 @@ class Codewire < Formula
 
   def caveats
     <<~EOS
-      CodeWire daemon will auto-start on first command.
+      CodeWire node will auto-start on first command.
 
       Quick start:
         cw launch -- claude -p "your prompt here"

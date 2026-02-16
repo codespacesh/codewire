@@ -62,14 +62,14 @@ func main() {
 }
 
 // ---------------------------------------------------------------------------
-// nodeCmd (aliases: daemon, start)
+// nodeCmd (aliases: start)
 // ---------------------------------------------------------------------------
 
 func nodeCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:     "node",
-		Aliases: []string{"daemon", "start"},
-		Short:   "Start the codewire node daemon",
+		Aliases: []string{"start"},
+		Short:   "Start the codewire node",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir := dataDir()
 			if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -105,7 +105,7 @@ func nodeCmd() *cobra.Command {
 func stopCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "stop",
-		Short: "Stop the running node daemon",
+		Short: "Stop the running node",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pidPath := filepath.Join(dataDir(), "codewire.pid")
 			data, err := os.ReadFile(pidPath)
