@@ -1,10 +1,14 @@
 services:
-  nats:
-    image: nats:2.10-alpine
+  relay:
+    build: .
+    command: ["relay", "--base-url", "https://localhost", "--listen", "0.0.0.0:8080", "--data-dir", "/data/relay", "--auth-mode", "none"]
     ports:
-      - "4222:4222"
-      - "8222:8222"
-    command: ["--http_port", "8222", "--logtime"]
+      - "8080:8080"
+      - "41820:41820/udp"
+    volumes:
+      - relay_data:/data
+    environment:
+      - TERM=xterm-256color
 
   caddy:
     image: caddy:2-alpine
@@ -15,6 +19,7 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
+      - relay
       - codewire
 
   codewire:
@@ -24,14 +29,15 @@ services:
     environment:
       - CODEWIRE_NODE_NAME=docker-test
       - CODEWIRE_LISTEN=0.0.0.0:9100
-      - CODEWIRE_NATS_URL=nats://nats:4222
+      - CODEWIRE_RELAY_URL=http://relay:8080
       - CODEWIRE_TOKEN=test-token-for-e2e
       - CODEWIRE_EXTERNAL_URL=wss://localhost:9443/ws
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - TERM=xterm-256color
     depends_on:
-      - nats
+      - relay
 
 volumes:
+  relay_data:
   caddy_data:
   caddy_config:

@@ -1,3 +1,15 @@
 localhost {
+	# Direct WebSocket connections to codewire node.
 	reverse_proxy /ws* codewire:9100
+
+	# Relay API and tunnel proxy.
+	reverse_proxy /api/* relay:8080
+	reverse_proxy /auth/* relay:8080
+	reverse_proxy /healthz relay:8080
+}
+
+# Wildcard for tunnel subdomains (*.localhost).
+*.localhost {
+	tls internal
+	reverse_proxy relay:8080
 }

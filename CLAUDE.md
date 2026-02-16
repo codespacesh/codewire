@@ -4,9 +4,11 @@
 
 Codewire is a persistent process server for AI coding agents. Single Go binary (`cw`) acts as both daemon and CLI client. Manages PTY sessions that survive disconnects — launch AI agents, detach, reconnect later.
 
+Two tiers: **Standalone** (default, zero config, works like tmux) and **Relay mode** (opt-in remote access via WireGuard, fleet discovery, shared KV storage).
+
 ## Tech Stack
 
-Go 1.23+, cobra, creack/pty, nhooyr.io/websocket, nats.go, BurntSushi/toml, golang.org/x/term
+Go 1.23+, cobra, creack/pty, nhooyr.io/websocket, coder/wgtunnel, modernc.org/sqlite, BurntSushi/toml, golang.org/x/term
 
 ## Project Structure
 
@@ -18,30 +20,36 @@ internal/
   protocol/
     protocol.go             # Frame wire format [type:u8][len:u32 BE][payload]
     messages.go             # Request/Response JSON (PascalCase type discriminator)
-    fleet_messages.go       # Fleet protocol types
   connection/
     connection.go           # FrameReader/FrameWriter interfaces
     unix.go                 # Unix socket transport
     websocket.go            # WebSocket transport (Text=Control, Binary=Data)
-  session/session.go        # SessionManager, Broadcaster, StatusWatcher, PTY lifecycle
+  session/
+    session.go              # SessionManager, Broadcaster, StatusWatcher, PTY lifecycle
+    events.go               # Event types, SubscriptionManager, EventLog (JSONL)
   node/
     node.go                 # Daemon: Unix listener, WS server, PID file, signals
-    handler.go              # Client dispatch, attach/watch/logs handlers
+    handler.go              # Client dispatch, attach/watch/logs/subscribe/wait handlers
   client/
-    client.go               # Target (local/remote), Connect, requestResponse
-    commands.go             # All CLI command implementations
+    client.go               # Target (local/remote/relay), Connect, requestResponse
+    commands.go             # All CLI command implementations (merged fleet)
   terminal/
     rawmode.go              # RawModeGuard (golang.org/x/term)
     size.go                 # Terminal size, SIGWINCH
     detach.go               # DetachDetector state machine (Ctrl+B d)
   statusbar/statusbar.go    # Status bar rendering
-  fleet/
-    fleet.go                # NATS subscriptions, heartbeat (30s)
-    client.go               # Fleet CLI: discover, launch, kill, send, attach
-  mcp/server.go             # MCP JSON-RPC over stdio (7 tools)
+  tunnel/
+    keys.go                 # WireGuard key management (LoadOrGenerateKey)
+    tunnel.go               # Node WireGuard tunnel (NodeTunnel)
+    relay.go                # Relay server (WireGuard + HTTP API + device auth)
+    setup.go                # Device authorization flow (cw setup)
+  store/
+    store.go                # Store interface (KV, nodes, device codes)
+    sqlite.go               # SQLite implementation (relay-only)
+  mcp/server.go             # MCP JSON-RPC over stdio (14 tools)
 tests/
-  integration_test.go       # 20 E2E tests
-  fleet_test.go             # 4 fleet unit tests
+  integration_test.go       # E2E tests (core functionality)
+  events_test.go            # Event system tests (tags, subscribe, wait)
 ```
 
 ## Development
@@ -78,5 +86,7 @@ GitHub Actions builds binaries, creates the release, and updates `Formula/codewi
 - **JSON messages**: flat struct with `"type"` discriminator in PascalCase (e.g. `{"type":"Launch","command":["bash"]}`)
 - **Socket**: `~/.codewire/codewire.sock` (Unix domain socket)
 - **Session lifecycle**: 3 goroutines per session (PTY reader, input writer, process waiter)
+- **Events**: Sessions emit typed events (session.created, session.status, session.output_summary). Events stored in `events.jsonl` per session. SubscriptionManager for pub/sub fan-out.
 - **Broadcaster**: fan-out to multiple attached clients, non-blocking send with drop for slow consumers
-- **Fleet**: NATS for control plane (discovery, commands), WebSocket for data plane (PTY attach)
+- **Relay**: WireGuard tunnel via `coder/wgtunnel`. Relay runs embedded SQLite for node registry + shared KV store. Nodes connect via userspace WireGuard (no root needed).
+- **Merged CLI**: No separate fleet namespace. `node:session` syntax everywhere. `cw nodes`, `cw subscribe`, `cw wait` are top-level commands.

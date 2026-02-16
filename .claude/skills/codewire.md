@@ -5,7 +5,7 @@ description: Use codewire to launch, monitor, and coordinate persistent AI agent
 
 # Codewire
 
-Persistent process server for AI coding agents. Launch sessions that survive disconnects, monitor progress, send input, and coordinate multiple agents.
+Persistent process server for AI coding agents. Launch sessions that survive disconnects, monitor progress, send input, and coordinate multiple agents. Tags, subscriptions, and wait provide structured LLM orchestration primitives.
 
 ## Commands
 
@@ -14,6 +14,7 @@ Persistent process server for AI coding agents. Launch sessions that survive dis
 ```bash
 cw launch -- <command> [args...]
 cw launch --dir /path/to/project -- claude -p "fix the auth bug"
+cw launch --tag worker --tag build -- claude -p "fix tests"
 ```
 
 ### List sessions
@@ -59,7 +60,7 @@ cw send <id> --file commands.txt             # From file
 ### Check session status
 
 ```bash
-cw status <id>              # Human-readable
+cw status <id>              # Human-readable (exit code, duration, tags, output stats)
 cw status <id> --json       # JSON output
 ```
 
@@ -68,39 +69,68 @@ cw status <id> --json       # JSON output
 ```bash
 cw kill <id>
 cw kill --all
+cw kill --tag worker         # Kill all sessions tagged "worker"
 ```
 
-## Multi-Agent Patterns
+### Subscribe to events
+
+```bash
+cw subscribe --tag worker                           # Events from worker sessions
+cw subscribe --event session.status                  # Status change events
+cw subscribe --session 3                             # All events from session 3
+```
+
+### Wait for completion
+
+```bash
+cw wait 3                                            # Wait for session 3
+cw wait --tag worker --condition all                 # Wait for ALL workers
+cw wait --tag worker --condition any --timeout 60    # ANY worker, 60s timeout
+```
+
+### Remote nodes
+
+```bash
+cw nodes                                             # List all nodes
+cw list dev-1                                        # Sessions on remote node
+cw attach dev-1:3                                    # Remote session
+cw launch dev-1 --tag worker -- claude -p "fix bug"  # Launch on remote node
+```
+
+### Shared KV store
+
+```bash
+cw kv set build_status done
+cw kv get build_status
+cw kv list task:                                     # List by prefix
+cw kv set --ttl 60s lock "node-a"                    # Auto-expiring
+cw kv delete build_status
+```
+
+## LLM Orchestration Patterns
 
 ### Supervisor: orchestrate workers
 
 ```bash
-# Launch workers
-cw launch -- claude -p "implement feature X"    # Session 1
-cw launch -- claude -p "write tests for X"      # Session 2
+# Launch tagged workers
+cw launch --tag worker -- claude -p "implement feature X"
+cw launch --tag worker -- claude -p "write tests for X"
 
-# Monitor worker 1
-cw watch 1 --timeout 30
+# Wait for all to complete
+cw wait --tag worker --condition all --timeout 300
 
-# Check if done
-cw status 1
-
-# Send coordination message
-cw send 1 "Tests are ready, please integrate"
-
-# Read final output
-cw logs 1 --tail 100
+# Check results
+cw list --json
 ```
 
 ### Parallel agents
 
 ```bash
-# Launch parallel tasks
-cw launch -- claude -p "optimize backend queries"
-cw launch -- claude -p "optimize frontend bundle"
+cw launch --tag backend -- claude -p "optimize queries"
+cw launch --tag frontend -- claude -p "optimize bundle"
 
-# Check all statuses
-cw list --json
+# Subscribe to status events
+cw subscribe --tag backend --event session.status
 ```
 
 ### Cross-session communication
@@ -110,22 +140,12 @@ cw list --json
 cw send 1 "Session 2 finished with exit code 0"
 ```
 
-## Fleet (multi-node)
-
-Send commands to remote nodes via NATS:
-
-```bash
-cw fleet list                                          # Discover all nodes
-cw fleet launch --on gpu-box -- claude -p "train"      # Launch on specific node
-cw fleet send gpu-box:1 "Status update?"               # Send to remote session
-cw fleet attach gpu-box:1                               # Attach to remote session
-cw fleet kill gpu-box:1                                 # Kill remote session
-```
-
 ## When to use codewire
 
 - Launch long-running AI agent tasks that should survive disconnects
 - Run multiple AI agents in parallel on different parts of a codebase
 - Monitor what an agent is doing without interrupting it
 - Coordinate between agents by sending messages between sessions
+- Wait for agent completion instead of polling
+- Tag and filter sessions for structured orchestration
 - Run background builds, tests, or other long processes

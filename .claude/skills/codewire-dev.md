@@ -17,16 +17,17 @@ codewire/
 │   ├── config/config.go        # TOML config + env overrides
 │   ├── protocol/
 │   │   ├── protocol.go         # Frame wire format
-│   │   ├── messages.go         # Request/Response JSON types
-│   │   └── fleet_messages.go   # Fleet protocol types
+│   │   └── messages.go         # Request/Response JSON types
 │   ├── connection/
 │   │   ├── connection.go       # FrameReader/FrameWriter interfaces
 │   │   ├── unix.go             # Unix socket transport
 │   │   └── websocket.go        # WebSocket transport
-│   ├── session/session.go      # SessionManager, PTY lifecycle
+│   ├── session/
+│   │   ├── session.go          # SessionManager, PTY lifecycle
+│   │   └── events.go           # Event types, SubscriptionManager
 │   ├── node/
 │   │   ├── node.go             # Daemon: listeners, PID file, signals
-│   │   └── handler.go          # Client dispatch, attach/watch/logs
+│   │   └── handler.go          # Client dispatch, attach/watch/logs/subscribe/wait
 │   ├── client/
 │   │   ├── client.go           # Target, Connect, requestResponse
 │   │   └── commands.go         # All CLI command implementations
@@ -35,13 +36,18 @@ codewire/
 │   │   ├── size.go             # Terminal size, SIGWINCH
 │   │   └── detach.go           # DetachDetector state machine
 │   ├── statusbar/statusbar.go  # Status bar rendering
-│   ├── fleet/
-│   │   ├── fleet.go            # NATS subscriptions, heartbeat
-│   │   └── client.go           # Fleet CLI commands
-│   └── mcp/server.go           # MCP JSON-RPC over stdio
+│   ├── tunnel/
+│   │   ├── keys.go             # WireGuard key management
+│   │   ├── tunnel.go           # Node WireGuard tunnel
+│   │   ├── relay.go            # Relay server (WG + HTTP API)
+│   │   └── setup.go            # Device authorization flow
+│   ├── store/
+│   │   ├── store.go            # Store interface (KV, nodes, device codes)
+│   │   └── sqlite.go           # SQLite implementation (relay-only)
+│   └── mcp/server.go           # MCP JSON-RPC over stdio (14 tools)
 ├── tests/
-│   ├── integration_test.go     # E2E tests (20 tests)
-│   └── fleet_test.go           # Fleet unit tests (4 tests)
+│   ├── integration_test.go     # E2E tests (core functionality)
+│   └── events_test.go          # Event system tests (tags, subscribe, wait)
 ├── go.mod
 ├── Makefile
 └── Dockerfile
@@ -90,11 +96,7 @@ rootCmd.AddCommand(newCmd)
 
 2. **Update protocol** (`internal/protocol/messages.go`):
 ```go
-// Add Type constant
-// Request.Type = "NewCommand"
-
-// Add fields with `json:"field_name,omitempty"` tags
-// Response.Type = "NewCommandResult"
+// Add fields to Request/Response with `json:"field_name,omitempty"` tags
 ```
 
 3. **Implement client** (`internal/client/commands.go`):
@@ -115,23 +117,19 @@ case "NewCommand":
     writer.SendResponse(&protocol.Response{Type: "NewCommandResult", ...})
 ```
 
-5. **Add integration test** (`tests/integration_test.go`):
+5. **Add integration test** (`tests/integration_test.go` or `tests/events_test.go`):
 ```go
 func TestNewCommand(t *testing.T) {
-    dir := tempDir(t)
-    target := startTestNode(t, dir)
-
-    resp := requestResponse(t, target, &protocol.Request{
-        Type: "NewCommand",
-        // ...
-    })
+    dir := tempDir(t, "test-name")
+    sock := startTestNode(t, dir)
+    resp := requestResponse(t, sock, &protocol.Request{Type: "NewCommand"})
     // Assertions
 }
 ```
 
 ### Test naming
 
-Unix socket paths have ~108 byte limits on macOS. The test helper uses `t.TempDir()` which handles this, but keep test names reasonable.
+Unix socket paths have ~108 byte limits on macOS. Keep test directory names short.
 
 ### Wire protocol
 
@@ -142,8 +140,10 @@ Frame = [type: u8][length: u32 BE][payload]
 
 JSON messages use PascalCase `type` discriminator:
 ```json
-{"type":"Launch","command":["bash"],"working_dir":"/tmp"}
+{"type":"Launch","command":["bash"],"working_dir":"/tmp","tags":["worker"]}
 {"type":"SessionList","sessions":[...]}
+{"type":"Subscribe","event_types":["session.status"],"tags":["worker"]}
+{"type":"Wait","condition":"all","tags":["worker"],"timeout_seconds":60}
 ```
 
 ### Key files for common changes
@@ -153,8 +153,9 @@ JSON messages use PascalCase `type` discriminator:
 | New CLI command | `cmd/cw/main.go` + `internal/client/commands.go` |
 | Protocol change | `internal/protocol/messages.go` + `internal/node/handler.go` |
 | Session lifecycle | `internal/session/session.go` |
+| Event system | `internal/session/events.go` |
 | Terminal handling | `internal/terminal/` |
-| Fleet/NATS | `internal/fleet/` + `internal/protocol/fleet_messages.go` |
+| Relay/tunnel | `internal/tunnel/` + `internal/store/` |
 | MCP tools | `internal/mcp/server.go` |
 
 ## Quick reference

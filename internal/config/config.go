@@ -11,8 +11,8 @@ import (
 
 // Config is the top-level configuration loaded from config.toml.
 type Config struct {
-	Node NodeConfig  `toml:"node"`
-	Nats *NatsConfig `toml:"nats,omitempty"`
+	Node     NodeConfig `toml:"node"`
+	RelayURL *string    `toml:"relay_url,omitempty"`
 }
 
 // NodeConfig describes the local node identity and network settings.
@@ -24,13 +24,6 @@ type NodeConfig struct {
 	// Externally-accessible WSS URL for fleet discovery
 	// (e.g. "wss://9100--workspace.coder.codespace.sh/ws").
 	ExternalURL *string `toml:"external_url,omitempty"`
-}
-
-// NatsConfig holds NATS connection parameters.
-type NatsConfig struct {
-	URL       string  `toml:"url"`
-	Token     *string `toml:"token,omitempty"`
-	CredsFile *string `toml:"creds_file,omitempty"`
 }
 
 // ServerEntry is a saved remote server (client-side).
@@ -79,40 +72,8 @@ func defaultName() string {
 	return string(out)
 }
 
-// autoDiscoverNats checks environment variables and well-known paths for
-// NATS configuration.
-func autoDiscoverNats() *NatsConfig {
-	// Check environment variables first.
-	if url := os.Getenv("CODEWIRE_NATS_URL"); url != "" {
-		cfg := &NatsConfig{URL: url}
-		if tok := os.Getenv("CODEWIRE_NATS_TOKEN"); tok != "" {
-			cfg.Token = &tok
-		}
-		if creds := os.Getenv("CODEWIRE_NATS_CREDS"); creds != "" {
-			cfg.CredsFile = &creds
-		}
-		return cfg
-	}
-
-	// Check well-known path (mounted by Coder template in codespace.sh workspaces).
-	credsPath := "/etc/codewire/nats.creds"
-	if _, err := os.Stat(credsPath); err == nil {
-		url := os.Getenv("CODEWIRE_NATS_URL")
-		if url == "" {
-			url = "nats://nats.codespace-system:4222"
-		}
-		return &NatsConfig{
-			URL:       url,
-			CredsFile: &credsPath,
-		}
-	}
-
-	return nil
-}
-
 // LoadConfig reads config.toml from dataDir, applies environment variable
-// overrides, auto-discovers NATS if not configured, and validates the
-// node name before returning.
+// overrides, and validates the node name before returning.
 func LoadConfig(dataDir string) (*Config, error) {
 	path := filepath.Join(dataDir, "config.toml")
 
@@ -147,9 +108,11 @@ func LoadConfig(dataDir string) (*Config, error) {
 		}
 	}
 
-	// Auto-discover NATS from env vars / well-known paths.
-	if cfg.Nats == nil {
-		cfg.Nats = autoDiscoverNats()
+	// Relay URL from env var.
+	if cfg.RelayURL == nil {
+		if relayURL := os.Getenv("CODEWIRE_RELAY_URL"); relayURL != "" {
+			cfg.RelayURL = &relayURL
+		}
 	}
 
 	if err := ValidateNodeName(cfg.Node.Name); err != nil {

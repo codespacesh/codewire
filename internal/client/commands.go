@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net/http"
 	"os"
 	"sort"
 	"strings"
@@ -57,13 +58,14 @@ func List(target *Target, jsonOutput bool) error {
 // Run
 // ---------------------------------------------------------------------------
 
-// Run launches a new session on the node with the given command and working
-// directory.
-func Run(target *Target, command []string, workingDir string) error {
+// Run launches a new session on the node with the given command, working
+// directory, and optional tags.
+func Run(target *Target, command []string, workingDir string, tags ...string) error {
 	resp, err := requestResponse(target, &protocol.Request{
 		Type:       "Launch",
 		Command:    command,
 		WorkingDir: workingDir,
+		Tags:       tags,
 	})
 	if err != nil {
 		return err
@@ -384,6 +386,30 @@ func Kill(target *Target, id uint32) error {
 }
 
 // ---------------------------------------------------------------------------
+// KillByTags
+// ---------------------------------------------------------------------------
+
+// KillByTags terminates all sessions matching the given tags.
+func KillByTags(target *Target, tags []string) error {
+	resp, err := requestResponse(target, &protocol.Request{
+		Type: "KillByTags",
+		Tags: tags,
+	})
+	if err != nil {
+		return err
+	}
+	if resp.Type == "Error" {
+		return fmt.Errorf("%s", formatError(resp.Message))
+	}
+	count := uint(0)
+	if resp.Count != nil {
+		count = *resp.Count
+	}
+	fmt.Fprintf(os.Stderr, "Killed %d session(s) matching tags %v\n", count, tags)
+	return nil
+}
+
+// ---------------------------------------------------------------------------
 // KillAll
 // ---------------------------------------------------------------------------
 
@@ -685,6 +711,255 @@ func printSessionTable(sessions []protocol.SessionInfo) {
 		}
 		fmt.Printf("%-6d %-20s %-12s %-10s %-8s\n", s.ID, prompt, s.Status, created, attached)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Nodes (relay discovery)
+// ---------------------------------------------------------------------------
+
+// Nodes fetches the list of registered nodes from a relay URL and prints them.
+func Nodes(relayURL string) error {
+	resp, err := fetchJSON(relayURL + "/api/v1/nodes")
+	if err != nil {
+		return err
+	}
+
+	var nodes []struct {
+		Name      string `json:"name"`
+		TunnelURL string `json:"tunnel_url"`
+		Connected bool   `json:"connected"`
+	}
+	if err := json.Unmarshal(resp, &nodes); err != nil {
+		return fmt.Errorf("parsing nodes: %w", err)
+	}
+
+	if len(nodes) == 0 {
+		fmt.Println("No registered nodes")
+		return nil
+	}
+
+	fmt.Printf("%-20s %-40s %-10s\n", "NAME", "TUNNEL URL", "STATUS")
+	for _, n := range nodes {
+		status := "offline"
+		if n.Connected {
+			status = "online"
+		}
+		fmt.Printf("%-20s %-40s %-10s\n", n.Name, n.TunnelURL, status)
+	}
+	return nil
+}
+
+func fetchJSON(url string) ([]byte, error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)
+	}
+
+	return io.ReadAll(resp.Body)
+}
+
+// ---------------------------------------------------------------------------
+// SubscribeEvents
+// ---------------------------------------------------------------------------
+
+// SubscribeEvents subscribes to session events and prints them as they arrive.
+func SubscribeEvents(target *Target, sessionID *uint32, tags []string, eventTypes []string) error {
+	reader, writer, err := target.Connect()
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
+	defer writer.Close()
+
+	req := &protocol.Request{
+		Type:       "Subscribe",
+		ID:         sessionID,
+		Tags:       tags,
+		EventTypes: eventTypes,
+	}
+	if err := writer.SendRequest(req); err != nil {
+		return err
+	}
+
+	for {
+		frame, err := reader.ReadFrame()
+		if err != nil {
+			return err
+		}
+		if frame == nil {
+			return nil
+		}
+		if frame.Type != protocol.FrameControl {
+			continue
+		}
+
+		var resp protocol.Response
+		if err := json.Unmarshal(frame.Payload, &resp); err != nil {
+			continue
+		}
+
+		switch resp.Type {
+		case "SubscribeAck":
+			fmt.Fprintf(os.Stderr, "[cw] subscribed (id=%d)\n", *resp.SubscriptionID)
+		case "Event":
+			if resp.Event != nil && resp.SessionID != nil {
+				data, _ := json.Marshal(resp.Event)
+				fmt.Printf("[session %d] %s\n", *resp.SessionID, string(data))
+			}
+		case "Error":
+			return fmt.Errorf("%s", resp.Message)
+		case "Unsubscribed":
+			return nil
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// WaitForSession
+// ---------------------------------------------------------------------------
+
+// WaitForSession blocks until the target session(s) complete.
+func WaitForSession(target *Target, sessionID *uint32, tags []string, condition string, timeout *uint64) error {
+	reader, writer, err := target.Connect()
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
+	defer writer.Close()
+
+	req := &protocol.Request{
+		Type:           "Wait",
+		ID:             sessionID,
+		Tags:           tags,
+		Condition:      condition,
+		TimeoutSeconds: timeout,
+	}
+	if err := writer.SendRequest(req); err != nil {
+		return err
+	}
+
+	for {
+		frame, err := reader.ReadFrame()
+		if err != nil {
+			return err
+		}
+		if frame == nil {
+			return nil
+		}
+		if frame.Type != protocol.FrameControl {
+			continue
+		}
+
+		var resp protocol.Response
+		if err := json.Unmarshal(frame.Payload, &resp); err != nil {
+			continue
+		}
+
+		switch resp.Type {
+		case "WaitResult":
+			if resp.Sessions != nil {
+				for _, s := range *resp.Sessions {
+					exitStr := "n/a"
+					if s.ExitCode != nil {
+						exitStr = fmt.Sprintf("%d", *s.ExitCode)
+					}
+					fmt.Printf("Session %d: %s (exit_code=%s)\n", s.ID, s.Status, exitStr)
+				}
+			}
+			return nil
+		case "Error":
+			return fmt.Errorf("%s", resp.Message)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// KV commands
+// ---------------------------------------------------------------------------
+
+// KVSet sets a key-value pair via the node (which proxies to the relay).
+func KVSet(target *Target, namespace, key, value, ttl string) error {
+	resp, err := requestResponse(target, &protocol.Request{
+		Type:      "KVSet",
+		Namespace: namespace,
+		Key:       key,
+		Value:     []byte(value),
+		TTL:       ttl,
+	})
+	if err != nil {
+		return err
+	}
+	if resp.Type == "Error" {
+		return fmt.Errorf("%s", resp.Message)
+	}
+	fmt.Fprintf(os.Stderr, "Set %s/%s\n", namespace, key)
+	return nil
+}
+
+// KVGet retrieves a value by key via the node.
+func KVGet(target *Target, namespace, key string) error {
+	resp, err := requestResponse(target, &protocol.Request{
+		Type:      "KVGet",
+		Namespace: namespace,
+		Key:       key,
+	})
+	if err != nil {
+		return err
+	}
+	if resp.Type == "Error" {
+		return fmt.Errorf("%s", resp.Message)
+	}
+	if resp.Value == nil {
+		fmt.Println("(not found)")
+		return nil
+	}
+	fmt.Println(string(resp.Value))
+	return nil
+}
+
+// KVList lists keys by prefix via the node.
+func KVList(target *Target, namespace, prefix string) error {
+	resp, err := requestResponse(target, &protocol.Request{
+		Type:      "KVList",
+		Namespace: namespace,
+		Key:       prefix,
+	})
+	if err != nil {
+		return err
+	}
+	if resp.Type == "Error" {
+		return fmt.Errorf("%s", resp.Message)
+	}
+	if resp.Entries == nil || len(*resp.Entries) == 0 {
+		fmt.Println("No keys found")
+		return nil
+	}
+	for _, e := range *resp.Entries {
+		fmt.Printf("%-30s %s\n", e.Key, string(e.Value))
+	}
+	return nil
+}
+
+// KVDelete deletes a key via the node.
+func KVDelete(target *Target, namespace, key string) error {
+	resp, err := requestResponse(target, &protocol.Request{
+		Type:      "KVDelete",
+		Namespace: namespace,
+		Key:       key,
+	})
+	if err != nil {
+		return err
+	}
+	if resp.Type == "Error" {
+		return fmt.Errorf("%s", resp.Message)
+	}
+	fmt.Fprintf(os.Stderr, "Deleted %s/%s\n", namespace, key)
+	return nil
 }
 
 // formatRelativeTime converts an RFC3339 timestamp to a human-readable

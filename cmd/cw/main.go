@@ -17,9 +17,9 @@ import (
 
 	"github.com/codespacesh/codewire/internal/client"
 	"github.com/codespacesh/codewire/internal/config"
-	"github.com/codespacesh/codewire/internal/fleet"
 	"github.com/codespacesh/codewire/internal/mcp"
 	"github.com/codespacesh/codewire/internal/node"
+	"github.com/codespacesh/codewire/internal/tunnel"
 )
 
 var (
@@ -47,8 +47,13 @@ func main() {
 		watchCmd(),
 		statusCmd(),
 		mcpServerCmd(),
-		fleetCmd(),
+		nodesCmd(),
+		subscribeCmd(),
+		waitSessionCmd(),
+		kvCmd(),
 		serverCmd(),
+		relayCmd(),
+		setupCmd(),
 	)
 
 	if err := rootCmd.Execute(); err != nil {
@@ -134,7 +139,10 @@ func stopCmd() *cobra.Command {
 // ---------------------------------------------------------------------------
 
 func runCmd() *cobra.Command {
-	var workDir string
+	var (
+		workDir string
+		tags    []string
+	)
 
 	cmd := &cobra.Command{
 		Use:     "run [-- command...]",
@@ -156,11 +164,12 @@ func runCmd() *cobra.Command {
 				return fmt.Errorf("command required after --")
 			}
 
-			return client.Run(target, args, workDir)
+			return client.Run(target, args, workDir, tags...)
 		},
 	}
 
 	cmd.Flags().StringVarP(&workDir, "dir", "d", "", "Working directory for the session")
+	cmd.Flags().StringSliceVar(&tags, "tag", nil, "Tags for the session (can be repeated)")
 
 	return cmd
 }
@@ -242,11 +251,14 @@ func attachCmd() *cobra.Command {
 // ---------------------------------------------------------------------------
 
 func killCmd() *cobra.Command {
-	var all bool
+	var (
+		all  bool
+		tags []string
+	)
 
 	cmd := &cobra.Command{
 		Use:   "kill [session-id]",
-		Short: "Kill a session or all sessions",
+		Short: "Kill a session, all sessions, or sessions by tag",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target, err := resolveTarget()
 			if err != nil {
@@ -263,8 +275,12 @@ func killCmd() *cobra.Command {
 				return client.KillAll(target)
 			}
 
+			if len(tags) > 0 {
+				return client.KillByTags(target, tags)
+			}
+
 			if len(args) == 0 {
-				return fmt.Errorf("session id required (or use --all)")
+				return fmt.Errorf("session id required (or use --all / --tag)")
 			}
 
 			parsed, err := strconv.ParseUint(args[0], 10, 32)
@@ -277,6 +293,7 @@ func killCmd() *cobra.Command {
 	}
 
 	cmd.Flags().BoolVar(&all, "all", false, "Kill all sessions")
+	cmd.Flags().StringSliceVar(&tags, "tag", nil, "Kill sessions matching tag (can be repeated)")
 
 	return cmd
 }
@@ -488,136 +505,257 @@ func mcpServerCmd() *cobra.Command {
 }
 
 // ---------------------------------------------------------------------------
-// fleetCmd — subcommand group
+// nodesCmd — list nodes from relay
 // ---------------------------------------------------------------------------
 
-func fleetCmd() *cobra.Command {
+func nodesCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "nodes",
+		Short: "List registered nodes from the relay",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			relayURL, err := resolveRelayURL()
+			if err != nil {
+				return err
+			}
+			return client.Nodes(relayURL)
+		},
+	}
+}
+
+// ---------------------------------------------------------------------------
+// subscribeCmd — subscribe to session events
+// ---------------------------------------------------------------------------
+
+func subscribeCmd() *cobra.Command {
+	var (
+		tags       []string
+		eventTypes []string
+		sessionID  uint64
+	)
+
 	cmd := &cobra.Command{
-		Use:   "fleet",
-		Short: "Fleet management commands",
+		Use:   "subscribe",
+		Short: "Subscribe to session events",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target, err := resolveTarget()
+			if err != nil {
+				return err
+			}
+
+			if target.IsLocal() {
+				if err := ensureNode(); err != nil {
+					return err
+				}
+			}
+
+			var sid *uint32
+			if cmd.Flags().Changed("session") {
+				v := uint32(sessionID)
+				sid = &v
+			}
+
+			return client.SubscribeEvents(target, sid, tags, eventTypes)
+		},
+	}
+
+	cmd.Flags().StringSliceVar(&tags, "tag", nil, "Filter by tag (can be repeated)")
+	cmd.Flags().StringSliceVar(&eventTypes, "event", nil, "Filter by event type (can be repeated)")
+	cmd.Flags().Uint64Var(&sessionID, "session", 0, "Filter by session ID")
+
+	return cmd
+}
+
+// ---------------------------------------------------------------------------
+// waitSessionCmd — wait for session(s) to complete
+// ---------------------------------------------------------------------------
+
+func waitSessionCmd() *cobra.Command {
+	var (
+		tags      []string
+		condition string
+		timeout   uint64
+	)
+
+	cmd := &cobra.Command{
+		Use:   "wait [session-id]",
+		Short: "Wait for session(s) to complete",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target, err := resolveTarget()
+			if err != nil {
+				return err
+			}
+
+			if target.IsLocal() {
+				if err := ensureNode(); err != nil {
+					return err
+				}
+			}
+
+			var sid *uint32
+			if len(args) > 0 {
+				parsed, err := strconv.ParseUint(args[0], 10, 32)
+				if err != nil {
+					return fmt.Errorf("invalid session id: %w", err)
+				}
+				v := uint32(parsed)
+				sid = &v
+			}
+
+			var timeoutPtr *uint64
+			if cmd.Flags().Changed("timeout") {
+				timeoutPtr = &timeout
+			}
+
+			return client.WaitForSession(target, sid, tags, condition, timeoutPtr)
+		},
+	}
+
+	cmd.Flags().StringSliceVar(&tags, "tag", nil, "Wait for sessions matching tag (can be repeated)")
+	cmd.Flags().StringVar(&condition, "condition", "all", "Wait condition: all or any")
+	cmd.Flags().Uint64Var(&timeout, "timeout", 0, "Timeout in seconds")
+
+	return cmd
+}
+
+// ---------------------------------------------------------------------------
+// kvCmd — key-value store subcommand group
+// ---------------------------------------------------------------------------
+
+func kvCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "kv",
+		Short: "Shared key-value store (requires relay)",
 	}
 
 	cmd.AddCommand(
-		fleetListCmd(),
-		fleetAttachCmd(),
-		fleetLaunchCmd(),
-		fleetKillCmd(),
-		fleetSendCmd(),
+		kvSetCmd(),
+		kvGetCmd(),
+		kvListCmd(),
+		kvDeleteCmd(),
 	)
 
 	return cmd
 }
 
-func fleetListCmd() *cobra.Command {
+func kvSetCmd() *cobra.Command {
 	var (
-		timeout    uint64
-		jsonOutput bool
+		namespace string
+		ttl       string
 	)
 
 	cmd := &cobra.Command{
-		Use:   "list",
-		Short: "Discover and list all fleet nodes",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			natsCfg, err := loadNatsConfig()
-			if err != nil {
-				return err
-			}
-			return fleet.HandleFleetList(natsCfg, timeout, jsonOutput)
-		},
-	}
-
-	cmd.Flags().Uint64Var(&timeout, "timeout", 2, "Discovery timeout in seconds")
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
-
-	return cmd
-}
-
-func fleetAttachCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "attach <node:session-id>",
-		Short: "Attach to a session on a fleet node",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			natsCfg, err := loadNatsConfig()
-			if err != nil {
-				return err
-			}
-
-			info, err := fleet.HandleFleetAttach(natsCfg, dataDir(), args[0])
-			if err != nil {
-				return err
-			}
-
-			target := &client.Target{
-				URL:   info.URL,
-				Token: info.Token,
-			}
-			return client.Attach(target, &info.SessionID, false)
-		},
-	}
-}
-
-func fleetLaunchCmd() *cobra.Command {
-	var (
-		onNode string
-		dir    string
-	)
-
-	cmd := &cobra.Command{
-		Use:   "launch [-- command...]",
-		Short: "Launch a session on a fleet node",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if onNode == "" {
-				return fmt.Errorf("--on <node> is required")
-			}
-			if len(args) == 0 {
-				return fmt.Errorf("command required after --")
-			}
-
-			natsCfg, err := loadNatsConfig()
-			if err != nil {
-				return err
-			}
-
-			return fleet.HandleFleetLaunch(natsCfg, onNode, args, dir)
-		},
-	}
-
-	cmd.Flags().StringVar(&onNode, "on", "", "Target node name")
-	cmd.Flags().StringVar(&dir, "dir", "", "Working directory on the remote node")
-
-	return cmd
-}
-
-func fleetKillCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "kill <node:session-id>",
-		Short: "Kill a session on a fleet node",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			natsCfg, err := loadNatsConfig()
-			if err != nil {
-				return err
-			}
-			return fleet.HandleFleetKill(natsCfg, args[0])
-		},
-	}
-}
-
-func fleetSendCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "send <node:session-id> <text>",
-		Short: "Send input to a session on a fleet node",
+		Use:   "set <key> <value>",
+		Short: "Set a key-value pair",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			natsCfg, err := loadNatsConfig()
+			target, err := resolveTarget()
 			if err != nil {
 				return err
 			}
-			data := []byte(args[1] + "\n")
-			return fleet.HandleFleetSendInput(natsCfg, args[0], data)
+
+			if target.IsLocal() {
+				if err := ensureNode(); err != nil {
+					return err
+				}
+			}
+
+			return client.KVSet(target, namespace, args[0], args[1], ttl)
 		},
 	}
+
+	cmd.Flags().StringVar(&namespace, "ns", "default", "Namespace")
+	cmd.Flags().StringVar(&ttl, "ttl", "", "Time-to-live (e.g. 60s, 5m)")
+
+	return cmd
+}
+
+func kvGetCmd() *cobra.Command {
+	var namespace string
+
+	cmd := &cobra.Command{
+		Use:   "get <key>",
+		Short: "Get a value by key",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target, err := resolveTarget()
+			if err != nil {
+				return err
+			}
+
+			if target.IsLocal() {
+				if err := ensureNode(); err != nil {
+					return err
+				}
+			}
+
+			return client.KVGet(target, namespace, args[0])
+		},
+	}
+
+	cmd.Flags().StringVar(&namespace, "ns", "default", "Namespace")
+
+	return cmd
+}
+
+func kvListCmd() *cobra.Command {
+	var namespace string
+
+	cmd := &cobra.Command{
+		Use:   "list [prefix]",
+		Short: "List keys",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target, err := resolveTarget()
+			if err != nil {
+				return err
+			}
+
+			if target.IsLocal() {
+				if err := ensureNode(); err != nil {
+					return err
+				}
+			}
+
+			prefix := ""
+			if len(args) > 0 {
+				prefix = args[0]
+			}
+
+			return client.KVList(target, namespace, prefix)
+		},
+	}
+
+	cmd.Flags().StringVar(&namespace, "ns", "default", "Namespace")
+
+	return cmd
+}
+
+func kvDeleteCmd() *cobra.Command {
+	var namespace string
+
+	cmd := &cobra.Command{
+		Use:   "delete <key>",
+		Short: "Delete a key",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target, err := resolveTarget()
+			if err != nil {
+				return err
+			}
+
+			if target.IsLocal() {
+				if err := ensureNode(); err != nil {
+					return err
+				}
+			}
+
+			return client.KVDelete(target, namespace, args[0])
+		},
+	}
+
+	cmd.Flags().StringVar(&namespace, "ns", "default", "Namespace")
+
+	return cmd
 }
 
 // ---------------------------------------------------------------------------
@@ -650,10 +788,6 @@ func serverAddCmd() *cobra.Command {
 			name := args[0]
 			url := args[1]
 
-			if token == "" {
-				return fmt.Errorf("--token is required")
-			}
-
 			dir := dataDir()
 			servers, err := config.LoadServersConfig(dir)
 			if err != nil {
@@ -674,7 +808,7 @@ func serverAddCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&token, "token", "", "Auth token for the server")
+	cmd.Flags().StringVar(&token, "token", "", "Auth token for the server (optional for relay URLs)")
 
 	return cmd
 }
@@ -734,6 +868,106 @@ func serverListCmd() *cobra.Command {
 }
 
 // ---------------------------------------------------------------------------
+// setupCmd
+// ---------------------------------------------------------------------------
+
+func setupCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "setup [relay-url]",
+		Short: "Connect this node to a relay via device authorization",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			relayURL := "https://relay.codespace.sh"
+			if len(args) > 0 {
+				relayURL = args[0]
+			}
+
+			dir := dataDir()
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return fmt.Errorf("creating data dir: %w", err)
+			}
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			sigCh := make(chan os.Signal, 1)
+			signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
+			go func() {
+				<-sigCh
+				cancel()
+			}()
+
+			return tunnel.RunSetup(ctx, relayURL, dir)
+		},
+	}
+}
+
+// ---------------------------------------------------------------------------
+// relayCmd
+// ---------------------------------------------------------------------------
+
+func relayCmd() *cobra.Command {
+	var (
+		baseURL     string
+		wgPort      uint16
+		wgEndpoint  string
+		listen      string
+		relayDir    string
+		authMode    string
+		authToken   string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "relay",
+		Short: "Run a CodeWire relay server",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if baseURL == "" {
+				return fmt.Errorf("--base-url is required")
+			}
+
+			if relayDir == "" {
+				relayDir = filepath.Join(dataDir(), "relay")
+			}
+
+			if err := os.MkdirAll(relayDir, 0o755); err != nil {
+				return fmt.Errorf("creating relay data dir: %w", err)
+			}
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			sigCh := make(chan os.Signal, 1)
+			signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
+			go func() {
+				<-sigCh
+				fmt.Fprintln(os.Stderr, "[cw] relay shutting down...")
+				cancel()
+			}()
+
+			return tunnel.RunRelay(ctx, tunnel.RelayConfig{
+				BaseURL:           baseURL,
+				WireguardEndpoint: wgEndpoint,
+				WireguardPort:     wgPort,
+				ListenAddr:        listen,
+				DataDir:           relayDir,
+				AuthMode:          authMode,
+				AuthToken:         authToken,
+			})
+		},
+	}
+
+	cmd.Flags().StringVar(&baseURL, "base-url", "", "Public base URL of the relay (e.g. https://relay.codespace.sh)")
+	cmd.Flags().Uint16Var(&wgPort, "wg-port", 41820, "WireGuard UDP port")
+	cmd.Flags().StringVar(&wgEndpoint, "wg-endpoint", "", "WireGuard endpoint to advertise (defaults to base-url hostname:wg-port)")
+	cmd.Flags().StringVar(&listen, "listen", ":8080", "HTTP listen address")
+	cmd.Flags().StringVar(&relayDir, "data-dir", "", "Data directory for relay (default: ~/.codewire/relay)")
+	cmd.Flags().StringVar(&authMode, "auth-mode", "none", "Auth mode: token, none")
+	cmd.Flags().StringVar(&authToken, "auth-token", "", "Shared auth token (required when --auth-mode=token)")
+
+	return cmd
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -767,11 +1001,16 @@ func resolveTarget() (*client.Target, error) {
 	}
 
 	// Treat serverFlag as a direct URL.
-	if tokenFlag == "" {
-		return nil, fmt.Errorf("--token required for ad-hoc server")
+	url := serverFlag
+	if strings.HasPrefix(url, "https://") || strings.HasPrefix(url, "http://") {
+		// Relay URL — token is optional (relay handles auth).
+		return &client.Target{URL: url, Token: tokenFlag}, nil
 	}
 
-	url := serverFlag
+	if tokenFlag == "" {
+		return nil, fmt.Errorf("--token required for ad-hoc WebSocket server")
+	}
+
 	if !strings.HasPrefix(url, "ws://") && !strings.HasPrefix(url, "wss://") {
 		url = "ws://" + url
 	}
@@ -818,13 +1057,13 @@ func ensureNode() error {
 	return fmt.Errorf("node failed to start (socket not available after 5s)")
 }
 
-func loadNatsConfig() (*config.NatsConfig, error) {
+func resolveRelayURL() (string, error) {
 	cfg, err := config.LoadConfig(dataDir())
 	if err != nil {
-		return nil, fmt.Errorf("loading config: %w", err)
+		return "", fmt.Errorf("loading config: %w", err)
 	}
-	if cfg.Nats == nil {
-		return nil, fmt.Errorf("NATS not configured (set CODEWIRE_NATS_URL or add [nats] to config.toml)")
+	if cfg.RelayURL == nil || *cfg.RelayURL == "" {
+		return "", fmt.Errorf("relay not configured (run 'cw setup <relay-url>' or set CODEWIRE_RELAY_URL)")
 	}
-	return cfg.Nats, nil
+	return *cfg.RelayURL, nil
 }

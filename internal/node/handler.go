@@ -48,7 +48,7 @@ func handleClient(reader connection.FrameReader, writer connection.FrameWriter, 
 		})
 
 	case "Launch":
-		id, launchErr := manager.Launch(req.Command, req.WorkingDir)
+		id, launchErr := manager.Launch(req.Command, req.WorkingDir, req.Tags...)
 		if launchErr != nil {
 			msg := launchErr.Error()
 			_ = writer.SendResponse(&protocol.Response{
@@ -129,6 +129,14 @@ func handleClient(reader connection.FrameReader, writer connection.FrameWriter, 
 
 	case "KillAll":
 		count := manager.KillAll()
+		c := uint(count)
+		_ = writer.SendResponse(&protocol.Response{
+			Type:  "KilledAll",
+			Count: &c,
+		})
+
+	case "KillByTags":
+		count := manager.KillByTags(req.Tags)
 		c := uint(count)
 		_ = writer.SendResponse(&protocol.Response{
 			Type:  "KilledAll",
@@ -222,6 +230,73 @@ func handleClient(reader connection.FrameReader, writer connection.FrameWriter, 
 		if watchErr := handleWatchSession(reader, writer, manager, *req.ID, includeHistory, req.HistoryLines); watchErr != nil {
 			slog.Debug("watch session ended", "id", *req.ID, "err", watchErr)
 		}
+
+	case "Subscribe":
+		var eventTypes []session.EventType
+		for _, et := range req.EventTypes {
+			eventTypes = append(eventTypes, session.EventType(et))
+		}
+		sub := manager.Subscriptions.Subscribe(req.ID, req.Tags, eventTypes)
+		subID := sub.ID
+		_ = writer.SendResponse(&protocol.Response{
+			Type:           "SubscribeAck",
+			SubscriptionID: &subID,
+		})
+
+		// Stream events until client disconnects.
+		disconnectCh := make(chan struct{}, 1)
+		go func() {
+			for {
+				f, err := reader.ReadFrame()
+				if err != nil || f == nil {
+					close(disconnectCh)
+					return
+				}
+				// Check for Unsubscribe.
+				if f.Type == protocol.FrameControl {
+					var unsubReq protocol.Request
+					if json.Unmarshal(f.Payload, &unsubReq) == nil && unsubReq.Type == "Unsubscribe" {
+						close(disconnectCh)
+						return
+					}
+				}
+			}
+		}()
+
+		for {
+			select {
+			case se, ok := <-sub.Ch:
+				if !ok {
+					return
+				}
+				sessionID := se.SessionID
+				_ = writer.SendResponse(&protocol.Response{
+					Type:           "Event",
+					SubscriptionID: &subID,
+					SessionID:      &sessionID,
+					Event: &protocol.SessionEvent{
+						Timestamp: se.Event.Timestamp.Format(time.RFC3339Nano),
+						EventType: string(se.Event.Type),
+						Data:      se.Event.Data,
+					},
+				})
+			case <-disconnectCh:
+				manager.Subscriptions.Unsubscribe(sub.ID)
+				_ = writer.SendResponse(&protocol.Response{
+					Type: "Unsubscribed",
+				})
+				return
+			}
+		}
+
+	case "Wait":
+		handleWait(reader, writer, manager, req)
+
+	case "KVSet", "KVGet", "KVDelete", "KVList":
+		_ = writer.SendResponse(&protocol.Response{
+			Type:    "Error",
+			Message: "not connected to a relay — KV operations require relay mode",
+		})
 
 	default:
 		_ = writer.SendResponse(&protocol.Response{
@@ -460,6 +535,119 @@ func handleWatchSession(
 	}
 }
 
+// handleWait blocks until the target session(s) complete or timeout.
+func handleWait(
+	reader connection.FrameReader,
+	writer connection.FrameWriter,
+	manager *session.SessionManager,
+	req protocol.Request,
+) {
+	var timeout time.Duration
+	if req.TimeoutSeconds != nil && *req.TimeoutSeconds > 0 {
+		timeout = time.Duration(*req.TimeoutSeconds) * time.Second
+	} else {
+		timeout = 24 * time.Hour // default: very long
+	}
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	condition := req.Condition
+	if condition == "" {
+		condition = "all"
+	}
+
+	// Subscribe to status events.
+	var eventTypes []session.EventType
+	eventTypes = append(eventTypes, session.EventSessionStatus)
+
+	sub := manager.Subscriptions.Subscribe(req.ID, req.Tags, eventTypes)
+	defer manager.Subscriptions.Unsubscribe(sub.ID)
+
+	// Check if already completed.
+	if req.ID != nil {
+		info, _, err := manager.GetStatus(*req.ID)
+		if err == nil && (strings.Contains(info.Status, "completed") || strings.Contains(info.Status, "killed")) {
+			sessions := []protocol.SessionInfo{info}
+			_ = writer.SendResponse(&protocol.Response{
+				Type:     "WaitResult",
+				Sessions: &sessions,
+			})
+			return
+		}
+	}
+
+	// If waiting by tags, check if matching sessions are already done.
+	if len(req.Tags) > 0 {
+		matching := manager.ListByTags(req.Tags)
+		allDone := true
+		anyDone := false
+		for _, s := range matching {
+			if strings.Contains(s.Status, "completed") || strings.Contains(s.Status, "killed") {
+				anyDone = true
+			} else {
+				allDone = false
+			}
+		}
+		if (condition == "all" && allDone && len(matching) > 0) || (condition == "any" && anyDone) {
+			_ = writer.SendResponse(&protocol.Response{
+				Type:     "WaitResult",
+				Sessions: &matching,
+			})
+			return
+		}
+	}
+
+	for {
+		select {
+		case _, ok := <-sub.Ch:
+			if !ok {
+				return
+			}
+
+			// Re-check condition.
+			if req.ID != nil {
+				info, _, err := manager.GetStatus(*req.ID)
+				if err == nil && (strings.Contains(info.Status, "completed") || strings.Contains(info.Status, "killed")) {
+					sessions := []protocol.SessionInfo{info}
+					_ = writer.SendResponse(&protocol.Response{
+						Type:     "WaitResult",
+						Sessions: &sessions,
+					})
+					return
+				}
+			}
+
+			if len(req.Tags) > 0 {
+				matching := manager.ListByTags(req.Tags)
+				allDone := true
+				anyDone := false
+				for _, s := range matching {
+					if strings.Contains(s.Status, "completed") || strings.Contains(s.Status, "killed") {
+						anyDone = true
+					} else {
+						allDone = false
+					}
+				}
+				if (condition == "all" && allDone && len(matching) > 0) || (condition == "any" && anyDone) {
+					_ = writer.SendResponse(&protocol.Response{
+						Type:     "WaitResult",
+						Sessions: &matching,
+					})
+					return
+				}
+			}
+
+		case <-timer.C:
+			_ = writer.SendResponse(&protocol.Response{
+				Type:    "Error",
+				Message: "wait timed out",
+			})
+			return
+		}
+	}
+}
+
 // handleLogs reads a session's log file and sends it to the client. If follow
 // is true, it polls for new data every 500ms until the connection is closed.
 func handleLogs(writer connection.FrameWriter, logPath string, follow bool, tail *uint) error {
@@ -470,7 +658,7 @@ func handleLogs(writer connection.FrameWriter, logPath string, follow bool, tail
 		} else {
 			return writer.SendResponse(&protocol.Response{
 				Type:    "Error",
-				Message: fmt.Sprintf("reading log file: %v", err),
+				Message: "failed to read session log",
 			})
 		}
 	}
