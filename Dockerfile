@@ -1,24 +1,23 @@
-FROM rust:1.88-bookworm AS builder
-WORKDIR /build
-COPY Cargo.toml Cargo.lock ./
-COPY src/ src/
-RUN cargo build --release --features nats
+# Build stage
+FROM golang:1.23-alpine AS builder
 
-FROM node:22-bookworm-slim
+RUN apk add --no-cache git
 
-# Install Claude Code CLI
-RUN npm install -g @anthropic-ai/claude-code
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
 
-# Copy codewire binary
-COPY --from=builder /build/target/release/cw /usr/local/bin/cw
+COPY . .
+RUN CGO_ENABLED=0 go build -o cw ./cmd/cw
 
-# Create non-root user (Claude Code refuses --dangerously-skip-permissions as root)
-RUN useradd -m -s /bin/bash codewire
-USER codewire
-WORKDIR /home/codewire
+# Runtime stage
+FROM alpine:3.19
 
-ENV TERM=xterm-256color
-ENV HOME=/home/codewire
+RUN apk add --no-cache bash ca-certificates
+
+COPY --from=builder /app/cw /usr/local/bin/cw
+
+EXPOSE 9100
 
 ENTRYPOINT ["cw"]
 CMD ["node"]

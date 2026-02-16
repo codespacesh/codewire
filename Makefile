@@ -1,26 +1,32 @@
-.PHONY: test test-all test-manual build install clean
+.PHONY: build test test-all test-manual lint clean install
 
-# Run unit and integration tests
+BINARY := cw
+BUILD_DIR := ./cmd/cw
+
+# Build release binary
+build:
+	go build -o $(BINARY) $(BUILD_DIR)
+
+# Run unit tests
 test:
-	cargo test
+	go test ./internal/...
 
 # Run all tests including manual CLI tests
 test-all: test test-manual
 
 # Run manual CLI integration test
-test-manual:
-	cargo build --release
-	./tests/manual_test.sh ./target/release/cw
+test-manual: build
+	./tests/manual_test.sh ./$(BINARY)
 
-# Build release binary
-build:
-	cargo build --release
+# Run linter
+lint:
+	go vet ./...
 
 # Install to /usr/local/bin
 install: build
-	cp target/release/cw /usr/local/bin/cw
+	cp $(BINARY) /usr/local/bin/$(BINARY)
 
 # Clean build artifacts
 clean:
-	cargo clean
+	rm -f $(BINARY)
 	rm -rf ~/.codewire/test-*
