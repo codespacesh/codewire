@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"nhooyr.io/websocket"
@@ -16,6 +17,7 @@ import (
 	"github.com/codespacesh/codewire/internal/config"
 	"github.com/codespacesh/codewire/internal/connection"
 	"github.com/codespacesh/codewire/internal/session"
+	"github.com/codespacesh/codewire/internal/tunnel"
 )
 
 // Node is the daemon that manages PTY sessions, accepting connections over
@@ -76,12 +78,30 @@ func (n *Node) Run(ctx context.Context) error {
 
 	defer n.Cleanup()
 
-	// Start WebSocket server if configured.
+	// Start WebSocket server if configured (direct mode).
 	if n.config.Node.Listen != nil {
 		addr := *n.config.Node.Listen
 		go func() {
 			if wsErr := n.runWSServer(ctx, addr); wsErr != nil {
 				slog.Error("websocket server error", "err", wsErr)
+			}
+		}()
+	}
+
+	// Start WireGuard tunnel if relay URL is configured.
+	if n.config.RelayURL != nil {
+		go func() {
+			tun, err := tunnel.Connect(ctx, *n.config.RelayURL, n.dataDir)
+			if err != nil {
+				slog.Error("tunnel connection failed", "err", err)
+				return
+			}
+			defer tun.Close()
+			slog.Info("tunnel connected", "url", tun.URL())
+
+			// Serve HTTP/WS on the tunnel listener.
+			if listener := tun.Listener(); listener != nil {
+				n.runWSServerOnListener(ctx, listener)
 			}
 		}()
 	}
@@ -142,7 +162,14 @@ func (n *Node) Cleanup() {
 func (n *Node) runWSServer(ctx context.Context, addr string) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		token := r.URL.Query().Get("token")
+		// Check Authorization header first, fall back to query param.
+		token := ""
+		if authHeader := r.Header.Get("Authorization"); strings.HasPrefix(authHeader, "Bearer ") {
+			token = strings.TrimPrefix(authHeader, "Bearer ")
+		}
+		if token == "" {
+			token = r.URL.Query().Get("token")
+		}
 		if !auth.ValidateToken(n.dataDir, token) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
@@ -179,6 +206,40 @@ func (n *Node) runWSServer(ctx context.Context, addr string) error {
 		return fmt.Errorf("websocket server: %w", err)
 	}
 	return nil
+}
+
+// runWSServerOnListener serves HTTP/WS on an arbitrary net.Listener (used for
+// tunnel connections where auth is handled at the relay level).
+func (n *Node) runWSServerOnListener(ctx context.Context, ln net.Listener) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		wsConn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+			InsecureSkipVerify: true, // Relay handles TLS
+		})
+		if err != nil {
+			slog.Error("tunnel websocket accept error", "err", err)
+			return
+		}
+
+		wsCtx := r.Context()
+		reader := connection.NewWSReader(wsCtx, wsConn)
+		writer := connection.NewWSWriter(wsCtx, wsConn)
+		handleClient(reader, writer, n.Manager)
+	})
+
+	srv := &http.Server{Handler: mux}
+
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		srv.Shutdown(shutdownCtx)
+	}()
+
+	slog.Info("tunnel HTTP/WS server started")
+	if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
+		slog.Error("tunnel HTTP/WS server error", "err", err)
+	}
 }
 
 // persistenceManager debounces persist signals from the session manager.

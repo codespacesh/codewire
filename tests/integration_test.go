@@ -114,6 +114,17 @@ type frameResult struct {
 	err   error
 }
 
+// connectRaw dials the Unix socket and returns the raw connection plus a
+// FrameReader and FrameWriter. The caller owns conn and should close it.
+func connectRaw(t *testing.T, sockPath string) (net.Conn, connection.FrameReader, connection.FrameWriter) {
+	t.Helper()
+	conn, err := net.Dial("unix", sockPath)
+	if err != nil {
+		t.Fatalf("connectRaw: %v", err)
+	}
+	return conn, connection.NewUnixReader(conn), connection.NewUnixWriter(conn)
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------

@@ -37,10 +37,32 @@ func (t *Target) Connect() (connection.FrameReader, connection.FrameWriter, erro
 		return connection.NewUnixReader(conn), connection.NewUnixWriter(conn), nil
 	}
 
-	// Remote WebSocket connection.
+	// Determine WebSocket URL.
+	wsURL := t.URL
+	if strings.HasPrefix(wsURL, "https://") {
+		// Relay URL: convert https:// → wss://
+		wsURL = "wss://" + strings.TrimPrefix(wsURL, "https://")
+		if !strings.HasSuffix(wsURL, "/ws") {
+			wsURL += "/ws"
+		}
+	} else if strings.HasPrefix(wsURL, "http://") {
+		wsURL = "ws://" + strings.TrimPrefix(wsURL, "http://")
+		if !strings.HasSuffix(wsURL, "/ws") {
+			wsURL += "/ws"
+		}
+	} else if !strings.HasSuffix(wsURL, "/ws") {
+		wsURL += "/ws"
+	}
+
+	// Send token via Authorization header only (not in URL query to avoid log exposure).
 	ctx := context.Background()
-	wsURL := t.URL + "/ws?token=" + t.Token
-	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	opts := &websocket.DialOptions{}
+	if t.Token != "" {
+		opts.HTTPHeader = make(map[string][]string)
+		opts.HTTPHeader["Authorization"] = []string{"Bearer " + t.Token}
+	}
+
+	conn, _, err := websocket.Dial(ctx, wsURL, opts)
 	if err != nil {
 		return nil, nil, fmt.Errorf("connecting to remote server: %w", err)
 	}

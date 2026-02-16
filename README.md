@@ -72,19 +72,20 @@ cw logs 1
 
 ## Commands
 
-### `cw launch [--dir <dir>] -- <command> [args...]`
+### `cw launch [--dir <dir>] [--tag <tag>...] -- <command> [args...]`
 
-Start a new session running the given command in a persistent PTY. Everything after `--` is the command and its arguments.
+Start a new session running the given command in a persistent PTY. Everything after `--` is the command and its arguments. Tags enable filtering and coordination.
 
 ```bash
 cw launch -- claude -p "refactor the database layer"
 cw launch --dir /home/coder/project -- claude -p "add unit tests for auth"
-cw launch -- aider --message "fix the login bug"
+cw launch --tag worker --tag build -- claude -p "fix tests"
 cw launch -- bash -c "npm test && npm run lint"
 ```
 
 Options:
 - `--dir`, `-d` — Working directory (defaults to current dir)
+- `--tag`, `-t` — Tag the session (repeatable)
 
 ### `cw list`
 
@@ -115,11 +116,12 @@ Works on completed sessions too — review what the agent did after it finished.
 
 ### `cw kill <id>`
 
-Terminate a session.
+Terminate a session. Supports tag-based filtering.
 
 ```bash
 cw kill 3
 cw kill --all
+cw kill --tag worker          # Kill all sessions tagged "worker"
 ```
 
 ### `cw send <id> [input]`
@@ -151,6 +153,63 @@ Get detailed session status including PID, output size, and recent output.
 ```bash
 cw status 1                     # Human-readable format
 cw status 1 --json              # JSON output
+```
+
+### `cw subscribe [node] [--tag <tag>] [--event <type>]`
+
+Subscribe to real-time session events. Events stream until you disconnect.
+
+```bash
+cw subscribe --tag worker                           # Events from sessions tagged "worker"
+cw subscribe --event session.status                  # Only status change events
+cw subscribe dev-1 --tag build                       # Events from remote node
+```
+
+### `cw wait [node:]<id> [--tag <tag>] [--condition all|any] [--timeout <seconds>]`
+
+Block until sessions complete.
+
+```bash
+cw wait 3                                            # Wait for session 3 to complete
+cw wait --tag worker --condition all                 # Wait for ALL workers to complete
+cw wait --tag worker --condition any --timeout 60    # Wait for ANY worker, 60s timeout
+```
+
+### `cw nodes`
+
+List all nodes registered with the relay.
+
+```bash
+cw nodes
+```
+
+### `cw setup [relay-url]`
+
+Authorize this node with a relay using the device authorization flow.
+
+```bash
+cw setup https://relay.codespace.sh
+```
+
+### `cw relay`
+
+Run a relay server. The relay provides WireGuard tunneling, node discovery, and shared KV storage.
+
+```bash
+cw relay --base-url https://relay.example.com --data-dir /data/relay
+```
+
+### `cw kv`
+
+Shared key-value store (requires relay connection).
+
+```bash
+cw kv set build_status done                          # Set key
+cw kv get build_status                               # Get key
+cw kv list task:                                     # List by prefix
+cw kv set --ttl 60s lock "node-a"                    # Auto-expiring key
+cw kv set --ns myproject key value                   # Namespaced
+cw kv delete build_status                            # Delete key
 ```
 
 ### `cw mcp-server`
@@ -231,15 +290,18 @@ Communication between client and daemon uses a frame-based binary protocol over 
 ~/.codewire/
 ├── codewire.sock         # Unix domain socket
 ├── codewire.pid          # Node PID file
-├── token                 # Auth token
+├── token                 # Auth token (for direct WS fallback)
+├── wg_private_key        # WireGuard private key (0600)
 ├── config.toml           # Configuration (optional)
 ├── servers.toml          # Saved remote servers (optional)
 ├── sessions.json         # Session metadata
 └── sessions/
     ├── 1/
-    │   └── output.log    # Captured PTY output
+    │   ├── output.log    # Captured PTY output
+    │   └── events.jsonl  # Metadata event log
     └── 2/
-        └── output.log
+        ├── output.log
+        └── events.jsonl
 ```
 
 ### Configuration
@@ -248,198 +310,183 @@ All settings via `~/.codewire/config.toml` or environment variables:
 
 ```toml
 [node]
-name = "my-node"                    # CODEWIRE_NODE_NAME — node name for fleet
-listen = "0.0.0.0:9100"             # CODEWIRE_LISTEN — WebSocket listener address
-external_url = "wss://host/ws"      # CODEWIRE_EXTERNAL_URL — advertised URL for fleet attach
-
-[nats]
-url = "nats://nats.example.com:4222"   # CODEWIRE_NATS_URL
-token = "secret"                        # CODEWIRE_NATS_TOKEN
-creds_file = "~/.codewire/fleet.creds"  # CODEWIRE_NATS_CREDS
+name = "my-node"                          # CODEWIRE_NODE_NAME
+listen = "0.0.0.0:9100"                   # CODEWIRE_LISTEN — direct WebSocket (optional)
+external_url = "wss://host/ws"            # CODEWIRE_EXTERNAL_URL
+relay_url = "https://relay.codespace.sh"  # CODEWIRE_RELAY_URL — opt-in remote access
 ```
 
-When no config file exists, codewire runs with defaults (Unix socket only, no WS, no fleet).
+When no config file exists, codewire runs in standalone mode (Unix socket only, no relay).
 
-## Remote Access (WebSocket)
+## Remote Access (WireGuard Relay)
 
-Enable WebSocket access by setting `listen` in [Configuration](#configuration), then start the daemon:
+Codewire uses WireGuard tunneling for remote access. Nodes establish userspace WireGuard tunnels to a relay server — no root required, works behind NAT.
+
+### Quick Setup
 
 ```bash
-# On your local machine: save the remote server
-cw server add my-server ws://remote-host:9100 --token <token>
+# Authorize your node with a relay
+cw setup https://relay.codespace.sh
 
-# Use it
+# That's it. Your node is now accessible remotely.
+```
+
+The setup flow generates a WireGuard key pair, authorizes via a device code (browser-based), and starts the tunnel.
+
+### Remote Commands
+
+All commands accept an optional node prefix for remote access:
+
+```bash
+# Local (no prefix)
+cw list                                    # Local sessions
+cw attach 3                                # Local session
+
+# Remote (node prefix)
+cw nodes                                   # List all nodes from relay
+cw list dev-1                              # Sessions on dev-1
+cw attach dev-1:3                          # Session 3 on dev-1
+cw launch dev-1 -- claude -p "fix bug"     # Launch on dev-1
+cw kill dev-1:3                            # Kill on dev-1
+```
+
+### Direct WebSocket (alternative)
+
+You can also connect directly via WebSocket without a relay:
+
+```bash
+cw server add my-server wss://remote-host:9100 --token <token>
 cw --server my-server list
 cw --server my-server attach 1
 ```
 
-WSS (TLS) is supported automatically — use `wss://` URLs for connections through TLS proxies like Caddy or Cloudflare.
-
-## Fleet Discovery (NATS)
-
-Discover and manage codewire daemons across multiple machines using NATS as the control plane. Fleet support is built into the binary — no feature flags needed.
-
-See [Configuration](#configuration) for all config options. Fleet requires at minimum `[nats] url`.
-
-### Fleet Commands
-
-```bash
-# Discover all nodes
-cw fleet list
-cw fleet list --json
-
-# Launch a session on a specific node
-cw fleet launch --on gpu-box -- claude -p "train the model"
-
-# Send input to a remote session
-cw fleet send gpu-box:1 "Status update?"
-
-# Kill a remote session
-cw fleet kill gpu-box:1
-
-# Attach to a remote session (discovers URL via NATS, connects via WSS)
-cw fleet attach gpu-box:1
-```
-
 ### Architecture
 
-- **NATS** = control plane (discovery, commands — JSON messages)
-- **WSS** = data plane (PTY attach/streaming — binary frames)
-- NATS never carries binary PTY data
-- Nodes heartbeat every 30 seconds on `cw.fleet.heartbeat`
-
-#### NATS Subjects
-
-| Subject | Direction | Purpose |
-|---------|-----------|---------|
-| `cw.fleet.discover` | Broadcast | Discovery — all nodes reply with `NodeInfo` |
-| `cw.fleet.heartbeat` | Publish | Nodes publish `NodeInfo` every 30s |
-| `cw.<node>.list` | Request-reply | List sessions on a node |
-| `cw.<node>.launch` | Request-reply | Launch session on a node |
-| `cw.<node>.kill` | Request-reply | Kill session on a node |
-| `cw.<node>.status` | Request-reply | Get session status on a node |
-| `cw.<node>.send` | Request-reply | Send input to session on a node |
-
-All messages are JSON-encoded `FleetRequest`/`FleetResponse` (see `internal/protocol/fleet_messages.go`). Binary PTY data never travels over NATS.
-
-### Communication Model
-
-Fleet > Node > Session
-
-- **Fleet**: All nodes connected via NATS
-- **Node**: A `cw` process on one machine
-- **Session**: A PTY process (Claude, shell, etc.)
-
-#### Session-to-session (same node)
-
-```bash
-cw send <id> "hello"       # Inject input into a session's stdin
-cw watch <id>              # Stream a session's stdout
+```
+                          INTERNET
+                             |
+                    +--------+--------+
+                    |   cw relay      |
+                    | HTTPS :443      |  <- Clients connect here
+                    | WG UDP :41820   |  <- Nodes tunnel here
+                    | /api/v1/nodes   |  <- Node discovery
+                    +--------+--------+
+                        |         |
+           WG tunnel    |         |   WG tunnel
+           (UDP)        |         |   (UDP)
+                        |         |
+                +-------+--+  +---+-------+
+                | cw node  |  | cw node   |
+                | "dev-1"  |  | "gpu-box" |
+                +----------+  +-----------+
 ```
 
-#### Session-to-session (across nodes, via NATS)
-
-```bash
-cw fleet send <node>:<id> "hello"    # Inject input via NATS
-cw fleet attach <node>:<id>          # Stream output via WSS
-```
-
-#### Node-to-node
-
-```bash
-cw fleet list                            # Discover all nodes
-cw fleet launch --on <node> -- <cmd>     # Launch remotely
-cw fleet kill <node>:<id>                # Kill remotely
-```
+- **Relay** = WireGuard hub + HTTP API (node discovery, shared KV, device auth)
+- **Nodes** = userspace WireGuard clients, serve HTTP/WS on tunnel listener
+- **Clients** = connect via relay, same wire protocol as local Unix socket
 
 ### Local Development (Docker Compose)
 
-The repo includes a Docker Compose stack for local fleet development and testing:
+The repo includes a Docker Compose stack:
 
-- **NATS** — message broker on `localhost:4222` (monitor: `localhost:8222`)
-- **Caddy** — TLS reverse proxy on `localhost:9443`
+- **Relay** — WireGuard + HTTP API on `localhost:8080`
+- **Caddy** — TLS reverse proxy on `localhost:9443` with wildcard subdomain support
 - **Codewire** — containerized node (`docker-test`) on `localhost:9100`
 
 ```bash
-# Copy env file (optionally set ANTHROPIC_API_KEY for Claude e2e tests)
-cp .env.example .env
-
 # Start the stack
 docker compose up -d --build
 
-# Discover the containerized node
-CODEWIRE_NATS_URL=nats://127.0.0.1:4222 cw fleet list
-
-# Launch a session on the container
-CODEWIRE_NATS_URL=nats://127.0.0.1:4222 cw fleet launch --on docker-test -- echo hello
+# List nodes
+cw nodes
 
 # Tear down
 docker compose down
 ```
 
-## Multi-Agent Patterns
+## LLM Orchestration
 
-CodeWire supports full cross-session communication, enabling multi-agent collaboration:
+CodeWire is designed for LLM-driven multi-agent workflows. Tags, subscriptions, and wait provide structured coordination primitives.
 
-### Multiple Attachments
+### Tags
 
-Multiple clients can attach to the same session simultaneously. Perfect for pair programming or monitoring.
+Label sessions at launch for filtering and coordination:
 
 ```bash
-# Terminal 1: Attach to session
+cw launch --tag worker --tag build -- claude -p "fix tests"
+cw launch --tag worker --tag lint -- claude -p "fix lint issues"
+
+# List sessions by tag (via MCP or API)
+# Kill all workers
+cw kill --tag worker
+```
+
+### Subscribe to Events
+
+Stream structured events from sessions:
+
+```bash
+# Watch all status changes for "worker" sessions
+cw subscribe --tag worker --event session.status
+
+# Subscribe to all events from session 3
+cw subscribe --session 3
+```
+
+Event types: `session.created`, `session.status`, `session.output_summary`, `session.input`, `session.attached`, `session.detached`
+
+### Wait for Completion
+
+Block until sessions finish — replaces polling:
+
+```bash
+# Wait for session 3 to complete
+cw wait 3
+
+# Wait for ALL workers to complete
+cw wait --tag worker --condition all
+
+# Wait for ANY worker to complete, 60s timeout
+cw wait --tag worker --condition any --timeout 60
+```
+
+### Multi-Agent Patterns
+
+**Supervisor pattern** — one orchestrator coordinates workers:
+
+```bash
+# Launch tagged workers
+cw launch --tag worker -- claude -p "implement feature X"
+cw launch --tag worker -- claude -p "write tests for X"
+
+# Wait for all workers to finish
+cw wait --tag worker --condition all --timeout 300
+
+# Check results
+cw list
+```
+
+**Agent swarms** — parallel agents with cross-session communication:
+
+```bash
+cw launch --tag backend -- claude -p "optimize queries"
+cw launch --tag frontend -- claude -p "optimize bundle"
+
+# Send coordination message
+cw send 1 "Backend ready for integration"
+
+# Monitor in real-time
+cw watch 2 --tail 100
+```
+
+**Multiple attachments** — multiple clients can attach to the same session:
+
+```bash
+# Terminal 1
 cw attach 1
 
-# Terminal 2: Also attach to same session (both see output)
+# Terminal 2 (both see output)
 cw attach 1
-```
-
-### Supervisor Pattern
-
-One orchestrator LLM coordinates multiple worker sessions:
-
-```bash
-# Launch worker agents
-cw launch -- claude -p "implement feature X"  # Session 1
-cw launch -- claude -p "write tests"          # Session 2
-
-# From supervisor agent (via MCP or CLI):
-cw status 1                                   # Check progress
-cw watch 1 --timeout 30                       # Monitor for 30s
-cw send 1 "Status update?\n"                  # Request update
-```
-
-### Agent Swarms
-
-Multiple agents working in parallel on different tasks:
-
-```bash
-# Launch parallel agents
-cw launch -- claude -p "optimize backend"     # Session 1
-cw launch -- claude -p "optimize frontend"    # Session 2
-cw launch -- claude -p "coordinate both"      # Session 3 (coordinator)
-
-# Coordinator uses MCP or CLI to:
-# - Monitor progress: cw watch 1
-# - Send updates: cw send 1 "Frontend ready for integration"
-# - Check completion: cw status 1
-```
-
-### Debugging & Monitoring
-
-Watch another agent from a separate terminal:
-
-```bash
-# Launch agent
-cw launch -- claude -p "fix auth bug"
-
-# From another terminal, monitor progress
-cw watch 1 --tail 100
-
-# Send test input
-cw send 1 "/help"
-
-# Check detailed status
-cw status 1
 ```
 
 ## Claude Code Integration
@@ -468,17 +515,24 @@ claude mcp add --scope user codewire -- cw mcp-server
 claude mcp add codewire -- cw mcp-server
 ```
 
-This exposes 7 tools:
+This exposes 14 tools:
 
 | Tool | Description |
 |------|-------------|
-| `codewire_launch_session` | Launch new session |
-| `codewire_list_sessions` | List sessions (filter by status) |
+| `codewire_launch_session` | Launch new session (with tags) |
+| `codewire_list_sessions` | List sessions with enriched metadata |
 | `codewire_read_session_output` | Read output snapshot |
 | `codewire_send_input` | Send input to a session |
 | `codewire_watch_session` | Monitor session (time-bounded) |
-| `codewire_get_session_status` | Get detailed status |
-| `codewire_kill_session` | Terminate session |
+| `codewire_get_session_status` | Get detailed status (exit code, duration, etc.) |
+| `codewire_kill_session` | Terminate session (by ID or tags) |
+| `codewire_subscribe` | Subscribe to session events |
+| `codewire_wait_for` | Block until sessions complete |
+| `codewire_list_nodes` | List nodes from relay |
+| `codewire_kv_set` | Set key-value (shared KV store) |
+| `codewire_kv_get` | Get value by key |
+| `codewire_kv_list` | List keys by prefix |
+| `codewire_kv_delete` | Delete key |
 
 ## Contributing
 

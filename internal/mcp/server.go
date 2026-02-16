@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/codespacesh/codewire/internal/config"
 	"github.com/codespacesh/codewire/internal/connection"
 	"github.com/codespacesh/codewire/internal/protocol"
 )
@@ -223,7 +225,7 @@ func getTools() []tool {
 		},
 		{
 			Name:        "codewire_launch_session",
-			Description: "Launch a new CodeWire session",
+			Description: "Launch a new CodeWire session with optional tags for grouping and filtering",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
@@ -236,22 +238,172 @@ func getTools() []tool {
 						"type":        "string",
 						"description": "Working directory (defaults to current dir)",
 					},
+					"tags": map[string]interface{}{
+						"type":        "array",
+						"items":       map[string]interface{}{"type": "string"},
+						"description": "Tags for grouping/filtering (e.g. ['worker', 'build'])",
+					},
 				},
 				"required": []string{"command"},
 			},
 		},
 		{
 			Name:        "codewire_kill_session",
-			Description: "Terminate a running session",
+			Description: "Terminate a running session by ID or by tag filter",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
 					"session_id": map[string]interface{}{
 						"type":        "integer",
-						"description": "The session ID to kill",
+						"description": "The session ID to kill (optional if tags provided)",
+					},
+					"tags": map[string]interface{}{
+						"type":        "array",
+						"items":       map[string]interface{}{"type": "string"},
+						"description": "Kill all sessions matching these tags",
 					},
 				},
-				"required": []string{"session_id"},
+			},
+		},
+		{
+			Name:        "codewire_subscribe",
+			Description: "Subscribe to session events (returns events as they arrive, time-bounded)",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"session_id": map[string]interface{}{
+						"type":        "integer",
+						"description": "Filter by session ID",
+					},
+					"tags": map[string]interface{}{
+						"type":        "array",
+						"items":       map[string]interface{}{"type": "string"},
+						"description": "Filter by tags",
+					},
+					"event_types": map[string]interface{}{
+						"type":        "array",
+						"items":       map[string]interface{}{"type": "string"},
+						"description": "Filter by event type (session.created, session.status, etc.)",
+					},
+					"max_duration_seconds": map[string]interface{}{
+						"type":        "integer",
+						"description": "Maximum subscription duration in seconds (default: 30)",
+					},
+				},
+			},
+		},
+		{
+			Name:        "codewire_wait_for",
+			Description: "Block until session(s) complete. Returns enriched session info when done.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"session_id": map[string]interface{}{
+						"type":        "integer",
+						"description": "Wait for this session ID to complete",
+					},
+					"tags": map[string]interface{}{
+						"type":        "array",
+						"items":       map[string]interface{}{"type": "string"},
+						"description": "Wait for sessions matching these tags",
+					},
+					"condition": map[string]interface{}{
+						"type":        "string",
+						"description": "Wait condition: 'all' (default) or 'any'",
+						"enum":        []string{"all", "any"},
+					},
+					"timeout_seconds": map[string]interface{}{
+						"type":        "integer",
+						"description": "Timeout in seconds (default: 300)",
+					},
+				},
+			},
+		},
+		{
+			Name:        "codewire_list_nodes",
+			Description: "List all registered nodes from the relay",
+			InputSchema: map[string]interface{}{
+				"type":       "object",
+				"properties": map[string]interface{}{},
+			},
+		},
+		{
+			Name:        "codewire_kv_set",
+			Description: "Set a key-value pair in the shared relay store",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"key": map[string]interface{}{
+						"type":        "string",
+						"description": "The key to set",
+					},
+					"value": map[string]interface{}{
+						"type":        "string",
+						"description": "The value to store",
+					},
+					"namespace": map[string]interface{}{
+						"type":        "string",
+						"description": "Namespace (default: 'default')",
+					},
+					"ttl": map[string]interface{}{
+						"type":        "string",
+						"description": "Time-to-live as Go duration (e.g. '60s', '5m')",
+					},
+				},
+				"required": []string{"key", "value"},
+			},
+		},
+		{
+			Name:        "codewire_kv_get",
+			Description: "Get a value from the shared relay store",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"key": map[string]interface{}{
+						"type":        "string",
+						"description": "The key to get",
+					},
+					"namespace": map[string]interface{}{
+						"type":        "string",
+						"description": "Namespace (default: 'default')",
+					},
+				},
+				"required": []string{"key"},
+			},
+		},
+		{
+			Name:        "codewire_kv_list",
+			Description: "List keys from the shared relay store",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"prefix": map[string]interface{}{
+						"type":        "string",
+						"description": "Key prefix to filter by",
+					},
+					"namespace": map[string]interface{}{
+						"type":        "string",
+						"description": "Namespace (default: 'default')",
+					},
+				},
+			},
+		},
+		{
+			Name:        "codewire_kv_delete",
+			Description: "Delete a key from the shared relay store",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"key": map[string]interface{}{
+						"type":        "string",
+						"description": "The key to delete",
+					},
+					"namespace": map[string]interface{}{
+						"type":        "string",
+						"description": "Namespace (default: 'default')",
+					},
+				},
+				"required": []string{"key"},
 			},
 		},
 	}
@@ -288,6 +440,20 @@ func handleToolCall(dataDir string, params json.RawMessage) (string, error) {
 		return toolLaunchSession(dataDir, args)
 	case "codewire_kill_session":
 		return toolKillSession(dataDir, args)
+	case "codewire_subscribe":
+		return toolSubscribe(dataDir, args)
+	case "codewire_wait_for":
+		return toolWaitFor(dataDir, args)
+	case "codewire_list_nodes":
+		return toolListNodes(dataDir, args)
+	case "codewire_kv_set":
+		return toolKVSet(dataDir, args)
+	case "codewire_kv_get":
+		return toolKVGet(dataDir, args)
+	case "codewire_kv_list":
+		return toolKVList(dataDir, args)
+	case "codewire_kv_delete":
+		return toolKVDelete(dataDir, args)
 	default:
 		return "", fmt.Errorf("unknown tool: %s", p.Name)
 	}
@@ -517,10 +683,20 @@ func toolLaunchSession(dataDir string, args map[string]interface{}) (string, err
 		}
 	}
 
+	var tags []string
+	if tagsRaw, ok := args["tags"].([]interface{}); ok {
+		for _, v := range tagsRaw {
+			if s, ok := v.(string); ok {
+				tags = append(tags, s)
+			}
+		}
+	}
+
 	resp, err := nodeRequest(dataDir, &protocol.Request{
 		Type:       "Launch",
 		Command:    command,
 		WorkingDir: workingDir,
+		Tags:       tags,
 	})
 	if err != nil {
 		return "", err
@@ -536,9 +712,37 @@ func toolLaunchSession(dataDir string, args map[string]interface{}) (string, err
 }
 
 func toolKillSession(dataDir string, args map[string]interface{}) (string, error) {
+	// Check if killing by tags.
+	var tags []string
+	if tagsRaw, ok := args["tags"].([]interface{}); ok {
+		for _, v := range tagsRaw {
+			if s, ok := v.(string); ok {
+				tags = append(tags, s)
+			}
+		}
+	}
+
+	if len(tags) > 0 {
+		resp, err := nodeRequest(dataDir, &protocol.Request{
+			Type: "KillByTags",
+			Tags: tags,
+		})
+		if err != nil {
+			return "", err
+		}
+		if resp.Type == "Error" {
+			return fmt.Sprintf("Error: %s", resp.Message), nil
+		}
+		count := uint(0)
+		if resp.Count != nil {
+			count = *resp.Count
+		}
+		return fmt.Sprintf("Killed %d session(s) matching tags %v", count, tags), nil
+	}
+
 	sessionID, err := argUint32(args, "session_id")
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("either session_id or tags required")
 	}
 
 	resp, err := nodeRequest(dataDir, &protocol.Request{
@@ -556,6 +760,188 @@ func toolKillSession(dataDir string, args map[string]interface{}) (string, error
 		return fmt.Sprintf("Killed session %d", *resp.ID), nil
 	}
 	return "Unexpected response", nil
+}
+
+func toolSubscribe(dataDir string, args map[string]interface{}) (string, error) {
+	maxDuration := uint64(30)
+	if v, ok := args["max_duration_seconds"].(float64); ok {
+		maxDuration = uint64(v)
+	}
+
+	var sessionID *uint32
+	if v, ok := args["session_id"].(float64); ok {
+		id := uint32(v)
+		sessionID = &id
+	}
+
+	var tags []string
+	if tagsRaw, ok := args["tags"].([]interface{}); ok {
+		for _, v := range tagsRaw {
+			if s, ok := v.(string); ok {
+				tags = append(tags, s)
+			}
+		}
+	}
+
+	var eventTypes []string
+	if etRaw, ok := args["event_types"].([]interface{}); ok {
+		for _, v := range etRaw {
+			if s, ok := v.(string); ok {
+				eventTypes = append(eventTypes, s)
+			}
+		}
+	}
+
+	return subscribeTimed(dataDir, sessionID, tags, eventTypes, maxDuration)
+}
+
+func toolWaitFor(dataDir string, args map[string]interface{}) (string, error) {
+	var sessionID *uint32
+	if v, ok := args["session_id"].(float64); ok {
+		id := uint32(v)
+		sessionID = &id
+	}
+
+	var tags []string
+	if tagsRaw, ok := args["tags"].([]interface{}); ok {
+		for _, v := range tagsRaw {
+			if s, ok := v.(string); ok {
+				tags = append(tags, s)
+			}
+		}
+	}
+
+	condition, _ := args["condition"].(string)
+	if condition == "" {
+		condition = "all"
+	}
+
+	timeoutSecs := uint64(300)
+	if v, ok := args["timeout_seconds"].(float64); ok {
+		timeoutSecs = uint64(v)
+	}
+
+	return waitForTimed(dataDir, sessionID, tags, condition, timeoutSecs)
+}
+
+func toolListNodes(dataDir string, _ map[string]interface{}) (string, error) {
+	cfg, err := loadRelayConfig(dataDir)
+	if err != nil {
+		return "", err
+	}
+
+	resp, fetchErr := fetchRelayJSON(cfg + "/api/v1/nodes")
+	if fetchErr != nil {
+		return "", fetchErr
+	}
+	return string(resp), nil
+}
+
+func toolKVSet(dataDir string, args map[string]interface{}) (string, error) {
+	key, _ := args["key"].(string)
+	if key == "" {
+		return "", fmt.Errorf("missing key")
+	}
+	value, _ := args["value"].(string)
+	namespace, _ := args["namespace"].(string)
+	if namespace == "" {
+		namespace = "default"
+	}
+	ttl, _ := args["ttl"].(string)
+
+	resp, err := nodeRequest(dataDir, &protocol.Request{
+		Type:      "KVSet",
+		Namespace: namespace,
+		Key:       key,
+		Value:     []byte(value),
+		TTL:       ttl,
+	})
+	if err != nil {
+		return "", err
+	}
+	if resp.Type == "Error" {
+		return fmt.Sprintf("Error: %s", resp.Message), nil
+	}
+	return fmt.Sprintf("Set %s/%s", namespace, key), nil
+}
+
+func toolKVGet(dataDir string, args map[string]interface{}) (string, error) {
+	key, _ := args["key"].(string)
+	if key == "" {
+		return "", fmt.Errorf("missing key")
+	}
+	namespace, _ := args["namespace"].(string)
+	if namespace == "" {
+		namespace = "default"
+	}
+
+	resp, err := nodeRequest(dataDir, &protocol.Request{
+		Type:      "KVGet",
+		Namespace: namespace,
+		Key:       key,
+	})
+	if err != nil {
+		return "", err
+	}
+	if resp.Type == "Error" {
+		return fmt.Sprintf("Error: %s", resp.Message), nil
+	}
+	if resp.Value == nil {
+		return "Key not found", nil
+	}
+	return string(resp.Value), nil
+}
+
+func toolKVList(dataDir string, args map[string]interface{}) (string, error) {
+	prefix, _ := args["prefix"].(string)
+	namespace, _ := args["namespace"].(string)
+	if namespace == "" {
+		namespace = "default"
+	}
+
+	resp, err := nodeRequest(dataDir, &protocol.Request{
+		Type:      "KVList",
+		Namespace: namespace,
+		Key:       prefix,
+	})
+	if err != nil {
+		return "", err
+	}
+	if resp.Type == "Error" {
+		return fmt.Sprintf("Error: %s", resp.Message), nil
+	}
+	if resp.Entries == nil {
+		return "[]", nil
+	}
+	out, err := json.MarshalIndent(resp.Entries, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
+func toolKVDelete(dataDir string, args map[string]interface{}) (string, error) {
+	key, _ := args["key"].(string)
+	if key == "" {
+		return "", fmt.Errorf("missing key")
+	}
+	namespace, _ := args["namespace"].(string)
+	if namespace == "" {
+		namespace = "default"
+	}
+
+	resp, err := nodeRequest(dataDir, &protocol.Request{
+		Type:      "KVDelete",
+		Namespace: namespace,
+		Key:       key,
+	})
+	if err != nil {
+		return "", err
+	}
+	if resp.Type == "Error" {
+		return fmt.Sprintf("Error: %s", resp.Message), nil
+	}
+	return fmt.Sprintf("Deleted %s/%s", namespace, key), nil
 }
 
 // ---------------------------------------------------------------------------
@@ -693,4 +1079,181 @@ func argUint32(args map[string]interface{}, key string) (uint32, error) {
 // endsWithNewline returns true if data ends with a newline byte.
 func endsWithNewline(data []byte) bool {
 	return len(data) > 0 && data[len(data)-1] == '\n'
+}
+
+// subscribeTimed subscribes to events and collects them for up to maxDurationSecs.
+func subscribeTimed(dataDir string, sessionID *uint32, tags, eventTypes []string, maxDurationSecs uint64) (string, error) {
+	sockPath := filepath.Join(dataDir, "codewire.sock")
+	conn, err := net.Dial("unix", sockPath)
+	if err != nil {
+		return "", err
+	}
+	defer conn.Close()
+
+	reader := connection.NewUnixReader(conn)
+	writer := connection.NewUnixWriter(conn)
+
+	req := &protocol.Request{
+		Type:       "Subscribe",
+		ID:         sessionID,
+		Tags:       tags,
+		EventTypes: eventTypes,
+	}
+	if err := writer.SendRequest(req); err != nil {
+		return "", err
+	}
+
+	deadline := time.After(time.Duration(maxDurationSecs) * time.Second)
+
+	type frameResult struct {
+		frame *protocol.Frame
+		err   error
+	}
+	frameCh := make(chan frameResult, 1)
+	go func() {
+		for {
+			f, err := reader.ReadFrame()
+			frameCh <- frameResult{f, err}
+			if err != nil || f == nil {
+				return
+			}
+		}
+	}()
+
+	var events []map[string]interface{}
+
+	for {
+		select {
+		case fr := <-frameCh:
+			if fr.err != nil {
+				out, _ := json.MarshalIndent(events, "", "  ")
+				return string(out), nil
+			}
+			if fr.frame == nil {
+				out, _ := json.MarshalIndent(events, "", "  ")
+				return string(out), nil
+			}
+			if fr.frame.Type != protocol.FrameControl {
+				continue
+			}
+			var resp protocol.Response
+			if err := json.Unmarshal(fr.frame.Payload, &resp); err != nil {
+				continue
+			}
+			switch resp.Type {
+			case "SubscribeAck":
+				// Subscribed OK.
+			case "Event":
+				event := map[string]interface{}{}
+				if resp.SessionID != nil {
+					event["session_id"] = *resp.SessionID
+				}
+				if resp.Event != nil {
+					event["timestamp"] = resp.Event.Timestamp
+					event["type"] = resp.Event.EventType
+					var data interface{}
+					if json.Unmarshal(resp.Event.Data, &data) == nil {
+						event["data"] = data
+					}
+				}
+				events = append(events, event)
+			case "Error":
+				return fmt.Sprintf("Error: %s", resp.Message), nil
+			}
+
+		case <-deadline:
+			out, _ := json.MarshalIndent(events, "", "  ")
+			return string(out), nil
+		}
+	}
+}
+
+// waitForTimed sends a Wait request and blocks for the result.
+func waitForTimed(dataDir string, sessionID *uint32, tags []string, condition string, timeoutSecs uint64) (string, error) {
+	sockPath := filepath.Join(dataDir, "codewire.sock")
+	conn, err := net.Dial("unix", sockPath)
+	if err != nil {
+		return "", err
+	}
+	defer conn.Close()
+
+	reader := connection.NewUnixReader(conn)
+	writer := connection.NewUnixWriter(conn)
+
+	req := &protocol.Request{
+		Type:           "Wait",
+		ID:             sessionID,
+		Tags:           tags,
+		Condition:      condition,
+		TimeoutSeconds: &timeoutSecs,
+	}
+	if err := writer.SendRequest(req); err != nil {
+		return "", err
+	}
+
+	// Read frames until we get the WaitResult.
+	for {
+		f, err := reader.ReadFrame()
+		if err != nil {
+			return "", err
+		}
+		if f == nil {
+			return "", fmt.Errorf("connection closed before wait result")
+		}
+		if f.Type != protocol.FrameControl {
+			continue
+		}
+		var resp protocol.Response
+		if err := json.Unmarshal(f.Payload, &resp); err != nil {
+			continue
+		}
+		switch resp.Type {
+		case "WaitResult":
+			if resp.Sessions != nil {
+				out, _ := json.MarshalIndent(resp.Sessions, "", "  ")
+				return string(out), nil
+			}
+			return "[]", nil
+		case "Error":
+			return fmt.Sprintf("Error: %s", resp.Message), nil
+		}
+	}
+}
+
+// loadRelayConfig returns the relay URL from config.
+func loadRelayConfig(dataDir string) (string, error) {
+	cfg, err := config.LoadConfig(dataDir)
+	if err != nil {
+		return "", fmt.Errorf("loading config: %w", err)
+	}
+	if cfg.RelayURL == nil || *cfg.RelayURL == "" {
+		return "", fmt.Errorf("relay not configured (run 'cw setup <relay-url>' or set CODEWIRE_RELAY_URL)")
+	}
+	return *cfg.RelayURL, nil
+}
+
+// fetchRelayJSON performs a GET request to a relay URL and returns the body.
+func fetchRelayJSON(url string) ([]byte, error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)
+	}
+
+	body := make([]byte, 0)
+	buf := make([]byte, 4096)
+	for {
+		n, err := resp.Body.Read(buf)
+		if n > 0 {
+			body = append(body, buf[:n]...)
+		}
+		if err != nil {
+			break
+		}
+	}
+	return body, nil
 }

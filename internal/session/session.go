@@ -158,12 +158,15 @@ func StatusKilled() SessionStatus { return SessionStatus{State: "killed"} }
 // SessionMeta holds the serialisable metadata for a session. It is written to
 // dataDir/sessions.json so that session IDs survive restarts.
 type SessionMeta struct {
-	ID         uint32    `json:"id"`
-	Prompt     string    `json:"prompt"`
-	WorkingDir string    `json:"working_dir"`
-	CreatedAt  time.Time `json:"created_at"`
-	Status     string    `json:"status"`
-	PID        *uint32   `json:"pid,omitempty"`
+	ID          uint32     `json:"id"`
+	Prompt      string     `json:"prompt"`
+	WorkingDir  string     `json:"working_dir"`
+	CreatedAt   time.Time  `json:"created_at"`
+	Status      string     `json:"status"`
+	PID         *uint32    `json:"pid,omitempty"`
+	Tags        []string   `json:"tags,omitempty"`
+	ExitCode    *int       `json:"exit_code,omitempty"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -180,6 +183,12 @@ type Session struct {
 	statusWatcher *StatusWatcher
 	logPath       string
 	mu            sync.Mutex // protects Meta.Status updates
+
+	// Enriched tracking (new).
+	outputBytes  atomic.Uint64
+	outputLines  atomic.Uint64
+	lastOutputAt atomic.Int64 // unix nano
+	eventLog     *EventLog
 }
 
 // ---------------------------------------------------------------------------
@@ -200,11 +209,12 @@ type AttachChannels struct {
 
 // SessionManager owns all live sessions and persists their metadata to disk.
 type SessionManager struct {
-	mu        sync.RWMutex
-	sessions  map[uint32]*Session
-	nextID    atomic.Uint32
-	dataDir   string
-	PersistCh chan struct{} // exported: the node package drains this to trigger writes
+	mu            sync.RWMutex
+	sessions      map[uint32]*Session
+	nextID        atomic.Uint32
+	dataDir       string
+	PersistCh     chan struct{} // exported: the node package drains this to trigger writes
+	Subscriptions *SubscriptionManager
 }
 
 // NewSessionManager creates a SessionManager rooted at dataDir. It reads
@@ -244,9 +254,10 @@ func NewSessionManager(dataDir string) (*SessionManager, error) {
 	// If the file does not exist we silently start from ID 1.
 
 	sm := &SessionManager{
-		sessions:  make(map[uint32]*Session),
-		dataDir:   dataDir,
-		PersistCh: make(chan struct{}, 1),
+		sessions:      make(map[uint32]*Session),
+		dataDir:       dataDir,
+		PersistCh:     make(chan struct{}, 1),
+		Subscriptions: NewSubscriptionManager(),
 	}
 	sm.nextID.Store(startID)
 	return sm, nil
@@ -261,7 +272,8 @@ func (m *SessionManager) triggerPersist() {
 }
 
 // Launch starts a new PTY session executing command in workingDir.
-func (m *SessionManager) Launch(command []string, workingDir string) (uint32, error) {
+// tags are optional labels for filtering/grouping.
+func (m *SessionManager) Launch(command []string, workingDir string, tags ...string) (uint32, error) {
 	if len(command) == 0 {
 		return 0, fmt.Errorf("command must not be empty")
 	}
@@ -320,6 +332,17 @@ func (m *SessionManager) Launch(command []string, workingDir string) (uint32, er
 	inputCh := make(chan []byte, 256)
 	statusWatcher := NewStatusWatcher(StatusRunning())
 
+	// Open event log.
+	eventsPath := filepath.Join(logDir, "events.jsonl")
+	eventLog, evErr := NewEventLog(eventsPath)
+	if evErr != nil {
+		slog.Error("failed to open event log", "id", id, "err", evErr)
+	}
+
+	if tags == nil {
+		tags = []string{}
+	}
+
 	sess := &Session{
 		Meta: SessionMeta{
 			ID:         id,
@@ -328,17 +351,26 @@ func (m *SessionManager) Launch(command []string, workingDir string) (uint32, er
 			CreatedAt:  time.Now().UTC(),
 			Status:     StatusRunning().String(),
 			PID:        pid,
+			Tags:       tags,
 		},
 		master:        ptmx,
 		broadcaster:   broadcaster,
 		inputCh:       inputCh,
 		statusWatcher: statusWatcher,
 		logPath:       logPath,
+		eventLog:      eventLog,
 	}
 
 	m.mu.Lock()
 	m.sessions[id] = sess
 	m.mu.Unlock()
+
+	// Emit session.created event.
+	createdEvent := NewSessionCreatedEvent(command, workingDir, tags)
+	if eventLog != nil {
+		eventLog.Append(createdEvent)
+	}
+	m.Subscriptions.Publish(id, tags, createdEvent)
 
 	// Open log file.
 	logFile, logErr := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
@@ -346,7 +378,7 @@ func (m *SessionManager) Launch(command []string, workingDir string) (uint32, er
 		slog.Error("failed to open session log file", "id", id, "path", logPath, "err", logErr)
 	}
 
-	// Goroutine 1: PTY reader → log file + broadcast.
+	// Goroutine 1: PTY reader → log file + broadcast + output tracking.
 	go func() {
 		buf := make([]byte, 4096)
 		for {
@@ -360,6 +392,15 @@ func (m *SessionManager) Launch(command []string, workingDir string) (uint32, er
 					}
 				}
 				broadcaster.Send(data)
+
+				// Track output stats.
+				sess.outputBytes.Add(uint64(n))
+				for _, b := range data {
+					if b == '\n' {
+						sess.outputLines.Add(1)
+					}
+				}
+				sess.lastOutputAt.Store(time.Now().UTC().UnixNano())
 			}
 			if readErr != nil {
 				if readErr == io.EOF || isEIO(readErr) {
@@ -371,6 +412,9 @@ func (m *SessionManager) Launch(command []string, workingDir string) (uint32, er
 		}
 		if logFile != nil {
 			logFile.Close()
+		}
+		if eventLog != nil {
+			eventLog.Close()
 		}
 		slog.Info("output reader exited", "id", id)
 	}()
@@ -386,23 +430,36 @@ func (m *SessionManager) Launch(command []string, workingDir string) (uint32, er
 		slog.Info("input writer exited", "id", id)
 	}()
 
-	// Goroutine 3: wait for process exit → update status.
+	// Goroutine 3: wait for process exit → update status + emit events.
 	go func() {
+		var exitCode int
 		waitErr := cmd.Wait()
 		if waitErr != nil {
 			var exitErr *exec.ExitError
 			if errors.As(waitErr, &exitErr) {
-				code := exitErr.ExitCode()
-				slog.Info("session process exited", "id", id, "code", code)
-				statusWatcher.Set(StatusCompleted(code))
+				exitCode = exitErr.ExitCode()
 			} else {
-				slog.Error("waiting for child", "id", id, "err", waitErr)
-				statusWatcher.Set(StatusCompleted(-1))
+				exitCode = -1
 			}
-		} else {
-			slog.Info("session process exited", "id", id, "code", 0)
-			statusWatcher.Set(StatusCompleted(0))
 		}
+		slog.Info("session process exited", "id", id, "code", exitCode)
+
+		now := time.Now().UTC()
+		durationMs := now.Sub(sess.Meta.CreatedAt).Milliseconds()
+
+		sess.mu.Lock()
+		sess.Meta.ExitCode = &exitCode
+		sess.Meta.CompletedAt = &now
+		sess.mu.Unlock()
+
+		statusWatcher.Set(StatusCompleted(exitCode))
+
+		// Emit session.status event.
+		statusEvent := NewSessionStatusEvent("running", "completed", &exitCode, &durationMs)
+		if sess.eventLog != nil {
+			sess.eventLog.Append(statusEvent)
+		}
+		m.Subscriptions.Publish(id, tags, statusEvent)
 	}()
 
 	slog.Info("session launched", "id", id)
@@ -417,17 +474,7 @@ func (m *SessionManager) List() []protocol.SessionInfo {
 
 	infos := make([]protocol.SessionInfo, 0, len(m.sessions))
 	for _, s := range m.sessions {
-		status := s.statusWatcher.Get()
-		attached := s.attachedCount.Load() > 0
-		infos = append(infos, protocol.SessionInfo{
-			ID:         s.Meta.ID,
-			Prompt:     s.Meta.Prompt,
-			WorkingDir: s.Meta.WorkingDir,
-			CreatedAt:  s.Meta.CreatedAt.Format(time.RFC3339),
-			Status:     status.String(),
-			Attached:   attached,
-			PID:        s.Meta.PID,
-		})
+		infos = append(infos, m.buildSessionInfo(s))
 	}
 	sort.Slice(infos, func(i, j int) bool { return infos[i].ID < infos[j].ID })
 	return infos
@@ -559,20 +606,11 @@ func (m *SessionManager) GetStatus(id uint32) (protocol.SessionInfo, uint64, err
 		return protocol.SessionInfo{}, 0, fmt.Errorf("session %d not found", id)
 	}
 
-	status := sess.statusWatcher.Get()
-	attached := sess.attachedCount.Load() > 0
+	info := m.buildSessionInfo(sess)
 
-	// Log file size.
-	var outputSize uint64
-	if fi, err := os.Stat(sess.logPath); err == nil {
-		outputSize = uint64(fi.Size())
-	}
-
-	// Last few lines of output.
-	var snippet *string
+	// Add snippet for GetStatus specifically.
 	if content, err := os.ReadFile(sess.logPath); err == nil {
 		lines := strings.Split(string(content), "\n")
-		// Take up to the last 5 non-empty lines.
 		start := len(lines) - 5
 		if start < 0 {
 			start = 0
@@ -580,22 +618,15 @@ func (m *SessionManager) GetStatus(id uint32) (protocol.SessionInfo, uint64, err
 		tail := lines[start:]
 		joined := strings.Join(tail, "\n")
 		if joined != "" {
-			snippet = &joined
+			info.LastOutputSnippet = &joined
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		slog.Warn("failed to read log file for snippet", "id", id, "err", err)
 	}
 
-	info := protocol.SessionInfo{
-		ID:                sess.Meta.ID,
-		Prompt:            sess.Meta.Prompt,
-		WorkingDir:        sess.Meta.WorkingDir,
-		CreatedAt:         sess.Meta.CreatedAt.Format(time.RFC3339),
-		Status:            status.String(),
-		Attached:          attached,
-		PID:               sess.Meta.PID,
-		OutputSizeBytes:   &outputSize,
-		LastOutputSnippet: snippet,
+	var outputSize uint64
+	if info.OutputBytes != nil {
+		outputSize = *info.OutputBytes
 	}
 
 	return info, outputSize, nil
@@ -682,6 +713,111 @@ func (m *SessionManager) PersistMeta() {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+// buildSessionInfo constructs a fully enriched SessionInfo from a live Session.
+func (m *SessionManager) buildSessionInfo(s *Session) protocol.SessionInfo {
+	status := s.statusWatcher.Get()
+	attached := s.attachedCount.Load() > 0
+	attachedCount := s.attachedCount.Load()
+
+	outputBytes := s.outputBytes.Load()
+	outputLines := s.outputLines.Load()
+
+	info := protocol.SessionInfo{
+		ID:            s.Meta.ID,
+		Prompt:        s.Meta.Prompt,
+		WorkingDir:    s.Meta.WorkingDir,
+		CreatedAt:     s.Meta.CreatedAt.Format(time.RFC3339),
+		Status:        status.String(),
+		Attached:      attached,
+		PID:           s.Meta.PID,
+		Tags:          s.Meta.Tags,
+		OutputBytes:   &outputBytes,
+		OutputLines:   &outputLines,
+		AttachedCount: attachedCount,
+	}
+
+	// File-based output size.
+	if fi, err := os.Stat(s.logPath); err == nil {
+		sz := uint64(fi.Size())
+		info.OutputSizeBytes = &sz
+	}
+
+	// Exit code and completion info.
+	s.mu.Lock()
+	if s.Meta.ExitCode != nil {
+		info.ExitCode = s.Meta.ExitCode
+	}
+	if s.Meta.CompletedAt != nil {
+		completedStr := s.Meta.CompletedAt.Format(time.RFC3339)
+		info.CompletedAt = &completedStr
+		durationMs := s.Meta.CompletedAt.Sub(s.Meta.CreatedAt).Milliseconds()
+		info.DurationMs = &durationMs
+	}
+	s.mu.Unlock()
+
+	// Last output timestamp.
+	if lastNano := s.lastOutputAt.Load(); lastNano > 0 {
+		lastStr := time.Unix(0, lastNano).UTC().Format(time.RFC3339)
+		info.LastOutputAt = &lastStr
+	}
+
+	return info
+}
+
+// GetSessionTags returns the tags for a session (used by handler for event filtering).
+func (m *SessionManager) GetSessionTags(id uint32) []string {
+	m.mu.RLock()
+	sess, ok := m.sessions[id]
+	m.mu.RUnlock()
+	if !ok {
+		return nil
+	}
+	return sess.Meta.Tags
+}
+
+// ListByTags returns sessions matching any of the given tags.
+func (m *SessionManager) ListByTags(tags []string) []protocol.SessionInfo {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var infos []protocol.SessionInfo
+	for _, s := range m.sessions {
+		if matchesTags(s.Meta.Tags, tags) {
+			infos = append(infos, m.buildSessionInfo(s))
+		}
+	}
+	sort.Slice(infos, func(i, j int) bool { return infos[i].ID < infos[j].ID })
+	return infos
+}
+
+func matchesTags(sessionTags, filterTags []string) bool {
+	for _, ft := range filterTags {
+		for _, st := range sessionTags {
+			if ft == st {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// KillByTags kills all running sessions matching any of the given tags.
+func (m *SessionManager) KillByTags(tags []string) int {
+	m.mu.RLock()
+	var ids []uint32
+	for id, s := range m.sessions {
+		if s.statusWatcher.Get().State == "running" && matchesTags(s.Meta.Tags, tags) {
+			ids = append(ids, id)
+		}
+	}
+	m.mu.RUnlock()
+
+	for _, id := range ids {
+		m.Kill(id)
+	}
+	return len(ids)
+}
 
 // isEIO returns true if err is an EIO (errno 5) wrapped in an *os.PathError.
 func isEIO(err error) bool {
