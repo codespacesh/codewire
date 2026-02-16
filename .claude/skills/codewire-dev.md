@@ -26,7 +26,7 @@ codewire/
 │   │   ├── session.go          # SessionManager, PTY lifecycle
 │   │   └── events.go           # Event types, SubscriptionManager
 │   ├── node/
-│   │   ├── node.go             # Daemon: listeners, PID file, signals
+│   │   ├── node.go             # Node: listeners, PID file, signals
 │   │   └── handler.go          # Client dispatch, attach/watch/logs/subscribe/wait
 │   ├── client/
 │   │   ├── client.go           # Target, Connect, requestResponse
@@ -74,7 +74,7 @@ make test
 # Check for running sessions
 cw list
 
-# Stop daemon if needed
+# Stop node if needed
 cw stop
 ```
 

@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Codewire is a persistent process server for AI coding agents. Single Go binary (`cw`) acts as both daemon and CLI client. Manages PTY sessions that survive disconnects — launch AI agents, detach, reconnect later.
+Codewire is a persistent process server for AI coding agents. Single Go binary (`cw`) acts as both node and CLI client. Manages PTY sessions that survive disconnects — launch AI agents, detach, reconnect later.
 
 Two tiers: **Standalone** (default, zero config, works like tmux) and **Relay mode** (opt-in remote access via WireGuard, fleet discovery, shared KV storage).
 
@@ -28,7 +28,7 @@ internal/
     session.go              # SessionManager, Broadcaster, StatusWatcher, PTY lifecycle
     events.go               # Event types, SubscriptionManager, EventLog (JSONL)
   node/
-    node.go                 # Daemon: Unix listener, WS server, PID file, signals
+    node.go                 # Node: Unix listener, WS server, PID file, signals
     handler.go              # Client dispatch, attach/watch/logs/subscribe/wait handlers
   client/
     client.go               # Target (local/remote/relay), Connect, requestResponse

@@ -20,8 +20,8 @@ import (
 	"github.com/codespacesh/codewire/internal/tunnel"
 )
 
-// Node is the daemon that manages PTY sessions, accepting connections over
-// a Unix domain socket and optionally a WebSocket listener.
+// Node manages PTY sessions, accepting connections over a Unix domain socket
+// and optionally a WebSocket listener.
 type Node struct {
 	Manager    *session.SessionManager
 	socketPath string
@@ -58,7 +58,7 @@ func NewNode(dataDir string) (*Node, error) {
 	}, nil
 }
 
-// Run starts the node daemon. It writes a PID file, listens on a Unix socket,
+// Run starts the node. It writes a PID file, listens on a Unix socket,
 // and optionally starts a WebSocket server. It blocks until ctx is cancelled.
 func (n *Node) Run(ctx context.Context) error {
 	// Write PID file.
