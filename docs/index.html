@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CodeWire — Persistent process server for AI coding agents</title>
-<meta name="description" content="Like tmux, but purpose-built for long-running LLM processes. Persistent sessions, fleet discovery, MCP integration.">
+<meta name="description" content="Like tmux, but purpose-built for long-running LLM processes. Persistent sessions, WireGuard relay, event-driven orchestration, MCP integration.">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 
@@ -212,8 +212,8 @@ td code{font-size:12px}
     <div class="nav-links">
       <a href="#quickstart">Quick Start</a>
       <a href="#commands">Commands</a>
-      <a href="#architecture">Architecture</a>
-      <a href="#fleet">Fleet</a>
+      <a href="#orchestration">Orchestration</a>
+      <a href="#relay">Relay</a>
       <a href="#mcp">MCP</a>
     </div>
     <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme">
@@ -231,7 +231,7 @@ td code{font-size:12px}
   <p class="desc">
     Like tmux, but purpose-built for long-running LLM processes.
     Native terminal scrolling, copy/paste, and no weird key chords.
-    Multi-attach, fleet discovery, MCP integration.
+    Tags, subscriptions, wait &mdash; LLM orchestration primitives built in.
   </p>
   <div class="install-cmd code-block">
     <span class="prompt">$</span>
@@ -247,7 +247,7 @@ td code{font-size:12px}
     <div class="step">
       <h3>Launch a session</h3>
       <p>Start a persistent process in a PTY. It runs in the background even if you disconnect.</p>
-      <div class="code-block"><pre><code><span class="cmd">cw launch</span> <span class="flag">--dir</span> ~/project <span class="flag">--</span> claude <span class="flag">-p</span> <span class="str">"refactor the auth module"</span></code></pre><button class="copy-btn" onclick="copyText('cw launch --dir ~/project -- claude -p &quot;refactor the auth module&quot;',this)">copy</button></div>
+      <div class="code-block"><pre><code><span class="cmd">cw launch</span> <span class="flag">--dir</span> ~/project <span class="flag">--tag</span> worker <span class="flag">--</span> claude <span class="flag">-p</span> <span class="str">"refactor the auth module"</span></code></pre><button class="copy-btn" onclick="copyText('cw launch --dir ~/project --tag worker -- claude -p &quot;refactor the auth module&quot;',this)">copy</button></div>
     </div>
     <div class="step">
       <h3>Attach to it</h3>
@@ -256,18 +256,19 @@ td code{font-size:12px}
     </div>
     <div class="step">
       <h3>List sessions</h3>
-      <p>See all running and completed sessions with their status and age.</p>
+      <p>See all running and completed sessions with their status, tags, and age.</p>
       <div class="code-block"><pre><code><span class="cmd">cw list</span>
 
- <span class="dim">ID  STATUS    AGE     PROMPT</span>
-  1  running   2m ago  claude -p "refactor the auth module"
-  2  running   45s     claude -p "write unit tests"</code></pre><button class="copy-btn" onclick="copyText('cw list',this)">copy</button></div>
+ <span class="dim">ID  STATUS     TAGS           AGE     PROMPT</span>
+  1  running    worker,build   2m ago  claude -p "refactor the auth module"
+  2  completed  worker         45s     claude -p "write unit tests"</code></pre><button class="copy-btn" onclick="copyText('cw list',this)">copy</button></div>
     </div>
     <div class="step">
-      <h3>Kill when done</h3>
-      <p>Terminate a session or kill all sessions at once.</p>
-      <div class="code-block"><pre><code><span class="cmd">cw kill</span> <span class="num">1</span>          <span class="cmt"># kill session 1</span>
-<span class="cmd">cw kill</span> <span class="flag">--all</span>      <span class="cmt"># kill everything</span></code></pre><button class="copy-btn" onclick="copyText('cw kill 1',this)">copy</button></div>
+      <h3>Wait or kill</h3>
+      <p>Block until sessions complete, or kill by ID or tag.</p>
+      <div class="code-block"><pre><code><span class="cmd">cw wait</span> <span class="flag">--tag</span> worker <span class="flag">--condition</span> all   <span class="cmt"># block until all workers finish</span>
+<span class="cmd">cw kill</span> <span class="flag">--tag</span> worker                    <span class="cmt"># kill all workers</span>
+<span class="cmd">cw kill</span> <span class="num">1</span>                                <span class="cmt"># kill session 1</span></code></pre><button class="copy-btn" onclick="copyText('cw wait --tag worker --condition all',this)">copy</button></div>
     </div>
   </div>
 </section>
@@ -275,25 +276,25 @@ td code{font-size:12px}
 <!-- ════════════════════════ Commands ════════════════════════ -->
 <section id="commands">
   <h2>Commands</h2>
-  <p>Global flags: <code>--server &lt;name|url&gt;</code> and <code>--token &lt;token&gt;</code> for remote connections.</p>
+  <p>Global flags: <code>--server &lt;name|url&gt;</code> and <code>--token &lt;token&gt;</code> for remote connections. All commands accept an optional node prefix for remote access (e.g. <code>cw list dev-1</code>).</p>
 
   <h3>Sessions</h3>
   <div class="cmd-group">
     <div class="cmd-entry">
-      <div class="cmd-sig">cw launch <span class="optional">[--dir &lt;dir&gt;]</span> -- &lt;command&gt; <span class="optional">[args...]</span></div>
-      <div class="cmd-desc">Start a new session running the given command in a persistent PTY.</div>
+      <div class="cmd-sig">cw launch <span class="optional">[--dir &lt;dir&gt;] [--tag &lt;tag&gt;...]</span> -- &lt;command&gt; <span class="optional">[args...]</span></div>
+      <div class="cmd-desc">Start a new session in a persistent PTY. Tags enable filtering and orchestration.</div>
     </div>
     <div class="cmd-entry">
       <div class="cmd-sig">cw attach <span class="optional">[&lt;id&gt;] [--no-history]</span></div>
       <div class="cmd-desc">Connect to a running session. Omit ID to auto-select the oldest unattached session. Detach with <code>Ctrl+B d</code>.</div>
     </div>
     <div class="cmd-entry">
-      <div class="cmd-sig">cw list <span class="optional">[--json]</span></div>
-      <div class="cmd-desc">Show all sessions with status, age, and prompt.</div>
+      <div class="cmd-sig">cw list <span class="optional">[node] [--json]</span></div>
+      <div class="cmd-desc">Show all sessions with status, tags, age, and prompt. Enriched metadata includes exit code, duration, output stats.</div>
     </div>
     <div class="cmd-entry">
-      <div class="cmd-sig">cw kill &lt;id&gt; <span class="optional">[--all]</span></div>
-      <div class="cmd-desc">Terminate a session. Use <code>--all</code> to kill every session.</div>
+      <div class="cmd-sig">cw kill &lt;id&gt; <span class="optional">[--all] [--tag &lt;tag&gt;]</span></div>
+      <div class="cmd-desc">Terminate a session. Use <code>--all</code> to kill everything, or <code>--tag</code> to kill by tag.</div>
     </div>
     <div class="cmd-entry">
       <div class="cmd-sig">cw logs &lt;id&gt; <span class="optional">[--follow] [--tail &lt;N&gt;]</span></div>
@@ -309,11 +310,59 @@ td code{font-size:12px}
     </div>
     <div class="cmd-entry">
       <div class="cmd-sig">cw status &lt;id&gt; <span class="optional">[--json]</span></div>
-      <div class="cmd-desc">Get detailed session info including PID, output size, and recent output.</div>
+      <div class="cmd-desc">Get detailed session info including exit code, duration, tags, PID, and output stats.</div>
     </div>
   </div>
 
-  <h3>Node</h3>
+  <h3>Orchestration</h3>
+  <div class="cmd-group">
+    <div class="cmd-entry">
+      <div class="cmd-sig">cw subscribe <span class="optional">[node] [--tag &lt;tag&gt;] [--event &lt;type&gt;] [--session &lt;id&gt;]</span></div>
+      <div class="cmd-desc">Subscribe to real-time session events. Events stream until disconnect.</div>
+    </div>
+    <div class="cmd-entry">
+      <div class="cmd-sig">cw wait <span class="optional">[node:]&lt;id&gt; [--tag &lt;tag&gt;] [--condition all|any] [--timeout &lt;s&gt;]</span></div>
+      <div class="cmd-desc">Block until sessions complete. Wait by ID, tag, or both.</div>
+    </div>
+  </div>
+
+  <h3>Remote</h3>
+  <div class="cmd-group">
+    <div class="cmd-entry">
+      <div class="cmd-sig">cw nodes</div>
+      <div class="cmd-desc">List all nodes registered with the relay.</div>
+    </div>
+    <div class="cmd-entry">
+      <div class="cmd-sig">cw setup <span class="optional">[relay-url]</span></div>
+      <div class="cmd-desc">Authorize this node with a relay using the device authorization flow.</div>
+    </div>
+    <div class="cmd-entry">
+      <div class="cmd-sig">cw relay <span class="optional">[--base-url &lt;url&gt;] [--data-dir &lt;dir&gt;] [--auth-mode &lt;mode&gt;]</span></div>
+      <div class="cmd-desc">Run a relay server (WireGuard tunneling, node discovery, shared KV).</div>
+    </div>
+  </div>
+
+  <h3>Shared KV</h3>
+  <div class="cmd-group">
+    <div class="cmd-entry">
+      <div class="cmd-sig">cw kv set <span class="optional">[--ns &lt;namespace&gt;] [--ttl &lt;duration&gt;]</span> &lt;key&gt; &lt;value&gt;</div>
+      <div class="cmd-desc">Set a key-value pair on the relay's shared store.</div>
+    </div>
+    <div class="cmd-entry">
+      <div class="cmd-sig">cw kv get <span class="optional">[--ns &lt;namespace&gt;]</span> &lt;key&gt;</div>
+      <div class="cmd-desc">Get a value by key.</div>
+    </div>
+    <div class="cmd-entry">
+      <div class="cmd-sig">cw kv list <span class="optional">[--ns &lt;namespace&gt;]</span> <span class="optional">[prefix]</span></div>
+      <div class="cmd-desc">List keys by prefix.</div>
+    </div>
+    <div class="cmd-entry">
+      <div class="cmd-sig">cw kv delete <span class="optional">[--ns &lt;namespace&gt;]</span> &lt;key&gt;</div>
+      <div class="cmd-desc">Delete a key.</div>
+    </div>
+  </div>
+
+  <h3>Node &amp; Servers</h3>
   <div class="cmd-group">
     <div class="cmd-entry">
       <div class="cmd-sig">cw node</div>
@@ -323,37 +372,9 @@ td code{font-size:12px}
       <div class="cmd-sig">cw stop</div>
       <div class="cmd-desc">Stop the running node gracefully.</div>
     </div>
-  </div>
-
-  <h3>Fleet</h3>
-  <div class="cmd-group">
     <div class="cmd-entry">
-      <div class="cmd-sig">cw fleet list <span class="optional">[--timeout &lt;s&gt;] [--json]</span></div>
-      <div class="cmd-desc">Discover all nodes and their sessions across the fleet. Default timeout: 2s.</div>
-    </div>
-    <div class="cmd-entry">
-      <div class="cmd-sig">cw fleet attach &lt;node&gt;:&lt;session_id&gt;</div>
-      <div class="cmd-desc">Attach to a remote session. Discovers URL via NATS, connects via WSS.</div>
-    </div>
-    <div class="cmd-entry">
-      <div class="cmd-sig">cw fleet launch --on &lt;node&gt; <span class="optional">[--dir &lt;dir&gt;]</span> -- &lt;command&gt; <span class="optional">[args...]</span></div>
-      <div class="cmd-desc">Launch a session on a specific node in the fleet.</div>
-    </div>
-    <div class="cmd-entry">
-      <div class="cmd-sig">cw fleet kill &lt;node&gt;:&lt;session_id&gt;</div>
-      <div class="cmd-desc">Kill a remote session.</div>
-    </div>
-    <div class="cmd-entry">
-      <div class="cmd-sig">cw fleet send &lt;node&gt;:&lt;session_id&gt; &lt;text&gt;</div>
-      <div class="cmd-desc">Send input to a remote session.</div>
-    </div>
-  </div>
-
-  <h3>Servers</h3>
-  <div class="cmd-group">
-    <div class="cmd-entry">
-      <div class="cmd-sig">cw server add &lt;name&gt; &lt;url&gt; --token &lt;token&gt;</div>
-      <div class="cmd-desc">Save a remote server connection.</div>
+      <div class="cmd-sig">cw server add &lt;name&gt; &lt;url&gt; <span class="optional">[--token &lt;token&gt;]</span></div>
+      <div class="cmd-desc">Save a remote server or relay connection. Token optional for relay URLs.</div>
     </div>
     <div class="cmd-entry">
       <div class="cmd-sig">cw server remove &lt;name&gt;</div>
@@ -363,15 +384,55 @@ td code{font-size:12px}
       <div class="cmd-sig">cw server list</div>
       <div class="cmd-desc">List all saved server connections.</div>
     </div>
-  </div>
-
-  <h3>MCP</h3>
-  <div class="cmd-group">
     <div class="cmd-entry">
       <div class="cmd-sig">cw mcp-server</div>
-      <div class="cmd-desc">Start the MCP (Model Context Protocol) server over stdin/stdout. Requires the <code>mcp</code> feature.</div>
+      <div class="cmd-desc">Start the MCP (Model Context Protocol) server over stdin/stdout.</div>
     </div>
   </div>
+</section>
+
+<!-- ════════════════════════ Orchestration ════════════════════════ -->
+<section id="orchestration">
+  <h2>LLM Orchestration</h2>
+  <p>CodeWire is designed for LLM-driven multi-agent workflows. Tags, subscriptions, and wait provide structured coordination primitives &mdash; no polling, no output parsing.</p>
+
+  <h3>Tags</h3>
+  <p>Label sessions at launch for filtering and coordination.</p>
+  <div class="code-block"><pre><code><span class="cmd">cw launch</span> <span class="flag">--tag</span> worker <span class="flag">--tag</span> build <span class="flag">--</span> claude <span class="flag">-p</span> <span class="str">"fix tests"</span>
+<span class="cmd">cw launch</span> <span class="flag">--tag</span> worker <span class="flag">--tag</span> lint <span class="flag">--</span> claude <span class="flag">-p</span> <span class="str">"fix lint issues"</span>
+<span class="cmd">cw kill</span> <span class="flag">--tag</span> worker          <span class="cmt"># kill all workers</span></code></pre><button class="copy-btn" onclick="copySnippet(this)">copy</button></div>
+
+  <h3>Subscribe to Events</h3>
+  <p>Stream structured, typed events from sessions in real-time.</p>
+  <div class="code-block"><pre><code><span class="cmd">cw subscribe</span> <span class="flag">--tag</span> worker <span class="flag">--event</span> session.status
+<span class="cmd">cw subscribe</span> <span class="flag">--session</span> <span class="num">3</span></code></pre><button class="copy-btn" onclick="copySnippet(this)">copy</button></div>
+  <p>Event types: <code>session.created</code>, <code>session.status</code>, <code>session.output_summary</code>, <code>session.input</code>, <code>session.attached</code>, <code>session.detached</code></p>
+
+  <h3>Wait for Completion</h3>
+  <p>Block until sessions finish &mdash; replaces polling.</p>
+  <div class="code-block"><pre><code><span class="cmd">cw wait</span> <span class="num">3</span>                                         <span class="cmt"># wait for session 3</span>
+<span class="cmd">cw wait</span> <span class="flag">--tag</span> worker <span class="flag">--condition</span> all              <span class="cmt"># ALL workers</span>
+<span class="cmd">cw wait</span> <span class="flag">--tag</span> worker <span class="flag">--condition</span> any <span class="flag">--timeout</span> <span class="num">60</span> <span class="cmt"># ANY, 60s</span></code></pre><button class="copy-btn" onclick="copySnippet(this)">copy</button></div>
+
+  <h3>Supervisor Pattern</h3>
+  <div class="code-block"><pre><code><span class="cmt"># Launch tagged workers</span>
+<span class="cmd">cw launch</span> <span class="flag">--tag</span> worker <span class="flag">--</span> claude <span class="flag">-p</span> <span class="str">"implement feature X"</span>
+<span class="cmd">cw launch</span> <span class="flag">--tag</span> worker <span class="flag">--</span> claude <span class="flag">-p</span> <span class="str">"write tests for X"</span>
+
+<span class="cmt"># Wait for all to complete</span>
+<span class="cmd">cw wait</span> <span class="flag">--tag</span> worker <span class="flag">--condition</span> all <span class="flag">--timeout</span> <span class="num">300</span>
+
+<span class="cmt"># Check results</span>
+<span class="cmd">cw list</span> <span class="flag">--json</span></code></pre><button class="copy-btn" onclick="copySnippet(this)">copy</button></div>
+
+  <h3>Multi-Agent Patterns</h3>
+  <ul>
+    <li><strong>Multiple Attachments</strong> &mdash; Multiple clients can attach to the same session simultaneously</li>
+    <li><strong>Supervisor</strong> &mdash; One orchestrator launches and waits on tagged worker sessions</li>
+    <li><strong>Agent Swarms</strong> &mdash; Parallel agents with event subscriptions for coordination</li>
+    <li><strong>Cross-Session</strong> &mdash; Use <code>cw send</code> and <code>cw watch</code> to pipe data between sessions</li>
+    <li><strong>Shared State</strong> &mdash; Use <code>cw kv</code> for cross-node key-value coordination (relay mode)</li>
+  </ul>
 </section>
 
 <!-- ════════════════════════ Architecture ════════════════════════ -->
@@ -379,15 +440,14 @@ td code{font-size:12px}
   <h2>Architecture</h2>
 
   <h3>Node Architecture</h3>
-  <p>A single Rust binary acts as both node and CLI client. The node manages PTY sessions and keeps processes alive regardless of client connections.</p>
+  <p>A single Go binary acts as both node and CLI client. The node manages PTY sessions and keeps processes alive regardless of client connections.</p>
 
 <div class="diagram" role="img" aria-label="Node architecture diagram">
                        <span class="hl">cw node</span>
-                  <span class="dim">~/.codewire/server.sock</span>
+                  <span class="dim">~/.codewire/codewire.sock</span>
 
   +----------------------------------------------+
   |              <span class="label">SessionManager</span>                   |
-  |           DashMap&lt;u32, Session&gt;               |
   |                                              |
   |   +----------+  +----------+                 |
   |   | <span class="label">Sess 1</span>   |  | <span class="label">Sess 2</span>   |   ...         |
@@ -409,9 +469,11 @@ td code{font-size:12px}
   |   |    <span class="dim">+---------------+</span>    |               |
   |   |                          |               |
   |   |    <span class="dim">output.log</span>            |               |
+  |   |    <span class="dim">events.jsonl</span>          |               |
   |   +--------------------------+               |
   |                                              |
-  |   <span class="dim">sessions.json (debounced 500ms)</span>             |
+  |   <span class="dim">SubscriptionManager (event pub/sub)</span>          |
+  |   <span class="dim">sessions.json (debounced 500ms)</span>              |
   +----------------------------------------------+
                        |
             +----------+----------+
@@ -420,35 +482,35 @@ td code{font-size:12px}
        <span class="dim">local clients</span>           <span class="dim">:9100 (opt.)</span>
 </div>
 
-  <h3>Fleet Topology</h3>
-  <p>Two-plane design: NATS for lightweight control messages (discovery, launch, kill) and WSS for heavy data plane (PTY streaming). NATS never carries binary PTY data.</p>
+  <h3>Relay Topology</h3>
+  <p>WireGuard tunneling for remote access. Nodes establish userspace WireGuard tunnels to a relay server &mdash; no root required, works behind NAT.</p>
 
-<div class="diagram" role="img" aria-label="Fleet topology diagram">
-   <span class="hl">NATS Control Plane</span>                     <span class="hl">WSS Data Plane</span>
-  <span class="dim">discovery, commands (JSON)</span>               <span class="dim">PTY streaming (binary)</span>
+<div class="diagram" role="img" aria-label="Relay topology diagram">
+                          <span class="hl">INTERNET</span>
+                             |
+                    +--------+--------+
+                    |   <span class="label">cw relay</span>      |
+                    | HTTPS :443      |  <span class="dim">&lt;- Clients connect here</span>
+                    | WG UDP :41820   |  <span class="dim">&lt;- Nodes tunnel here</span>
+                    | /api/v1/nodes   |  <span class="dim">&lt;- Node discovery</span>
+                    | /api/v1/kv/*    |  <span class="dim">&lt;- Shared KV store</span>
+                    +--------+--------+
+                        |         |
+           WG tunnel    |         |   WG tunnel
+           (UDP)        |         |   (UDP)
+                        |         |
+                +-------+--+  +---+-------+
+                | <span class="label">cw node</span>  |  | <span class="label">cw node</span>   |
+                | "dev-1"  |  | "gpu-box" |
+                +----------+  +-----------+
 
-  +------------+  <span class="dim">cw.fleet.discover</span>   +------------+
-  |  <span class="label">Node A</span>    |&lt;--------------------&gt;|  <span class="label">Node B</span>    |
-  |   :9100    |  <span class="dim">cw.fleet.heartbeat</span>  |   :9100    |
-  |            |                      |            |
-  |  sess 1,2  |  <span class="dim">cw.&lt;node&gt;.list</span>      |  sess 1,3  |
-  +-----+------+  <span class="dim">cw.&lt;node&gt;.launch</span>    +-----+------+
-        |         <span class="dim">cw.&lt;node&gt;.kill</span>            |
-        |         <span class="dim">cw.&lt;node&gt;.status</span>          |
-        |         <span class="dim">cw.&lt;node&gt;.send</span>            |
-        |                                  |
-        +----------+    +-----------------+
-                   |    |
-              +----+----+----+
-              |  <span class="label">NATS Server</span>  |
-              |  <span class="dim">:4222</span>        |
-              +--------------+
-
-  <span class="hl">Fleet Attach Flow:</span>
-  1. Client sends Discover via NATS
-  2. Target node replies with external_url
-  3. Client connects directly via WSS <span class="dim">(wss://node:9100/ws)</span>
-  4. Binary PTY frames flow over WebSocket
+  <span class="hl">Connection Flow:</span>
+  1. Node starts, generates WireGuard key pair
+  2. Node registers with relay (device auth flow)
+  3. Node creates userspace WG tunnel (no root)
+  4. Client calls <span class="dim">GET /api/v1/nodes</span> to discover
+  5. Client connects through relay to node
+  6. Same wire protocol as local Unix socket
 </div>
 
   <h3>Wire Protocol</h3>
@@ -470,23 +532,42 @@ td code{font-size:12px}
 </div>
 </section>
 
+<!-- ════════════════════════ Relay ════════════════════════ -->
+<section id="relay">
+  <h2>Remote Access</h2>
+  <p>Two tiers: <strong>Standalone</strong> (default, zero config, local only) and <strong>Relay mode</strong> (opt-in remote access via WireGuard).</p>
+
+  <h3>Setup</h3>
+  <div class="code-block"><pre><code><span class="cmt"># Authorize your node with a relay</span>
+<span class="cmd">cw setup</span> https://relay.codespace.sh
+
+<span class="cmt"># That's it. Your node is now accessible remotely.</span></code></pre><button class="copy-btn" onclick="copyText('cw setup https://relay.codespace.sh',this)">copy</button></div>
+
+  <h3>Remote Commands</h3>
+  <p>All commands accept an optional node prefix:</p>
+  <div class="code-block"><pre><code><span class="cmd">cw nodes</span>                                  <span class="cmt"># list all nodes</span>
+<span class="cmd">cw list</span> dev-1                              <span class="cmt"># sessions on dev-1</span>
+<span class="cmd">cw attach</span> dev-1:<span class="num">3</span>                          <span class="cmt"># session 3 on dev-1</span>
+<span class="cmd">cw launch</span> dev-1 <span class="flag">--tag</span> worker <span class="flag">--</span> claude <span class="flag">-p</span> <span class="str">"fix bug"</span>
+<span class="cmd">cw kill</span> dev-1:<span class="num">3</span></code></pre><button class="copy-btn" onclick="copySnippet(this)">copy</button></div>
+
+  <h3>Direct WebSocket</h3>
+  <p>You can also connect directly via WebSocket without a relay:</p>
+  <div class="code-block"><pre><code><span class="cmd">cw server add</span> my-server wss://remote-host:9100 <span class="flag">--token</span> &lt;token&gt;
+<span class="cmd">cw</span> <span class="flag">--server</span> my-server list</code></pre><button class="copy-btn" onclick="copySnippet(this)">copy</button></div>
+</section>
+
 <!-- ════════════════════════ Configuration ════════════════════════ -->
 <section id="configuration">
   <h2>Configuration</h2>
 
   <h3>Config File</h3>
   <p>Located at <code>~/.codewire/config.toml</code></p>
-  <div class="code-block"><pre><code><span class="cmt"># Node settings</span>
-<span class="kw">[node]</span>
-<span class="flag">name</span> = <span class="str">"my-node"</span>                    <span class="cmt"># Node name for fleet (alphanumeric, -, _)</span>
-<span class="flag">listen</span> = <span class="str">"0.0.0.0:9100"</span>             <span class="cmt"># WebSocket listener address</span>
-<span class="flag">external_url</span> = <span class="str">"wss://host/ws"</span>      <span class="cmt"># Advertised URL for fleet attach</span>
-
-<span class="cmt"># NATS connection (enables fleet features)</span>
-<span class="kw">[nats]</span>
-<span class="flag">url</span> = <span class="str">"nats://nats.example.com:4222"</span>
-<span class="flag">token</span> = <span class="str">"secret"</span>                     <span class="cmt"># Optional token auth</span>
-<span class="flag">creds_file</span> = <span class="str">"~/.codewire/fleet.creds"</span>  <span class="cmt"># Optional credentials file</span></code></pre><button class="copy-btn" onclick="copySnippet(this)">copy</button></div>
+  <div class="code-block"><pre><code><span class="kw">[node]</span>
+<span class="flag">name</span> = <span class="str">"my-node"</span>                          <span class="cmt"># Node name</span>
+<span class="flag">listen</span> = <span class="str">"0.0.0.0:9100"</span>                   <span class="cmt"># Direct WebSocket (optional)</span>
+<span class="flag">external_url</span> = <span class="str">"wss://host/ws"</span>            <span class="cmt"># Advertised URL</span>
+<span class="flag">relay_url</span> = <span class="str">"https://relay.codespace.sh"</span>  <span class="cmt"># Opt-in remote access</span></code></pre><button class="copy-btn" onclick="copySnippet(this)">copy</button></div>
 
   <h3>Environment Variable Overrides</h3>
   <table>
@@ -495,10 +576,8 @@ td code{font-size:12px}
       <tr><td><code>CODEWIRE_NODE_NAME</code></td><td>node.name</td></tr>
       <tr><td><code>CODEWIRE_LISTEN</code></td><td>node.listen</td></tr>
       <tr><td><code>CODEWIRE_EXTERNAL_URL</code></td><td>node.external_url</td></tr>
+      <tr><td><code>CODEWIRE_RELAY_URL</code></td><td>node.relay_url</td></tr>
       <tr><td><code>CODEWIRE_TOKEN</code></td><td>Auth token (for containers)</td></tr>
-      <tr><td><code>CODEWIRE_NATS_URL</code></td><td>nats.url</td></tr>
-      <tr><td><code>CODEWIRE_NATS_TOKEN</code></td><td>nats.token</td></tr>
-      <tr><td><code>CODEWIRE_NATS_CREDS</code></td><td>nats.creds_file</td></tr>
     </tbody>
   </table>
 
@@ -506,69 +585,21 @@ td code{font-size:12px}
   <p><code>~/.codewire/</code> contains all runtime state.</p>
 <div class="diagram" role="img" aria-label="Data directory layout">
 ~/.codewire/
-|-- server.sock           <span class="dim"># Unix domain socket</span>
-|-- node.pid              <span class="dim"># Node PID file</span>
-|-- token                 <span class="dim"># Auth token (mode 0600)</span>
+|-- codewire.sock         <span class="dim"># Unix domain socket</span>
+|-- codewire.pid          <span class="dim"># Node PID file</span>
+|-- token                 <span class="dim"># Auth token (direct WS fallback)</span>
+|-- wg_private_key        <span class="dim"># WireGuard private key (0600)</span>
 |-- config.toml           <span class="dim"># Configuration</span>
 |-- servers.toml          <span class="dim"># Saved remote servers</span>
 |-- sessions.json         <span class="dim"># Session metadata</span>
 `-- sessions/
     |-- 1/
-    |   `-- output.log    <span class="dim"># Captured PTY output</span>
+    |   |-- output.log    <span class="dim"># Captured PTY output</span>
+    |   `-- events.jsonl  <span class="dim"># Metadata event log</span>
     `-- 2/
-        `-- output.log
+        |-- output.log
+        `-- events.jsonl
 </div>
-
-  <h3>Auto-Discovery</h3>
-  <p>If <code>/etc/codewire/nats.creds</code> exists (e.g. mounted by a Coder template), the node automatically configures NATS:</p>
-  <div class="code-block"><pre><code><span class="flag">url</span> = <span class="str">"nats://nats.codespace-system:4222"</span>
-<span class="flag">creds_file</span> = <span class="str">"/etc/codewire/nats.creds"</span></code></pre><button class="copy-btn" onclick="copySnippet(this)">copy</button></div>
-</section>
-
-<!-- ════════════════════════ Fleet ════════════════════════ -->
-<section id="fleet">
-  <h2>Fleet</h2>
-  <p>Fleet mode enables multi-node orchestration via NATS discovery and WebSocket data plane. Requires the <code>nats</code> feature.</p>
-
-  <h3>NATS Setup</h3>
-  <p>Point each node at a shared NATS server. Each node advertises itself and responds to fleet commands.</p>
-  <div class="code-block"><pre><code><span class="cmt"># On each node: ~/.codewire/config.toml</span>
-<span class="kw">[node]</span>
-<span class="flag">name</span> = <span class="str">"gpu-box"</span>
-<span class="flag">listen</span> = <span class="str">"0.0.0.0:9100"</span>
-<span class="flag">external_url</span> = <span class="str">"wss://gpu-box.example.com/ws"</span>
-
-<span class="kw">[nats]</span>
-<span class="flag">url</span> = <span class="str">"nats://nats.example.com:4222"</span></code></pre><button class="copy-btn" onclick="copySnippet(this)">copy</button></div>
-
-  <h3>Discovery</h3>
-  <p>Nodes publish heartbeats every 30s on <code>cw.fleet.heartbeat</code>. Clients broadcast on <code>cw.fleet.discover</code> and collect responses.</p>
-  <div class="code-block"><pre><code><span class="cmt"># List all nodes and sessions</span>
-<span class="cmd">cw fleet list</span>
-
- <span class="dim">NODE        SESSIONS  UPTIME</span>
-  gpu-box    3         2h 15m
-  dev-01     1         45m
-
-<span class="cmt"># Launch on a specific node</span>
-<span class="cmd">cw fleet launch</span> <span class="flag">--on</span> gpu-box <span class="flag">--</span> claude <span class="flag">-p</span> <span class="str">"train the model"</span>
-
-<span class="cmt"># Attach to a remote session</span>
-<span class="cmd">cw fleet attach</span> gpu-box:1</code></pre><button class="copy-btn" onclick="copySnippet(this)">copy</button></div>
-
-  <h3>NATS Subjects</h3>
-  <table>
-    <thead><tr><th>Subject</th><th>Pattern</th><th>Purpose</th></tr></thead>
-    <tbody>
-      <tr><td><code>cw.fleet.discover</code></td><td>Broadcast</td><td>All nodes reply with info</td></tr>
-      <tr><td><code>cw.fleet.heartbeat</code></td><td>Publish</td><td>Periodic node announcements</td></tr>
-      <tr><td><code>cw.&lt;node&gt;.list</code></td><td>Request-reply</td><td>List sessions on node</td></tr>
-      <tr><td><code>cw.&lt;node&gt;.launch</code></td><td>Request-reply</td><td>Launch session on node</td></tr>
-      <tr><td><code>cw.&lt;node&gt;.kill</code></td><td>Request-reply</td><td>Kill session on node</td></tr>
-      <tr><td><code>cw.&lt;node&gt;.status</code></td><td>Request-reply</td><td>Get session status</td></tr>
-      <tr><td><code>cw.&lt;node&gt;.send</code></td><td>Request-reply</td><td>Send input to session</td></tr>
-    </tbody>
-  </table>
 </section>
 
 <!-- ════════════════════════ MCP ════════════════════════ -->
@@ -577,15 +608,8 @@ td code{font-size:12px}
   <p>CodeWire exposes an MCP server (JSON-RPC 2.0 over stdin/stdout) so AI agents can programmatically manage sessions.</p>
 
   <h3>Claude Code Config</h3>
-  <p>Add to your Claude Code MCP settings:</p>
-  <div class="code-block"><pre><code>{
-  <span class="str">"mcpServers"</span>: {
-    <span class="str">"codewire"</span>: {
-      <span class="str">"command"</span>: <span class="str">"cw"</span>,
-      <span class="str">"args"</span>: [<span class="str">"mcp-server"</span>]
-    }
-  }
-}</code></pre><button class="copy-btn" onclick="copySnippet(this)">copy</button></div>
+  <div class="code-block"><pre><code><span class="cmt"># Add as MCP server (user-level)</span>
+<span class="cmd">claude mcp add</span> <span class="flag">--scope</span> user codewire <span class="flag">--</span> cw mcp-server</code></pre><button class="copy-btn" onclick="copyText('claude mcp add --scope user codewire -- cw mcp-server',this)">copy</button></div>
 
   <h3>Available Tools</h3>
   <table>
@@ -594,7 +618,7 @@ td code{font-size:12px}
       <tr>
         <td><code>codewire_launch_session</code></td>
         <td>Launch a new session</td>
-        <td><code>command</code> (required), <code>working_dir</code></td>
+        <td><code>command</code>, <code>working_dir</code>, <code>tags</code></td>
       </tr>
       <tr>
         <td><code>codewire_list_sessions</code></td>
@@ -604,17 +628,17 @@ td code{font-size:12px}
       <tr>
         <td><code>codewire_read_session_output</code></td>
         <td>Read output snapshot</td>
-        <td><code>session_id</code>, <code>tail</code>, <code>max_chars</code> (50000)</td>
+        <td><code>session_id</code>, <code>tail</code>, <code>max_chars</code></td>
       </tr>
       <tr>
         <td><code>codewire_send_input</code></td>
         <td>Send input to session</td>
-        <td><code>session_id</code>, <code>input</code>, <code>auto_newline</code> (true)</td>
+        <td><code>session_id</code>, <code>input</code>, <code>auto_newline</code></td>
       </tr>
       <tr>
         <td><code>codewire_watch_session</code></td>
         <td>Monitor (time-bounded)</td>
-        <td><code>session_id</code>, <code>max_duration_seconds</code> (30)</td>
+        <td><code>session_id</code>, <code>max_duration_seconds</code></td>
       </tr>
       <tr>
         <td><code>codewire_get_session_status</code></td>
@@ -623,20 +647,46 @@ td code{font-size:12px}
       </tr>
       <tr>
         <td><code>codewire_kill_session</code></td>
-        <td>Terminate a session</td>
-        <td><code>session_id</code></td>
+        <td>Terminate session</td>
+        <td><code>session_id</code>, <code>tags</code></td>
+      </tr>
+      <tr>
+        <td><code>codewire_subscribe</code></td>
+        <td>Subscribe to events</td>
+        <td><code>tags</code>, <code>event_types</code>, <code>duration_seconds</code></td>
+      </tr>
+      <tr>
+        <td><code>codewire_wait_for</code></td>
+        <td>Wait for completion</td>
+        <td><code>session_id</code>, <code>tags</code>, <code>condition</code>, <code>timeout</code></td>
+      </tr>
+      <tr>
+        <td><code>codewire_list_nodes</code></td>
+        <td>List relay nodes</td>
+        <td>&mdash;</td>
+      </tr>
+      <tr>
+        <td><code>codewire_kv_set</code></td>
+        <td>Set key-value</td>
+        <td><code>namespace</code>, <code>key</code>, <code>value</code>, <code>ttl</code></td>
+      </tr>
+      <tr>
+        <td><code>codewire_kv_get</code></td>
+        <td>Get value by key</td>
+        <td><code>namespace</code>, <code>key</code></td>
+      </tr>
+      <tr>
+        <td><code>codewire_kv_list</code></td>
+        <td>List keys by prefix</td>
+        <td><code>namespace</code>, <code>prefix</code></td>
+      </tr>
+      <tr>
+        <td><code>codewire_kv_delete</code></td>
+        <td>Delete key</td>
+        <td><code>namespace</code>, <code>key</code></td>
       </tr>
     </tbody>
   </table>
-
-  <h3>Multi-Agent Patterns</h3>
-  <p>CodeWire enables several multi-agent coordination patterns:</p>
-  <ul>
-    <li><strong>Multiple Attachments</strong> &mdash; Multiple clients can attach to the same session simultaneously</li>
-    <li><strong>Supervisor Pattern</strong> &mdash; One orchestrator agent launches and coordinates worker agents</li>
-    <li><strong>Agent Swarms</strong> &mdash; Parallel agents working on different tasks, coordinated via <code>send</code> and <code>watch</code></li>
-    <li><strong>Cross-Session Communication</strong> &mdash; Use <code>cw send</code> and <code>cw watch</code> to pipe data between sessions</li>
-  </ul>
 </section>
 
 <!-- ════════════════════════ Installation ════════════════════════ -->
@@ -658,22 +708,8 @@ td code{font-size:12px}
   <p>Options: <code>--version VERSION</code>, <code>--prefix DIR</code>, <code>--verbose</code></p>
 
   <h3>Build from Source</h3>
-  <div class="code-block"><pre><code><span class="cmt"># Default (includes WebSocket support)</span>
-<span class="cmd">cargo install</span> <span class="flag">--path</span> .
-
-<span class="cmt"># With fleet discovery</span>
-<span class="cmd">cargo build</span> <span class="flag">--release --features</span> nats
-
-<span class="cmt"># With MCP server</span>
-<span class="cmd">cargo build</span> <span class="flag">--release --features</span> mcp
-
-<span class="cmt"># Everything</span>
-<span class="cmd">cargo build</span> <span class="flag">--release --all-features</span></code></pre><button class="copy-btn" onclick="copySnippet(this)">copy</button></div>
-  <div class="badges">
-    <span class="badge">default = ws</span>
-    <span class="badge">nats (implies ws)</span>
-    <span class="badge">mcp</span>
-  </div>
+  <div class="code-block"><pre><code><span class="cmd">go build</span> <span class="flag">-o</span> cw ./cmd/cw
+<span class="cmd">sudo mv</span> cw /usr/local/bin/cw</code></pre><button class="copy-btn" onclick="copyText('go build -o cw ./cmd/cw && sudo mv cw /usr/local/bin/cw',this)">copy</button></div>
 
   <h3>Coder Module</h3>
   <p>Add CodeWire to Coder workspaces with a Terraform module:</p>
