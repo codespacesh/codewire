@@ -6,10 +6,6 @@ on:
     branches:
       - main
 
-env:
-  CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
-
 jobs:
   test:
     name: Test on ${{ matrix.os }}
@@ -22,32 +18,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo registry
-        uses: actions/cache@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          path: ~/.cargo/registry
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Cache cargo index
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/git
-          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Cache cargo build
-        uses: actions/cache@v4
-        with:
-          path: target
-          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+          go-version-file: go.mod
 
       - name: Run tests
-        run: cargo test --all-features
-
-      - name: Run tests (release mode)
-        run: cargo test --all-features --release
+        run: go test ./internal/... ./tests/... -timeout 120s -count=1
 
   lint:
     name: Lint
@@ -56,16 +33,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          components: rustfmt, clippy
+          go-version-file: go.mod
 
-      - name: Check formatting
-        run: cargo fmt -- --check
-
-      - name: Run clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Run go vet
+        run: go vet ./...
 
   build:
     name: Build on ${{ matrix.os }}
@@ -77,11 +51,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
 
       - name: Build
-        run: cargo build --release --all-features
+        run: go build -o cw ./cmd/cw
 
       - name: Verify binary exists
-        run: test -f target/release/cw
+        run: test -f cw
