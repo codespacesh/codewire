@@ -1,0 +1,27 @@
+[Unit]
+Description=Codewire Relay
+Documentation=https://codewire.sh
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/cw relay \
+  --base-url=${BASE_URL} \
+  --listen=0.0.0.0:8080 \
+  --wg-port=41820 \
+  --data-dir=/var/lib/codewire-relay \
+  --auth-mode=token
+EnvironmentFile=-/etc/codewire-relay/env
+StateDirectory=codewire-relay
+DynamicUser=yes
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

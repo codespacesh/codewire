@@ -1,0 +1,24 @@
+apiVersion: codewire.io/v1alpha1
+kind: CodewireRelay
+metadata:
+  name: example
+  namespace: default
+spec:
+  baseURL: https://example.relay.codespace.sh
+  authMode: token
+  persistence:
+    size: 1Gi
+  ingress:
+    className: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+  wireguard:
+    service:
+      type: LoadBalancer
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi

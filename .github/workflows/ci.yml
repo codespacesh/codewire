@@ -61,3 +61,46 @@ jobs:
 
       - name: Verify binary exists
         run: test -f cw
+
+  operator-build:
+    name: Operator Build & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: operator/go.mod
+
+      - name: Build operator
+        working-directory: operator
+        run: go build -o bin/operator .
+
+      - name: Vet operator
+        working-directory: operator
+        run: go vet ./...
+
+      - name: Test operator
+        working-directory: operator
+        run: go test ./... -timeout 120s -count=1
+
+  helm-lint:
+    name: Helm Chart Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Lint codewire-relay chart
+        run: helm lint charts/codewire-relay/ --strict
+
+      - name: Template codewire-relay chart
+        run: |
+          helm template test-relay charts/codewire-relay/ \
+            --set relay.baseURL=https://test.relay.example.com \
+            > /dev/null

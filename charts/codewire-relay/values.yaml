@@ -1,0 +1,66 @@
+relay:
+  baseURL: ""  # Required: e.g. https://relay.example.com
+  authMode: "token"
+  authToken: ""  # Auto-generated if empty
+  wgPort: 41820
+  wgEndpoint: ""  # Defaults to baseURL hostname:wgPort
+  listenAddr: "0.0.0.0:8080"
+
+image:
+  repository: ghcr.io/codespacesh/codewire
+  tag: ""  # Defaults to appVersion
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+replicaCount: 1
+
+persistence:
+  enabled: true
+  size: 1Gi
+  storageClass: ""
+  accessModes:
+    - ReadWriteOnce
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: relay.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+wireguard:
+  service:
+    type: LoadBalancer
+    annotations: {}
+    loadBalancerIP: ""
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+monitoring:
+  enabled: false
+  serviceMonitor:
+    interval: 30s
+    labels: {}
