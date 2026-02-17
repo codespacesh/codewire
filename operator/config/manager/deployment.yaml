@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: codewire-operator
+  namespace: codewire-system
+  labels:
+    app.kubernetes.io/name: codewire-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: codewire-operator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: codewire-operator
+    spec:
+      serviceAccountName: codewire-operator
+      containers:
+        - name: operator
+          image: ghcr.io/codespacesh/codewire-operator:latest
+          args:
+            - --health-probe-bind-address=:8081
+            - --relay-image=ghcr.io/codespacesh/codewire:latest
+          ports:
+            - containerPort: 8081
+              name: health
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+      terminationGracePeriodSeconds: 10

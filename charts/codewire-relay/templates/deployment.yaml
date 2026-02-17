@@ -1,0 +1,114 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "codewire-relay.fullname" . }}
+  labels:
+    {{- include "codewire-relay.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "codewire-relay.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "codewire-relay.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "codewire-relay.serviceAccountName" . }}
+      containers:
+        - name: relay
+          image: "{{ .Values.image.repository }}:{{ include "codewire-relay.imageTag" . }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- if eq .Values.relay.authMode "token" }}
+          command: ["sh", "-c"]
+          args:
+            - |
+              exec cw relay \
+                --base-url={{ .Values.relay.baseURL | quote }} \
+                --listen={{ .Values.relay.listenAddr | quote }} \
+                --wg-port={{ int .Values.relay.wgPort }} \
+                --data-dir=/data \
+                --auth-mode={{ .Values.relay.authMode | quote }} \
+                --auth-token="$CW_AUTH_TOKEN" \
+                {{- if .Values.relay.wgEndpoint }}
+                --wg-endpoint={{ .Values.relay.wgEndpoint | quote }}
+                {{- end }}
+          {{- else }}
+          args:
+            - relay
+            - --base-url={{ .Values.relay.baseURL }}
+            - --listen={{ .Values.relay.listenAddr }}
+            - --wg-port={{ int .Values.relay.wgPort }}
+            - --data-dir=/data
+            - --auth-mode={{ .Values.relay.authMode }}
+            {{- if .Values.relay.wgEndpoint }}
+            - --wg-endpoint={{ .Values.relay.wgEndpoint }}
+            {{- end }}
+          {{- end }}
+          {{- if eq .Values.relay.authMode "token" }}
+          env:
+            - name: CW_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "codewire-relay.fullname" . }}
+                  key: auth-token
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: wireguard
+              containerPort: {{ int .Values.relay.wgPort }}
+              protocol: UDP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "codewire-relay.fullname" . }}-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

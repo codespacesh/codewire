@@ -1,0 +1,267 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: codewirerelays.codewire.io
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.16.1
+spec:
+  group: codewire.io
+  names:
+    kind: CodewireRelay
+    listKind: CodewireRelayList
+    plural: codewirerelays
+    singular: codewirerelay
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      additionalPrinterColumns:
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: URL
+          type: string
+          jsonPath: .status.relayURL
+        - name: Nodes
+          type: integer
+          jsonPath: .status.connectedNodes
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      subresources:
+        status: {}
+      schema:
+        openAPIV3Schema:
+          description: CodewireRelay is the Schema for the codewirerelays API.
+          type: object
+          properties:
+            apiVersion:
+              description: >-
+                APIVersion defines the versioned schema of this representation
+                of an object.
+              type: string
+            kind:
+              description: >-
+                Kind is a string value representing the REST resource this
+                object represents.
+              type: string
+            metadata:
+              type: object
+            spec:
+              description: CodewireRelaySpec defines the desired state of a Codewire Relay instance.
+              type: object
+              required:
+                - baseURL
+              properties:
+                baseURL:
+                  description: >-
+                    BaseURL is the public URL of the relay
+                    (e.g. https://acme.relay.codespace.sh).
+                  type: string
+                authMode:
+                  description: 'AuthMode is the authentication mode: "token" or "none".'
+                  type: string
+                  default: token
+                authToken:
+                  description: AuthToken is the shared auth token. Auto-generated if empty.
+                  type: string
+                wgPort:
+                  description: WGPort is the WireGuard UDP port.
+                  type: integer
+                  format: int32
+                  default: 41820
+                persistence:
+                  description: Persistence configures the PVC for relay data.
+                  type: object
+                  properties:
+                    size:
+                      description: Size of the PVC.
+                      type: string
+                      default: 1Gi
+                    storageClass:
+                      description: StorageClass for the PVC.
+                      type: string
+                ingress:
+                  description: Ingress configures the Ingress resource for HTTPS API access.
+                  type: object
+                  properties:
+                    className:
+                      description: ClassName is the IngressClass to use.
+                      type: string
+                    annotations:
+                      description: Annotations for the Ingress.
+                      type: object
+                      additionalProperties:
+                        type: string
+                wireguard:
+                  description: WireGuard configures the WireGuard service.
+                  type: object
+                  properties:
+                    service:
+                      description: Service configures the WireGuard Kubernetes Service.
+                      type: object
+                      properties:
+                        type:
+                          description: >-
+                            Type of the Service (LoadBalancer, NodePort,
+                            ClusterIP).
+                          type: string
+                          default: LoadBalancer
+                        annotations:
+                          description: Annotations for the Service.
+                          type: object
+                          additionalProperties:
+                            type: string
+                resources:
+                  description: Resources defines compute resources for the relay pod.
+                  type: object
+                  properties:
+                    requests:
+                      type: object
+                      properties:
+                        cpu:
+                          type: string
+                        memory:
+                          type: string
+                    limits:
+                      type: object
+                      properties:
+                        cpu:
+                          type: string
+                        memory:
+                          type: string
+                credentialInjection:
+                  description: >-
+                    CredentialInjection configures injection of relay credentials
+                    into another namespace.
+                  type: object
+                  required:
+                    - targetNamespace
+                  properties:
+                    targetNamespace:
+                      description: >-
+                        TargetNamespace is the namespace to inject credentials
+                        into.
+                      type: string
+                    secretName:
+                      description: >-
+                        SecretName is the name of the Secret to create in the
+                        target namespace.
+                      type: string
+                      default: codewire-relay-creds
+                dns:
+                  description: DNS configures automatic DNS record management.
+                  type: object
+                  required:
+                    - provider
+                    - zoneID
+                    - apiTokenSecretRef
+                  properties:
+                    provider:
+                      description: Provider is the DNS provider (currently only "cloudflare").
+                      type: string
+                    zoneID:
+                      description: ZoneID is the DNS zone ID.
+                      type: string
+                    apiTokenSecretRef:
+                      description: >-
+                        APITokenSecretRef references a Secret containing the DNS
+                        provider API token.
+                      type: object
+                      required:
+                        - name
+                        - key
+                      properties:
+                        name:
+                          description: Name of the Secret.
+                          type: string
+                        key:
+                          description: Key within the Secret.
+                          type: string
+                image:
+                  description: Image overrides the relay container image.
+                  type: object
+                  properties:
+                    repository:
+                      description: Repository is the container image repository.
+                      type: string
+                    tag:
+                      description: Tag is the container image tag.
+                      type: string
+            status:
+              description: CodewireRelayStatus defines the observed state of a Codewire Relay instance.
+              type: object
+              properties:
+                phase:
+                  description: Phase is the current lifecycle phase.
+                  type: string
+                  enum:
+                    - Pending
+                    - Provisioning
+                    - Running
+                    - Failed
+                wireguardEndpoint:
+                  description: WireGuardEndpoint is the external WireGuard endpoint (ip:port).
+                  type: string
+                relayURL:
+                  description: RelayURL is the public relay URL.
+                  type: string
+                connectedNodes:
+                  description: ConnectedNodes is the number of currently connected nodes.
+                  type: integer
+                  format: int32
+                conditions:
+                  description: Conditions represent the latest available observations.
+                  type: array
+                  items:
+                    description: >-
+                      Condition contains details for one aspect of the current
+                      state of this API resource.
+                    type: object
+                    required:
+                      - lastTransitionTime
+                      - message
+                      - reason
+                      - status
+                      - type
+                    properties:
+                      lastTransitionTime:
+                        description: >-
+                          lastTransitionTime is the last time the condition
+                          transitioned from one status to another.
+                        type: string
+                        format: date-time
+                      message:
+                        description: >-
+                          message is a human readable message indicating details
+                          about the transition.
+                        type: string
+                        maxLength: 32768
+                      observedGeneration:
+                        description: >-
+                          observedGeneration represents the .metadata.generation
+                          that the condition was set based upon.
+                        type: integer
+                        format: int64
+                        minimum: 0
+                      reason:
+                        description: >-
+                          reason contains a programmatic identifier indicating
+                          the reason for the condition's last transition.
+                        type: string
+                        maxLength: 1024
+                        minLength: 1
+                        pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      status:
+                        description: status of the condition, one of True, False, Unknown.
+                        type: string
+                        enum:
+                          - "True"
+                          - "False"
+                          - Unknown
+                      type:
+                        description: type of condition in CamelCase.
+                        type: string
+                        maxLength: 316
+                        pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$

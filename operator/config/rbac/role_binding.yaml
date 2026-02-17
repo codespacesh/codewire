@@ -1,0 +1,14 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: codewire-operator
+  labels:
+    app.kubernetes.io/name: codewire-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: codewire-operator
+subjects:
+  - kind: ServiceAccount
+    name: codewire-operator
+    namespace: codewire-system
