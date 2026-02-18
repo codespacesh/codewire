@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-broker
+  namespace: codewire-demo
+  labels:
+    app: demo-broker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: demo-broker
+  template:
+    metadata:
+      labels:
+        app: demo-broker
+    spec:
+      serviceAccountName: demo-broker
+      containers:
+      - name: broker
+        image: ghcr.io/codespacesh/codewire-demo-broker:latest
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: DEMO_NAMESPACE
+          value: codewire-demo
+        - name: DEMO_IMAGE
+          value: ghcr.io/codespacesh/codewire-demo:latest
+        - name: DEMO_POOL_SIZE
+          value: "3"
+        - name: DEMO_POD_MAX_AGE
+          value: "300"
+        - name: DEMO_ALLOWED_ORIGIN
+          value: "https://codewire.sh"
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 8080
+          initialDelaySeconds: 3
+          periodSeconds: 5

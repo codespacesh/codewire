@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: demo-broker
+  namespace: codewire-demo
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: demo-broker
+  namespace: codewire-demo
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch", "create", "delete", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: demo-broker
+  namespace: codewire-demo
+subjects:
+- kind: ServiceAccount
+  name: demo-broker
+  namespace: codewire-demo
+roleRef:
+  kind: Role
+  name: demo-broker
+  apiGroup: rbac.authorization.k8s.io

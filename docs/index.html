@@ -195,7 +195,7 @@ td code{font-size:12px}
 .term-demo{
   max-width:640px;margin:32px auto 0;border-radius:var(--radius);
   border:1px solid var(--border);overflow:hidden;text-align:left;
-  background:var(--bg-code);
+  background:var(--bg-code);position:relative;
 }
 .term-chrome{
   display:flex;align-items:center;gap:8px;
@@ -234,6 +234,45 @@ td code{font-size:12px}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
 .term-demo.fade-out .term-body{animation:fadeOut .6s ease-out forwards}
 @keyframes fadeOut{to{opacity:0}}
+
+/* ── Live Demo Widget ── */
+.try-live-btn{
+  display:inline-flex;align-items:center;gap:6px;
+  position:absolute;top:8px;right:8px;z-index:10;
+  padding:5px 12px;border-radius:4px;
+  background:var(--accent);color:#0d0d0d;
+  border:none;cursor:pointer;
+  font-family:var(--font-mono);font-size:11px;font-weight:600;
+  transition:opacity .15s;
+}
+.try-live-btn:hover{opacity:0.85}
+.try-live-btn .pulse{
+  width:6px;height:6px;border-radius:50%;
+  background:#28c840;
+  animation:pulse-dot 2s ease-in-out infinite;
+}
+@keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:0.4}}
+.live-term-container{min-height:260px;position:relative}
+.live-term-container .xterm{height:100%}
+.live-toolbar{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:6px 14px;background:var(--bg-alt);
+  border-top:1px solid var(--border);
+  font-family:var(--font-mono);font-size:11px;
+}
+.live-timer{color:var(--fg-dim)}
+.live-timer.warning{color:#e5a83e}
+.live-timer.critical{color:#e55}
+.live-expand{
+  color:var(--accent);text-decoration:none;font-size:11px;
+  font-family:var(--font-mono);
+}
+.live-expand:hover{text-decoration:underline}
+.live-close-btn{
+  background:none;border:none;color:var(--fg-dim);
+  cursor:pointer;font-family:var(--font-mono);font-size:11px;
+}
+.live-close-btn:hover{color:var(--fg-bright)}
 
 /* ── Responsive ── */
 @media(max-width:600px){
@@ -287,19 +326,28 @@ td code{font-size:12px}
   </div>
 
   <div class="term-demo" id="term-demo">
+    <button class="try-live-btn" id="try-live-btn" onclick="window.cwDemo.tryLive()">
+      <span class="pulse"></span> Try it live
+    </button>
     <div class="term-chrome">
       <span class="term-dot red"></span>
       <span class="term-dot yellow"></span>
       <span class="term-dot green"></span>
-      <span class="term-title">codewire demo</span>
+      <span class="term-title" id="term-title">codewire demo</span>
     </div>
-    <div class="term-body">
+    <div class="term-body" id="term-animated">
       <div class="term-lines"></div>
       <div class="term-input-line">
         <span class="term-prompt">$ </span>
         <span class="term-typed"></span>
         <span class="term-cursor"></span>
       </div>
+    </div>
+    <div class="live-term-container hidden" id="live-term-container"></div>
+    <div class="live-toolbar hidden" id="live-toolbar">
+      <span class="live-timer" id="live-status">Connecting...</span>
+      <a href="/demo" class="live-expand" id="live-expand">Open full terminal</a>
+      <button class="live-close-btn" onclick="window.cwDemo.closeLive()">Close</button>
     </div>
   </div>
 </section>
@@ -864,6 +912,10 @@ td code{font-size:12px}
   &nbsp;&middot;&nbsp; MIT License
 </footer>
 
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5/css/xterm.min.css">
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5/lib/xterm.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0/lib/addon-fit.min.js"></script>
+
 <script>
 // ── Theme Toggle ──
 function getPreferredTheme() {
@@ -1035,6 +1087,141 @@ function copySnippet(btn) {
   }
 
   run();
+})();
+
+// ── Live Demo (inline xterm.js widget) ──
+window.cwDemo = (function() {
+  const BROKER_URL = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+    ? 'http://localhost:8080'
+    : 'https://demo.codewire.sh';
+
+  let liveTerm = null;
+  let liveWS = null;
+  let liveFit = null;
+
+  async function tryLive() {
+    const btn = document.getElementById('try-live-btn');
+    const animated = document.getElementById('term-animated');
+    const container = document.getElementById('live-term-container');
+    const toolbar = document.getElementById('live-toolbar');
+    const title = document.getElementById('term-title');
+
+    btn.disabled = true;
+    btn.textContent = 'Connecting...';
+
+    try {
+      const resp = await fetch(BROKER_URL + '/api/session');
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        throw new Error(data.error || 'Server returned ' + resp.status);
+      }
+      const sessionData = await resp.json();
+
+      // Switch from animated to live terminal
+      animated.classList.add('hidden');
+      container.classList.remove('hidden');
+      toolbar.classList.remove('hidden');
+      btn.classList.add('hidden');
+      title.textContent = 'live demo — read only';
+
+      // Init xterm
+      liveTerm = new Terminal({
+        cursorBlink: false,
+        fontSize: 13,
+        fontFamily: 'ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace',
+        theme: {
+          background: '#1a1a1a',
+          foreground: '#c8c8c8',
+          cursor: '#7eb8da',
+          selectionBackground: 'rgba(126,184,218,0.3)',
+        },
+        rows: 14,
+        disableStdin: true,
+        allowProposedApi: true,
+      });
+      liveFit = new FitAddon.FitAddon();
+      liveTerm.loadAddon(liveFit);
+      liveTerm.open(container);
+      liveFit.fit();
+
+      // Update expand link
+      const expandLink = document.getElementById('live-expand');
+      expandLink.href = '/demo?ws=' + encodeURIComponent(sessionData.ws);
+
+      connectLiveWS(sessionData.ws);
+    } catch (err) {
+      btn.disabled = false;
+      btn.innerHTML = '<span class="pulse"></span> Try it live';
+      console.error('Demo error:', err);
+    }
+  }
+
+  function connectLiveWS(url) {
+    liveWS = new WebSocket(url);
+    liveWS.binaryType = 'arraybuffer';
+
+    liveWS.onopen = () => {
+      const statusEl = document.getElementById('live-status');
+      statusEl.textContent = 'Watching live demo';
+      statusEl.className = 'live-timer';
+
+      const dims = liveFit.proposeDimensions();
+      if (dims) {
+        const resizeMsg = new Uint8Array([2, ...new TextEncoder().encode(JSON.stringify({columns: dims.cols, rows: dims.rows}))]);
+        liveWS.send(resizeMsg);
+      }
+    };
+
+    liveWS.onmessage = (evt) => {
+      if (evt.data instanceof ArrayBuffer) {
+        const data = new Uint8Array(evt.data);
+        if (data[0] === 0) {
+          liveTerm.write(data.slice(1));
+        }
+      } else {
+        try {
+          const msg = JSON.parse(evt.data);
+          if (msg.AuthToken) {
+            liveWS.send(JSON.stringify({AuthToken: msg.AuthToken}));
+          }
+        } catch {
+          liveTerm.write(evt.data);
+        }
+      }
+    };
+
+    liveWS.onclose = () => {
+      const statusEl = document.getElementById('live-status');
+      statusEl.textContent = 'Demo complete';
+      statusEl.className = 'live-timer';
+    };
+
+    window.addEventListener('resize', () => {
+      if (liveFit) liveFit.fit();
+    });
+  }
+
+  function closeLive() {
+    if (liveWS) { liveWS.close(); liveWS = null; }
+    if (liveTerm) { liveTerm.dispose(); liveTerm = null; }
+
+    const animated = document.getElementById('term-animated');
+    const container = document.getElementById('live-term-container');
+    const toolbar = document.getElementById('live-toolbar');
+    const btn = document.getElementById('try-live-btn');
+    const title = document.getElementById('term-title');
+
+    animated.classList.remove('hidden');
+    container.classList.add('hidden');
+    toolbar.classList.add('hidden');
+    container.innerHTML = '';
+    btn.classList.remove('hidden');
+    btn.disabled = false;
+    btn.innerHTML = '<span class="pulse"></span> Try it live';
+    title.textContent = 'codewire demo';
+  }
+
+  return { tryLive, closeLive };
 })();
 </script>
 </body>

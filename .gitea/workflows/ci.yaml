@@ -60,6 +60,76 @@ jobs:
           push: true
           tags: ${{ steps.tags.outputs.tags }}
 
+  build-demo:
+    name: Build Demo Images
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Authenticate to Infisical
+        run: |
+          RESPONSE=$(curl -s -X POST "${INFISICAL_API_URL}/v1/auth/oidc-auth/login" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"identityId\": \"${INFISICAL_IDENTITY_ID}\",
+              \"jwt\": \"$(cat ${INFISICAL_SA_TOKEN_PATH})\"
+            }")
+          ACCESS_TOKEN=$(echo "$RESPONSE" | jq -r '.accessToken')
+          if [ "$ACCESS_TOKEN" = "null" ] || [ -z "$ACCESS_TOKEN" ]; then
+            echo "Failed to authenticate to Infisical"
+            echo "$RESPONSE"
+            exit 1
+          fi
+          echo "INFISICAL_TOKEN=$ACCESS_TOKEN" >> $GITHUB_ENV
+
+      - name: Login to Gitea Container Registry
+        run: |
+          REGISTRY_TOKEN=$(curl -s "${INFISICAL_API_URL}/v3/secrets/raw/GITEA_REGISTRY_TOKEN?workspaceSlug=codespace&environment=prod&secretPath=/ci" \
+            -H "Authorization: Bearer ${INFISICAL_TOKEN}" | jq -r '.secret.secretValue')
+          echo "$REGISTRY_TOKEN" | docker login git.noel.sh -u ci --password-stdin
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker
+
+      - name: Determine image tags
+        id: tags
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            TAG="${{ github.ref_name }}"
+            echo "demo_tags=git.noel.sh/codespace/codewire-demo:${TAG},git.noel.sh/codespace/codewire-demo:${{ gitea.sha }}" >> $GITHUB_OUTPUT
+            echo "broker_tags=git.noel.sh/codespace/codewire-demo-broker:${TAG},git.noel.sh/codespace/codewire-demo-broker:${{ gitea.sha }}" >> $GITHUB_OUTPUT
+          else
+            echo "demo_tags=git.noel.sh/codespace/codewire-demo:latest,git.noel.sh/codespace/codewire-demo:${{ gitea.sha }}" >> $GITHUB_OUTPUT
+            echo "broker_tags=git.noel.sh/codespace/codewire-demo-broker:latest,git.noel.sh/codespace/codewire-demo-broker:${{ gitea.sha }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build cw binary for demo image
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o demo/cw ./cmd/cw
+
+      - name: Build and push demo image
+        uses: docker/build-push-action@v5
+        with:
+          context: demo
+          file: demo/Dockerfile
+          push: true
+          tags: ${{ steps.tags.outputs.demo_tags }}
+
+      - name: Build and push broker image
+        uses: docker/build-push-action@v5
+        with:
+          context: demo/broker
+          file: demo/broker/Dockerfile
+          push: true
+          tags: ${{ steps.tags.outputs.broker_tags }}
+
   deploy-prod:
     name: Deploy to Prod
     needs: [build-docs]
