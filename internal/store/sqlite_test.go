@@ -71,13 +71,13 @@ func TestKVTTL(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	// Set with very short TTL.
-	ttl := time.Millisecond
+	// Set with a TTL long enough to survive the immediate read.
+	ttl := 2 * time.Second
 	if err := s.KVSet(ctx, "ns", "expiring", []byte("gone"), &ttl); err != nil {
 		t.Fatal(err)
 	}
 
-	// Should exist immediately.
+	// Should exist immediately (well within 2s TTL).
 	val, err := s.KVGet(ctx, "ns", "expiring")
 	if err != nil {
 		t.Fatal(err)
@@ -86,8 +86,12 @@ func TestKVTTL(t *testing.T) {
 		t.Fatal("expected value before expiry")
 	}
 
-	// Wait for expiry.
-	time.Sleep(5 * time.Millisecond)
+	// Now set a very short TTL and wait for it to expire.
+	ttl = time.Millisecond
+	if err := s.KVSet(ctx, "ns", "expiring", []byte("gone"), &ttl); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
 
 	val, err = s.KVGet(ctx, "ns", "expiring")
 	if err != nil {

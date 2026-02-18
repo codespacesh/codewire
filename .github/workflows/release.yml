@@ -114,7 +114,7 @@ jobs:
       - name: Push to OCI registry
         run: |
           VERSION=${GITHUB_REF_NAME#v}
-          helm push codewire-relay-${VERSION}.tgz oci://ghcr.io/sonica
+          helm push codewire-relay-${VERSION}.tgz oci://ghcr.io/codespacesh
 
   operator-image:
     name: Build & Push Operator Image
