@@ -127,7 +127,8 @@ func (r *CodewireRelayReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// 6. Run sub-reconcilers in order.
 	reconcileErr := r.runSubReconcilers(ctx, &relay)
 
-	// 7. Set phase based on outcome.
+	// 7. Set phase and relay URL based on outcome.
+	relay.Status.RelayURL = relay.Spec.BaseURL
 	if reconcileErr != nil {
 		relay.Status.Phase = "Failed"
 		logger.Error(reconcileErr, "reconciliation failed")
