@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +17,37 @@ import (
 	"github.com/codespacesh/codewire/internal/statusbar"
 	"github.com/codespacesh/codewire/internal/terminal"
 )
+
+// ResolveSessionArg resolves a session argument that can be either a numeric ID
+// or a session name (optionally prefixed with @). It queries the node to
+// resolve names to IDs.
+func ResolveSessionArg(target *Target, arg string) (uint32, error) {
+	// Strip leading @ if present.
+	name := strings.TrimPrefix(arg, "@")
+
+	// Try numeric ID first.
+	if parsed, err := strconv.ParseUint(name, 10, 32); err == nil {
+		return uint32(parsed), nil
+	}
+
+	// Resolve by name — list sessions and find by name.
+	resp, err := requestResponse(target, &protocol.Request{Type: "ListSessions"})
+	if err != nil {
+		return 0, err
+	}
+	if resp.Type == "Error" {
+		return 0, fmt.Errorf("%s", formatError(resp.Message))
+	}
+	if resp.Sessions == nil {
+		return 0, fmt.Errorf("no sessions found")
+	}
+	for _, s := range *resp.Sessions {
+		if s.Name == name {
+			return s.ID, nil
+		}
+	}
+	return 0, fmt.Errorf("no session named %q", name)
+}
 
 // ---------------------------------------------------------------------------
 // List
@@ -59,12 +91,14 @@ func List(target *Target, jsonOutput bool) error {
 // ---------------------------------------------------------------------------
 
 // Run launches a new session on the node with the given command, working
-// directory, and optional tags.
-func Run(target *Target, command []string, workingDir string, tags ...string) error {
+// directory, and optional tags. If name is non-empty, the session is assigned
+// that name for addressing.
+func Run(target *Target, command []string, workingDir string, name string, tags ...string) error {
 	resp, err := requestResponse(target, &protocol.Request{
 		Type:       "Launch",
 		Command:    command,
 		WorkingDir: workingDir,
+		Name:       name,
 		Tags:       tags,
 	})
 	if err != nil {
@@ -697,9 +731,16 @@ func GetStatus(target *Target, id uint32, jsonOutput bool) error {
 // printSessionTable prints a formatted table of sessions.
 func printSessionTable(sessions []protocol.SessionInfo) {
 	// Column headers.
-	fmt.Printf("%-6s %-20s %-12s %-10s %-8s\n", "ID", "COMMAND", "STATUS", "CREATED", "ATTACHED")
+	fmt.Printf("%-6s %-16s %-20s %-12s %-10s %-8s\n", "ID", "NAME", "COMMAND", "STATUS", "CREATED", "ATTACHED")
 
 	for _, s := range sessions {
+		name := s.Name
+		if name == "" {
+			name = "-"
+		}
+		if len(name) > 16 {
+			name = name[:13] + "..."
+		}
 		prompt := s.Prompt
 		if len(prompt) > 20 {
 			prompt = prompt[:17] + "..."
@@ -709,7 +750,7 @@ func printSessionTable(sessions []protocol.SessionInfo) {
 		if s.Attached {
 			attached = "yes"
 		}
-		fmt.Printf("%-6d %-20s %-12s %-10s %-8s\n", s.ID, prompt, s.Status, created, attached)
+		fmt.Printf("%-6d %-16s %-20s %-12s %-10s %-8s\n", s.ID, name, prompt, s.Status, created, attached)
 	}
 }
 
@@ -960,6 +1001,275 @@ func KVDelete(target *Target, namespace, key string) error {
 	}
 	fmt.Fprintf(os.Stderr, "Deleted %s/%s\n", namespace, key)
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Msg — send a direct message
+// ---------------------------------------------------------------------------
+
+// Msg sends a direct message to a session.
+func Msg(target *Target, fromID *uint32, toID uint32, body string) error {
+	resp, err := requestResponse(target, &protocol.Request{
+		Type:  "MsgSend",
+		ID:    fromID,
+		ToID:  &toID,
+		Body:  body,
+	})
+	if err != nil {
+		return err
+	}
+	if resp.Type == "Error" {
+		return fmt.Errorf("%s", formatError(resp.Message))
+	}
+	fmt.Fprintf(os.Stderr, "Message sent: %s\n", resp.MessageID)
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Inbox — read messages for a session
+// ---------------------------------------------------------------------------
+
+// Inbox reads and displays messages for a session.
+func Inbox(target *Target, sessionID uint32, tail int) error {
+	t := uint(tail)
+	resp, err := requestResponse(target, &protocol.Request{
+		Type: "MsgRead",
+		ID:   &sessionID,
+		Tail: &t,
+	})
+	if err != nil {
+		return err
+	}
+	if resp.Type == "Error" {
+		return fmt.Errorf("%s", formatError(resp.Message))
+	}
+	if resp.Messages == nil {
+		fmt.Println("No messages")
+		return nil
+	}
+
+	messages := *resp.Messages
+	if len(messages) == 0 {
+		fmt.Println("No messages")
+		return nil
+	}
+
+	for _, m := range messages {
+		fromLabel := fmt.Sprintf("%d", m.From)
+		if m.FromName != "" {
+			fromLabel = m.FromName
+		}
+		toLabel := fmt.Sprintf("%d", m.To)
+		if m.ToName != "" {
+			toLabel = m.ToName
+		}
+
+		switch m.EventType {
+		case "message.request":
+			fmt.Printf("[%s] REQUEST %s → %s (req=%s): %s\n", m.Timestamp, fromLabel, toLabel, m.RequestID, m.Body)
+		case "message.reply":
+			fmt.Printf("[%s] REPLY %s (req=%s): %s\n", m.Timestamp, fromLabel, m.RequestID, m.Body)
+		default:
+			fmt.Printf("[%s] %s → %s: %s\n", m.Timestamp, fromLabel, toLabel, m.Body)
+		}
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Request — send a request and wait for reply
+// ---------------------------------------------------------------------------
+
+// Request sends a request to a session and blocks until a reply arrives.
+func Request(target *Target, fromID *uint32, toID uint32, body string, timeout uint64) error {
+	reader, writer, err := target.Connect()
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
+	defer writer.Close()
+
+	req := &protocol.Request{
+		Type:           "MsgRequest",
+		ID:             fromID,
+		ToID:           &toID,
+		Body:           body,
+		TimeoutSeconds: &timeout,
+	}
+	if err := writer.SendRequest(req); err != nil {
+		return fmt.Errorf("sending request: %w", err)
+	}
+
+	// Read response — blocks until reply or timeout.
+	frame, err := reader.ReadFrame()
+	if err != nil {
+		return fmt.Errorf("reading response: %w", err)
+	}
+	if frame == nil {
+		return fmt.Errorf("connection closed before response")
+	}
+	if frame.Type != protocol.FrameControl {
+		return fmt.Errorf("expected control frame")
+	}
+
+	var resp protocol.Response
+	if err := json.Unmarshal(frame.Payload, &resp); err != nil {
+		return fmt.Errorf("parsing response: %w", err)
+	}
+
+	switch resp.Type {
+	case "MsgRequestResult":
+		fromLabel := "unknown"
+		if resp.FromName != "" {
+			fromLabel = resp.FromName
+		} else if resp.FromID != nil {
+			fromLabel = fmt.Sprintf("%d", *resp.FromID)
+		}
+		fmt.Printf("[reply from %s] %s\n", fromLabel, resp.ReplyBody)
+	case "Error":
+		return fmt.Errorf("%s", resp.Message)
+	default:
+		return fmt.Errorf("unexpected response: %s", resp.Type)
+	}
+
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Reply — reply to a pending request
+// ---------------------------------------------------------------------------
+
+// Reply sends a reply to a pending request.
+func Reply(target *Target, fromID *uint32, requestID string, body string) error {
+	resp, err := requestResponse(target, &protocol.Request{
+		Type:      "MsgReply",
+		ID:        fromID,
+		RequestID: requestID,
+		Body:      body,
+	})
+	if err != nil {
+		return err
+	}
+	if resp.Type == "Error" {
+		return fmt.Errorf("%s", formatError(resp.Message))
+	}
+	fmt.Fprintf(os.Stderr, "Reply sent for request %s\n", requestID)
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Listen — stream message traffic
+// ---------------------------------------------------------------------------
+
+// Listen streams all message traffic on the node in real-time.
+func Listen(target *Target, sessionID *uint32) error {
+	reader, writer, err := target.Connect()
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
+	defer writer.Close()
+
+	req := &protocol.Request{
+		Type: "MsgListen",
+		ID:   sessionID,
+	}
+	if err := writer.SendRequest(req); err != nil {
+		return err
+	}
+
+	for {
+		frame, err := reader.ReadFrame()
+		if err != nil {
+			return err
+		}
+		if frame == nil {
+			return nil
+		}
+		if frame.Type != protocol.FrameControl {
+			continue
+		}
+
+		var resp protocol.Response
+		if err := json.Unmarshal(frame.Payload, &resp); err != nil {
+			continue
+		}
+
+		switch resp.Type {
+		case "MsgListenAck":
+			fmt.Fprintf(os.Stderr, "[cw] listening for messages...\n")
+		case "Event":
+			if resp.Event != nil {
+				printMessageEvent(resp.SessionID, resp.Event)
+			}
+		case "Error":
+			return fmt.Errorf("%s", resp.Message)
+		}
+	}
+}
+
+// printMessageEvent formats a message event for the listen stream.
+func printMessageEvent(sessionID *uint32, event *protocol.SessionEvent) {
+	switch event.EventType {
+	case "direct.message":
+		var d struct {
+			From     uint32 `json:"from"`
+			FromName string `json:"from_name"`
+			To       uint32 `json:"to"`
+			ToName   string `json:"to_name"`
+			Body     string `json:"body"`
+		}
+		if json.Unmarshal(event.Data, &d) != nil {
+			return
+		}
+		fromLabel := fmt.Sprintf("%d", d.From)
+		if d.FromName != "" {
+			fromLabel = d.FromName
+		}
+		toLabel := fmt.Sprintf("%d", d.To)
+		if d.ToName != "" {
+			toLabel = d.ToName
+		}
+		fmt.Printf("[%s → %s] %s\n", fromLabel, toLabel, d.Body)
+
+	case "message.request":
+		var d struct {
+			RequestID string `json:"request_id"`
+			From      uint32 `json:"from"`
+			FromName  string `json:"from_name"`
+			To        uint32 `json:"to"`
+			ToName    string `json:"to_name"`
+			Body      string `json:"body"`
+		}
+		if json.Unmarshal(event.Data, &d) != nil {
+			return
+		}
+		fromLabel := fmt.Sprintf("%d", d.From)
+		if d.FromName != "" {
+			fromLabel = d.FromName
+		}
+		toLabel := fmt.Sprintf("%d", d.To)
+		if d.ToName != "" {
+			toLabel = d.ToName
+		}
+		fmt.Printf("[%s → %s] REQUEST (%s): %s\n", fromLabel, toLabel, d.RequestID, d.Body)
+
+	case "message.reply":
+		var d struct {
+			RequestID string `json:"request_id"`
+			From      uint32 `json:"from"`
+			FromName  string `json:"from_name"`
+			Body      string `json:"body"`
+		}
+		if json.Unmarshal(event.Data, &d) != nil {
+			return
+		}
+		fromLabel := fmt.Sprintf("%d", d.From)
+		if d.FromName != "" {
+			fromLabel = d.FromName
+		}
+		fmt.Printf("[%s] REPLY (%s): %s\n", fromLabel, d.RequestID, d.Body)
+	}
 }
 
 // formatRelativeTime converts an RFC3339 timestamp to a human-readable

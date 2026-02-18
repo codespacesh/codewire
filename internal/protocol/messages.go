@@ -5,6 +5,7 @@ import "encoding/json"
 // SessionInfo describes a terminal session, matching the Rust SessionInfo struct.
 type SessionInfo struct {
 	ID                uint32  `json:"id"`
+	Name              string  `json:"name,omitempty"`
 	Prompt            string  `json:"prompt"`
 	WorkingDir        string  `json:"working_dir"`
 	CreatedAt         string  `json:"created_at"`
@@ -41,6 +42,9 @@ type Request struct {
 	Tail           *uint    `json:"tail,omitempty"`
 	Data           []byte   `json:"data,omitempty"`
 
+	// Session name for Launch and name-based addressing.
+	Name string `json:"name,omitempty"`
+
 	// New fields for enriched protocol.
 	Tags           []string `json:"tags,omitempty"`
 	EventTypes     []string `json:"event_types,omitempty"`
@@ -53,6 +57,12 @@ type Request struct {
 	Key       string `json:"key,omitempty"`
 	Value     []byte `json:"value,omitempty"`
 	TTL       string `json:"ttl,omitempty"` // Go duration string
+
+	// Messaging fields.
+	ToID      *uint32 `json:"to_id,omitempty"`
+	ToName    string  `json:"to_name,omitempty"`
+	Body      string  `json:"body,omitempty"`
+	RequestID string  `json:"request_id,omitempty"`
 }
 
 // UnmarshalJSON implements custom JSON unmarshalling for Request.
@@ -100,6 +110,27 @@ type Response struct {
 	// KV fields.
 	Value   []byte    `json:"value,omitempty"`
 	Entries *[]KVPair `json:"entries,omitempty"`
+
+	// Messaging fields.
+	MessageID string             `json:"message_id,omitempty"`
+	Messages  *[]MessageResponse `json:"messages,omitempty"`
+	RequestID string             `json:"request_id,omitempty"`
+	ReplyBody string             `json:"reply_body,omitempty"`
+	FromID    *uint32            `json:"from_id,omitempty"`
+	FromName  string             `json:"from_name,omitempty"`
+}
+
+// MessageResponse represents a message in an inbox read result.
+type MessageResponse struct {
+	MessageID string `json:"message_id"`
+	Timestamp string `json:"timestamp"`
+	From      uint32 `json:"from"`
+	FromName  string `json:"from_name,omitempty"`
+	To        uint32 `json:"to"`
+	ToName    string `json:"to_name,omitempty"`
+	Body      string `json:"body"`
+	EventType string `json:"type"` // "direct.message", "message.request", "message.reply"
+	RequestID string `json:"request_id,omitempty"`
 }
 
 // SessionEvent is a typed event pushed to subscribers.

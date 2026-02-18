@@ -15,12 +15,15 @@ import (
 type EventType string
 
 const (
-	EventSessionCreated     EventType = "session.created"
-	EventSessionStatus      EventType = "session.status"
-	EventOutputSummary      EventType = "session.output_summary"
-	EventInput              EventType = "session.input"
-	EventAttached           EventType = "session.attached"
-	EventDetached           EventType = "session.detached"
+	EventSessionCreated EventType = "session.created"
+	EventSessionStatus  EventType = "session.status"
+	EventOutputSummary  EventType = "session.output_summary"
+	EventInput          EventType = "session.input"
+	EventAttached       EventType = "session.attached"
+	EventDetached       EventType = "session.detached"
+	EventDirectMessage  EventType = "direct.message"
+	EventRequest        EventType = "message.request"
+	EventReply          EventType = "message.reply"
 )
 
 // Event is a typed, timestamped session event written to events.jsonl.
@@ -61,6 +64,33 @@ type AttachDetachData struct {
 	ClientID string `json:"client_id"`
 }
 
+// --- Messaging Data Types ---
+
+type DirectMessageData struct {
+	MessageID string `json:"message_id"`
+	From      uint32 `json:"from"`
+	FromName  string `json:"from_name,omitempty"`
+	To        uint32 `json:"to"`
+	ToName    string `json:"to_name,omitempty"`
+	Body      string `json:"body"`
+}
+
+type RequestData struct {
+	RequestID string `json:"request_id"`
+	From      uint32 `json:"from"`
+	FromName  string `json:"from_name,omitempty"`
+	To        uint32 `json:"to"`
+	ToName    string `json:"to_name,omitempty"`
+	Body      string `json:"body"`
+}
+
+type ReplyData struct {
+	RequestID string `json:"request_id"`
+	From      uint32 `json:"from"`
+	FromName  string `json:"from_name,omitempty"`
+	Body      string `json:"body"`
+}
+
 // --- Event Constructors ---
 
 func NewSessionCreatedEvent(command []string, workingDir string, tags []string) Event {
@@ -91,6 +121,21 @@ func NewAttachedEvent(clientID string) Event {
 func NewDetachedEvent(clientID string) Event {
 	data, _ := json.Marshal(AttachDetachData{ClientID: clientID})
 	return Event{Timestamp: time.Now().UTC(), Type: EventDetached, Data: data}
+}
+
+func NewDirectMessageEvent(msg DirectMessageData) Event {
+	data, _ := json.Marshal(msg)
+	return Event{Timestamp: time.Now().UTC(), Type: EventDirectMessage, Data: data}
+}
+
+func NewRequestEvent(req RequestData) Event {
+	data, _ := json.Marshal(req)
+	return Event{Timestamp: time.Now().UTC(), Type: EventRequest, Data: data}
+}
+
+func NewReplyEvent(reply ReplyData) Event {
+	data, _ := json.Marshal(reply)
+	return Event{Timestamp: time.Now().UTC(), Type: EventReply, Data: data}
 }
 
 // --- EventLog — append-only JSONL file ---
@@ -147,6 +192,18 @@ func ReadEventLog(path string) ([]Event, error) {
 		events = append(events, e)
 	}
 	return events, scanner.Err()
+}
+
+// ReadTail reads the last N events from this log's file. If tail <= 0, all events are returned.
+func (l *EventLog) ReadTail(tail int) ([]Event, error) {
+	events, err := ReadEventLog(l.path)
+	if err != nil {
+		return nil, err
+	}
+	if tail > 0 && len(events) > tail {
+		events = events[len(events)-tail:]
+	}
+	return events, nil
 }
 
 // Close closes the underlying file.

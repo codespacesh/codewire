@@ -21,7 +21,9 @@
       "Bash(wc:*)",
       "Bash(docker compose:*)",
       "Bash(docker build:*)",
-      "WebSearch"
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "Bash(open:*)"
     ]
   },
   "enableAllProjectMcpServers": true

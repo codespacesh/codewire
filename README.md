@@ -72,27 +72,33 @@ cw logs 1
 
 ## Commands
 
-### `cw launch [--dir <dir>] [--tag <tag>...] -- <command> [args...]`
+### `cw launch [--name <name>] [--dir <dir>] [--tag <tag>...] -- <command> [args...]`
 
-Start a new session running the given command in a persistent PTY. Everything after `--` is the command and its arguments. Tags enable filtering and coordination.
+Start a new session running the given command in a persistent PTY. Everything after `--` is the command and its arguments. Names give sessions stable identifiers for messaging. Tags enable filtering and coordination.
 
 ```bash
 cw launch -- claude -p "refactor the database layer"
+cw launch --name planner -- claude -p "plan the refactor"
 cw launch --dir /home/coder/project -- claude -p "add unit tests for auth"
 cw launch --tag worker --tag build -- claude -p "fix tests"
 cw launch -- bash -c "npm test && npm run lint"
 ```
 
 Options:
+- `--name` — Unique name for the session (alphanumeric + hyphens, 1-32 chars). Used for addressing in messaging.
 - `--dir`, `-d` — Working directory (defaults to current dir)
 - `--tag`, `-t` — Tag the session (repeatable)
 
 ### `cw list`
 
-Show all sessions with their status, age, and prompt.
+Show all sessions with their name, status, age, and command.
 
 ```bash
 cw list
+# ID     NAME             COMMAND              STATUS       CREATED    ATTACHED
+# 1      planner          claude -p "plan ...  running      2m ago     no
+# 2      coder            claude -p "impl...   running      45s ago    no
+
 cw list --json   # machine-readable output
 ```
 
@@ -144,6 +150,60 @@ cw watch 1                      # Watch with recent history
 cw watch 1 --tail 50            # Start from last 50 lines
 cw watch 1 --no-history         # Only new output
 cw watch 1 --timeout 60         # Auto-exit after 60 seconds
+```
+
+### `cw msg <target> <body> [--from <session>]`
+
+Send a direct message to a session. Target can be a session ID or name.
+
+```bash
+cw msg coder "start with the auth module"              # by name
+cw msg 2 "start with the auth module"                  # by ID
+cw msg --from planner coder "start with the auth module"  # with sender
+```
+
+### `cw inbox <session> [--tail <N>]`
+
+Read messages from a session's inbox. Shows direct messages and pending requests.
+
+```bash
+cw inbox coder                # latest 50 messages
+cw inbox planner --tail 10    # last 10 messages
+```
+
+### `cw request <target> <body> [--from <session>] [--timeout <s>]`
+
+Send a request to a session and block until a reply arrives. Like `msg` but synchronous — the caller waits for a response.
+
+```bash
+cw request --from planner coder "ready for review?"
+# [reply from coder] yes, PR #42 is up
+
+cw request coder "status?" --timeout 30    # 30s timeout (default: 60s)
+```
+
+### `cw reply <request-id> <body> [--from <session>]`
+
+Reply to a pending request. The request ID comes from `cw inbox` or from a `message.request` event.
+
+```bash
+cw reply req_x7y8z9 "yes, PR #42 is up" --from coder
+```
+
+### `cw listen [--session <session>]`
+
+Stream all message traffic on the node in real-time. Shows direct messages, requests, and replies as they happen.
+
+```bash
+cw listen                     # all message traffic
+cw listen --session planner   # only messages involving planner
+```
+
+Output format:
+```
+[planner → coder] start with the auth module
+[coder → planner] REQUEST (req_x7y8): need the DB schema?
+[planner] REPLY (req_x7y8): use the existing users table
 ```
 
 ### `cw status <id>`
@@ -484,7 +544,7 @@ cw subscribe --tag worker --event session.status
 cw subscribe --session 3
 ```
 
-Event types: `session.created`, `session.status`, `session.output_summary`, `session.input`, `session.attached`, `session.detached`
+Event types: `session.created`, `session.status`, `session.output_summary`, `session.input`, `session.attached`, `session.detached`, `direct.message`, `message.request`, `message.reply`
 
 ### Wait for Completion
 
@@ -515,6 +575,24 @@ cw wait --tag worker --condition all --timeout 300
 
 # Check results
 cw list
+```
+
+**Agent messaging** — named agents exchanging structured messages:
+
+```bash
+# Launch named agents
+cw launch --name planner -- claude -p "plan the refactor"
+cw launch --name coder -- claude -p "implement changes"
+
+# Send a direct message
+cw msg --from planner coder "start with the auth module"
+
+# Request/reply — synchronous coordination
+cw request --from planner coder "ready for review?"
+# [reply from coder] yes, PR #42 is up
+
+# Monitor all message traffic
+cw listen
 ```
 
 **Agent swarms** — parallel agents with cross-session communication:
@@ -566,11 +644,11 @@ claude mcp add --scope user codewire -- cw mcp-server
 claude mcp add codewire -- cw mcp-server
 ```
 
-This exposes 14 tools:
+This exposes 18 tools:
 
 | Tool | Description |
 |------|-------------|
-| `codewire_launch_session` | Launch new session (with tags) |
+| `codewire_launch_session` | Launch new session (with name and tags) |
 | `codewire_list_sessions` | List sessions with enriched metadata |
 | `codewire_read_session_output` | Read output snapshot |
 | `codewire_send_input` | Send input to a session |
@@ -579,6 +657,10 @@ This exposes 14 tools:
 | `codewire_kill_session` | Terminate session (by ID or tags) |
 | `codewire_subscribe` | Subscribe to session events |
 | `codewire_wait_for` | Block until sessions complete |
+| `codewire_msg` | Send a direct message to a session |
+| `codewire_read_messages` | Read messages from a session's inbox |
+| `codewire_request` | Send a request and block for reply |
+| `codewire_reply` | Reply to a pending request |
 | `codewire_list_nodes` | List nodes from relay |
 | `codewire_kv_set` | Set key-value (shared KV store) |
 | `codewire_kv_get` | Get value by key |
