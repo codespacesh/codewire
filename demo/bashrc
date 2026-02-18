@@ -1,0 +1,14 @@
+export PS1='\[\e[36m\]demo\[\e[0m\]:\[\e[33m\]\w\[\e[0m\]$ '
+
+echo ""
+echo -e "\e[36m  ╔═══════════════════════════════════════╗"
+echo -e "  ║     \e[1mCodeWire Live Demo\e[0m\e[36m              ║"
+echo -e "  ╚═══════════════════════════════════════╝\e[0m"
+echo ""
+echo -e "  Try these commands:"
+echo -e "    \e[33mcw launch worker -- echo hello world\e[0m"
+echo -e "    \e[33mcw list\e[0m"
+echo -e "    \e[33mcw logs 1\e[0m"
+echo -e "    \e[33mcw launch --tag build -- sleep 10\e[0m"
+echo -e "    \e[33mcw wait --tag build\e[0m"
+echo ""

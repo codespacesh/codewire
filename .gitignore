@@ -1,3 +1,7 @@
 /target
+/cw
+/demo-broker
+demo/cw
+demo/broker/broker
 .env
 operator/bin/

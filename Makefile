@@ -1,7 +1,11 @@
-.PHONY: build test test-all test-manual lint clean install
+.PHONY: build test test-all test-manual lint clean install \
+       demo-build broker-build demo-push broker-push
 
 BINARY := cw
 BUILD_DIR := ./cmd/cw
+DEMO_IMAGE ?= ghcr.io/codespacesh/codewire-demo
+BROKER_IMAGE ?= ghcr.io/codespacesh/codewire-demo-broker
+IMAGE_TAG ?= latest
 
 # Build release binary
 build:
@@ -26,7 +30,25 @@ lint:
 install: build
 	cp $(BINARY) /usr/local/bin/$(BINARY)
 
+# Build demo container image (requires cw binary in demo/)
+demo-build: build
+	cp $(BINARY) demo/cw
+	docker build -t $(DEMO_IMAGE):$(IMAGE_TAG) demo/
+	rm -f demo/cw
+
+# Build broker image
+broker-build:
+	docker build -t $(BROKER_IMAGE):$(IMAGE_TAG) demo/broker/
+
+# Push demo images
+demo-push: demo-build
+	docker push $(DEMO_IMAGE):$(IMAGE_TAG)
+
+broker-push: broker-build
+	docker push $(BROKER_IMAGE):$(IMAGE_TAG)
+
 # Clean build artifacts
 clean:
 	rm -f $(BINARY)
+	rm -f demo/cw
 	rm -rf ~/.codewire/test-*

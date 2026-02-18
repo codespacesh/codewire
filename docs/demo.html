@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CodeWire — Live Demo</title>
+<meta name="description" content="Watch a multi-agent code review workflow powered by CodeWire.">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5/css/xterm.min.css">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d0d0d;
+  --bg-alt:#161616;
+  --fg:#c8c8c8;
+  --fg-dim:#707070;
+  --fg-bright:#e8e8e8;
+  --accent:#7eb8da;
+  --border:#252525;
+  --font-mono:ui-monospace,"SF Mono","Cascadia Code","Fira Code",Menlo,Consolas,monospace;
+  --font-sans:ui-sans-serif,system-ui,-apple-system,sans-serif;
+}
+html,body{height:100%;background:var(--bg);color:var(--fg);font-family:var(--font-sans)}
+.demo-header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 20px;height:48px;
+  background:var(--bg-alt);border-bottom:1px solid var(--border);
+  flex-shrink:0;
+}
+.demo-header .logo{font-family:var(--font-mono);font-weight:700;font-size:15px;color:var(--fg-bright);text-decoration:none}
+.demo-header .logo span{color:var(--accent)}
+.demo-header .meta{display:flex;align-items:center;gap:16px}
+.status{
+  font-family:var(--font-mono);font-size:13px;color:var(--fg-dim);
+  padding:4px 10px;border:1px solid var(--border);border-radius:4px;
+}
+.close-link{
+  color:var(--fg-dim);text-decoration:none;font-size:13px;
+  padding:4px 10px;border:1px solid var(--border);border-radius:4px;
+  transition:all .15s;
+}
+.close-link:hover{color:var(--fg-bright);border-color:var(--fg-dim);text-decoration:none}
+.demo-body{
+  display:flex;flex-direction:column;
+  height:calc(100vh - 48px);
+  padding:0;
+}
+#terminal{flex:1;padding:8px}
+.overlay{
+  position:fixed;inset:0;
+  display:flex;align-items:center;justify-content:center;
+  background:rgba(13,13,13,0.9);z-index:200;
+}
+.overlay-box{
+  text-align:center;padding:40px;
+  background:var(--bg-alt);border:1px solid var(--border);border-radius:8px;
+  max-width:400px;
+}
+.overlay-box h2{font-size:18px;color:var(--fg-bright);margin-bottom:12px}
+.overlay-box p{color:var(--fg-dim);font-size:14px;margin-bottom:20px}
+.btn{
+  display:inline-block;padding:10px 24px;
+  background:var(--accent);color:#0d0d0d;
+  border:none;border-radius:6px;cursor:pointer;
+  font-size:14px;font-weight:600;text-decoration:none;
+  transition:opacity .15s;
+}
+.btn:hover{opacity:0.85;text-decoration:none}
+.btn + .btn{margin-left:12px}
+.btn-secondary{background:transparent;border:1px solid var(--border);color:var(--fg)}
+.btn-secondary:hover{border-color:var(--fg-dim);color:var(--fg-bright)}
+.spinner{
+  width:24px;height:24px;border:3px solid var(--border);
+  border-top-color:var(--accent);border-radius:50%;
+  animation:spin .8s linear infinite;margin:0 auto 16px;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+.hidden{display:none}
+</style>
+</head>
+<body>
+
+<div class="demo-header">
+  <a href="/" class="logo">code<span>wire</span></a>
+  <div class="meta">
+    <div class="status" id="status">Connecting...</div>
+    <a href="/" class="close-link">Close</a>
+  </div>
+</div>
+
+<div class="demo-body">
+  <div id="terminal"></div>
+</div>
+
+<!-- Connecting overlay -->
+<div class="overlay" id="overlay-connect">
+  <div class="overlay-box">
+    <div class="spinner"></div>
+    <h2>Starting demo</h2>
+    <p>Launching a fresh multi-agent workflow...</p>
+  </div>
+</div>
+
+<!-- Demo ended overlay -->
+<div class="overlay hidden" id="overlay-ended">
+  <div class="overlay-box">
+    <h2>Demo complete</h2>
+    <p>The multi-agent code review workflow has finished.</p>
+    <button class="btn" onclick="startSession()">Replay</button>
+    <a href="/" class="btn btn-secondary">Back to docs</a>
+  </div>
+</div>
+
+<!-- Error overlay -->
+<div class="overlay hidden" id="overlay-error">
+  <div class="overlay-box">
+    <h2>Demo unavailable</h2>
+    <p id="error-msg">Could not connect to the demo server.</p>
+    <a href="/" class="btn">Back to docs</a>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5/lib/xterm.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0/lib/addon-fit.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-web-links@0/lib/addon-web-links.min.js"></script>
+<script>
+(function() {
+  const BROKER_URL = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+    ? 'http://localhost:8080'
+    : 'https://demo.codewire.sh';
+
+  const overlayConnect = document.getElementById('overlay-connect');
+  const overlayEnded = document.getElementById('overlay-ended');
+  const overlayError = document.getElementById('overlay-error');
+  const errorMsg = document.getElementById('error-msg');
+  const statusEl = document.getElementById('status');
+  const termEl = document.getElementById('terminal');
+
+  let term = null;
+  let fitAddon = null;
+  let ws = null;
+
+  function showOverlay(el) {
+    [overlayConnect, overlayEnded, overlayError].forEach(o => o.classList.add('hidden'));
+    if (el) el.classList.remove('hidden');
+  }
+
+  function initTerminal() {
+    if (term) {
+      term.dispose();
+    }
+    term = new Terminal({
+      cursorBlink: false,
+      fontSize: 14,
+      fontFamily: 'ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace',
+      theme: {
+        background: '#0d0d0d',
+        foreground: '#c8c8c8',
+        cursor: '#7eb8da',
+        selectionBackground: 'rgba(126,184,218,0.3)',
+      },
+      disableStdin: true,
+      allowProposedApi: true,
+    });
+    fitAddon = new FitAddon.FitAddon();
+    term.loadAddon(fitAddon);
+    term.loadAddon(new WebLinksAddon.WebLinksAddon());
+    term.open(termEl);
+    fitAddon.fit();
+
+    window.addEventListener('resize', () => {
+      if (fitAddon) fitAddon.fit();
+    });
+  }
+
+  async function startSession() {
+    showOverlay(overlayConnect);
+    statusEl.textContent = 'Connecting...';
+    initTerminal();
+
+    try {
+      // Check for shared WebSocket URL from inline widget
+      const params = new URLSearchParams(location.search);
+      const sharedWS = params.get('ws');
+
+      if (sharedWS) {
+        connectWS(sharedWS);
+        return;
+      }
+
+      const resp = await fetch(BROKER_URL + '/api/session');
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        throw new Error(data.error || 'Server returned ' + resp.status);
+      }
+      const data = await resp.json();
+      connectWS(data.ws);
+    } catch (err) {
+      errorMsg.textContent = err.message || 'Could not connect to the demo server.';
+      showOverlay(overlayError);
+    }
+  }
+
+  function connectWS(url) {
+    ws = new WebSocket(url);
+    ws.binaryType = 'arraybuffer';
+
+    ws.onopen = () => {
+      showOverlay(null);
+      statusEl.textContent = 'Watching live demo';
+
+      // Send initial terminal size
+      const dims = fitAddon.proposeDimensions();
+      if (dims) {
+        const resizeMsg = new Uint8Array([2, ...new TextEncoder().encode(JSON.stringify({columns: dims.cols, rows: dims.rows}))]);
+        ws.send(resizeMsg);
+      }
+    };
+
+    ws.onmessage = (evt) => {
+      if (evt.data instanceof ArrayBuffer) {
+        const data = new Uint8Array(evt.data);
+        // ttyd protocol: first byte is type (0=output)
+        if (data[0] === 0) {
+          term.write(data.slice(1));
+        }
+      } else {
+        // Text message — likely JSON control
+        try {
+          const msg = JSON.parse(evt.data);
+          if (msg.AuthToken) {
+            ws.send(JSON.stringify({AuthToken: msg.AuthToken}));
+          }
+        } catch {
+          term.write(evt.data);
+        }
+      }
+    };
+
+    ws.onclose = () => {
+      statusEl.textContent = 'Demo complete';
+      showOverlay(overlayEnded);
+    };
+
+    ws.onerror = () => {
+      errorMsg.textContent = 'WebSocket connection failed.';
+      showOverlay(overlayError);
+    };
+
+    // Handle terminal resize (send to ttyd even though read-only)
+    term.onResize(({cols, rows}) => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        const resizeMsg = new Uint8Array([2, ...new TextEncoder().encode(JSON.stringify({columns: cols, rows: rows}))]);
+        ws.send(resizeMsg);
+      }
+    });
+  }
+
+  startSession();
+
+  // Expose for replay button
+  window.startSession = startSession;
+})();
+</script>
+</body>
+</html>
