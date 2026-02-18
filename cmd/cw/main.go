@@ -189,6 +189,11 @@ func runCmd() *cobra.Command {
 				return fmt.Errorf("command required after --")
 			}
 
+			// Default to current working directory if --dir not specified.
+			if workDir == "" {
+				workDir, _ = os.Getwd()
+			}
+
 			return client.Run(target, command, workDir, name, tags...)
 		},
 	}

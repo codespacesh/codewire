@@ -115,7 +115,7 @@ REQUEST_PID=$!
 sleep 2
 
 # Get the request ID from planner's inbox and reply
-REQ_ID=$(cw inbox planner --json 2>/dev/null | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+REQ_ID=$(cw inbox planner 2>/dev/null | grep -o 'req_[a-zA-Z0-9_]*' | head -1)
 if [ -n "$REQ_ID" ]; then
   type_cmd "cw reply $REQ_ID -f planner 'Yes — 24h TTL for access tokens, 7d for refresh tokens'"
 else
