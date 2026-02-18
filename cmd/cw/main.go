@@ -54,6 +54,11 @@ func main() {
 		serverCmd(),
 		relayCmd(),
 		setupCmd(),
+		msgCmd(),
+		inboxCmd(),
+		requestCmd(),
+		replyCmd(),
+		listenCmd(),
 	)
 
 	if err := rootCmd.Execute(); err != nil {
@@ -142,6 +147,7 @@ func runCmd() *cobra.Command {
 	var (
 		workDir string
 		tags    []string
+		name    string
 	)
 
 	cmd := &cobra.Command{
@@ -164,12 +170,13 @@ func runCmd() *cobra.Command {
 				return fmt.Errorf("command required after --")
 			}
 
-			return client.Run(target, args, workDir, tags...)
+			return client.Run(target, args, workDir, name, tags...)
 		},
 	}
 
 	cmd.Flags().StringVarP(&workDir, "dir", "d", "", "Working directory for the session")
 	cmd.Flags().StringSliceVar(&tags, "tag", nil, "Tags for the session (can be repeated)")
+	cmd.Flags().StringVar(&name, "name", "", "Unique name for the session (alphanumeric + hyphens, 1-32 chars)")
 
 	return cmd
 }
@@ -213,8 +220,8 @@ func attachCmd() *cobra.Command {
 	var noHistory bool
 
 	cmd := &cobra.Command{
-		Use:   "attach [session-id]",
-		Short: "Attach to a session's PTY",
+		Use:   "attach [session]",
+		Short: "Attach to a session's PTY (by ID or name)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target, err := resolveTarget()
 			if err != nil {
@@ -229,12 +236,11 @@ func attachCmd() *cobra.Command {
 
 			var id *uint32
 			if len(args) > 0 {
-				parsed, err := strconv.ParseUint(args[0], 10, 32)
+				resolved, err := client.ResolveSessionArg(target, args[0])
 				if err != nil {
-					return fmt.Errorf("invalid session id: %w", err)
+					return err
 				}
-				v := uint32(parsed)
-				id = &v
+				id = &resolved
 			}
 
 			return client.Attach(target, id, noHistory)
@@ -257,8 +263,8 @@ func killCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "kill [session-id]",
-		Short: "Kill a session, all sessions, or sessions by tag",
+		Use:   "kill [session]",
+		Short: "Kill a session (by ID or name), all sessions, or sessions by tag",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target, err := resolveTarget()
 			if err != nil {
@@ -280,15 +286,15 @@ func killCmd() *cobra.Command {
 			}
 
 			if len(args) == 0 {
-				return fmt.Errorf("session id required (or use --all / --tag)")
+				return fmt.Errorf("session id or name required (or use --all / --tag)")
 			}
 
-			parsed, err := strconv.ParseUint(args[0], 10, 32)
+			resolved, err := client.ResolveSessionArg(target, args[0])
 			if err != nil {
-				return fmt.Errorf("invalid session id: %w", err)
+				return err
 			}
 
-			return client.Kill(target, uint32(parsed))
+			return client.Kill(target, resolved)
 		},
 	}
 
@@ -309,8 +315,8 @@ func logsCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "logs <session-id>",
-		Short: "View session output logs",
+		Use:   "logs <session>",
+		Short: "View session output logs (by ID or name)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target, err := resolveTarget()
@@ -324,9 +330,9 @@ func logsCmd() *cobra.Command {
 				}
 			}
 
-			parsed, err := strconv.ParseUint(args[0], 10, 32)
+			resolved, err := client.ResolveSessionArg(target, args[0])
 			if err != nil {
-				return fmt.Errorf("invalid session id: %w", err)
+				return err
 			}
 
 			var tailPtr *int
@@ -334,7 +340,7 @@ func logsCmd() *cobra.Command {
 				tailPtr = &tail
 			}
 
-			return client.Logs(target, uint32(parsed), follow, tailPtr)
+			return client.Logs(target, resolved, follow, tailPtr)
 		},
 	}
 
@@ -356,8 +362,8 @@ func sendCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "send <session-id> [input]",
-		Short: "Send input to a session",
+		Use:   "send <session> [input]",
+		Short: "Send input to a session (by ID or name)",
 		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target, err := resolveTarget()
@@ -371,9 +377,9 @@ func sendCmd() *cobra.Command {
 				}
 			}
 
-			parsed, err := strconv.ParseUint(args[0], 10, 32)
+			resolved, err := client.ResolveSessionArg(target, args[0])
 			if err != nil {
-				return fmt.Errorf("invalid session id: %w", err)
+				return err
 			}
 
 			var input *string
@@ -386,7 +392,7 @@ func sendCmd() *cobra.Command {
 				filePtr = &file
 			}
 
-			return client.SendInput(target, uint32(parsed), input, useStdin, filePtr, noNewline)
+			return client.SendInput(target, resolved, input, useStdin, filePtr, noNewline)
 		},
 	}
 
@@ -409,8 +415,8 @@ func watchCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "watch <session-id>",
-		Short: "Watch session output in real-time",
+		Use:   "watch <session>",
+		Short: "Watch session output in real-time (by ID or name)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target, err := resolveTarget()
@@ -424,9 +430,9 @@ func watchCmd() *cobra.Command {
 				}
 			}
 
-			parsed, err := strconv.ParseUint(args[0], 10, 32)
+			resolved, err := client.ResolveSessionArg(target, args[0])
 			if err != nil {
-				return fmt.Errorf("invalid session id: %w", err)
+				return err
 			}
 
 			var tailPtr *int
@@ -439,7 +445,7 @@ func watchCmd() *cobra.Command {
 				timeoutPtr = &timeout
 			}
 
-			return client.WatchSession(target, uint32(parsed), tailPtr, noHistory, timeoutPtr)
+			return client.WatchSession(target, resolved, tailPtr, noHistory, timeoutPtr)
 		},
 	}
 
@@ -458,8 +464,8 @@ func statusCmd() *cobra.Command {
 	var jsonOutput bool
 
 	cmd := &cobra.Command{
-		Use:   "status <session-id>",
-		Short: "Get detailed status for a session",
+		Use:   "status <session>",
+		Short: "Get detailed status for a session (by ID or name)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target, err := resolveTarget()
@@ -473,12 +479,12 @@ func statusCmd() *cobra.Command {
 				}
 			}
 
-			parsed, err := strconv.ParseUint(args[0], 10, 32)
+			resolved, err := client.ResolveSessionArg(target, args[0])
 			if err != nil {
-				return fmt.Errorf("invalid session id: %w", err)
+				return err
 			}
 
-			return client.GetStatus(target, uint32(parsed), jsonOutput)
+			return client.GetStatus(target, resolved, jsonOutput)
 		},
 	}
 
@@ -963,6 +969,220 @@ func relayCmd() *cobra.Command {
 	cmd.Flags().StringVar(&relayDir, "data-dir", "", "Data directory for relay (default: ~/.codewire/relay)")
 	cmd.Flags().StringVar(&authMode, "auth-mode", "none", "Auth mode: token, none")
 	cmd.Flags().StringVar(&authToken, "auth-token", "", "Shared auth token (required when --auth-mode=token)")
+
+	return cmd
+}
+
+// ---------------------------------------------------------------------------
+// msgCmd — send a direct message to a session
+// ---------------------------------------------------------------------------
+
+func msgCmd() *cobra.Command {
+	var from string
+
+	cmd := &cobra.Command{
+		Use:   "msg <target> <body>",
+		Short: "Send a message to a session (by ID or name)",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target, err := resolveTarget()
+			if err != nil {
+				return err
+			}
+
+			if target.IsLocal() {
+				if err := ensureNode(); err != nil {
+					return err
+				}
+			}
+
+			toID, err := client.ResolveSessionArg(target, args[0])
+			if err != nil {
+				return err
+			}
+
+			var fromID *uint32
+			if from != "" {
+				resolved, err := client.ResolveSessionArg(target, from)
+				if err != nil {
+					return err
+				}
+				fromID = &resolved
+			}
+
+			return client.Msg(target, fromID, toID, args[1])
+		},
+	}
+
+	cmd.Flags().StringVar(&from, "from", "", "Sender session (ID or name)")
+
+	return cmd
+}
+
+// ---------------------------------------------------------------------------
+// inboxCmd — read messages for a session
+// ---------------------------------------------------------------------------
+
+func inboxCmd() *cobra.Command {
+	var tail int
+
+	cmd := &cobra.Command{
+		Use:   "inbox <session>",
+		Short: "Read messages for a session (by ID or name)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target, err := resolveTarget()
+			if err != nil {
+				return err
+			}
+
+			if target.IsLocal() {
+				if err := ensureNode(); err != nil {
+					return err
+				}
+			}
+
+			sessionID, err := client.ResolveSessionArg(target, args[0])
+			if err != nil {
+				return err
+			}
+
+			return client.Inbox(target, sessionID, tail)
+		},
+	}
+
+	cmd.Flags().IntVar(&tail, "tail", 50, "Number of messages to show")
+
+	return cmd
+}
+
+// ---------------------------------------------------------------------------
+// listenCmd — stream message traffic
+// ---------------------------------------------------------------------------
+
+func listenCmd() *cobra.Command {
+	var sessionArg string
+
+	cmd := &cobra.Command{
+		Use:   "listen",
+		Short: "Stream all message traffic in real-time",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target, err := resolveTarget()
+			if err != nil {
+				return err
+			}
+
+			if target.IsLocal() {
+				if err := ensureNode(); err != nil {
+					return err
+				}
+			}
+
+			var sessionID *uint32
+			if sessionArg != "" {
+				resolved, err := client.ResolveSessionArg(target, sessionArg)
+				if err != nil {
+					return err
+				}
+				sessionID = &resolved
+			}
+
+			return client.Listen(target, sessionID)
+		},
+	}
+
+	cmd.Flags().StringVar(&sessionArg, "session", "", "Filter by session (ID or name)")
+
+	return cmd
+}
+
+// ---------------------------------------------------------------------------
+// requestCmd — send a request and block for reply
+// ---------------------------------------------------------------------------
+
+func requestCmd() *cobra.Command {
+	var (
+		from    string
+		timeout uint64
+	)
+
+	cmd := &cobra.Command{
+		Use:   "request <target> <body>",
+		Short: "Send a request to a session and wait for a reply",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target, err := resolveTarget()
+			if err != nil {
+				return err
+			}
+
+			if target.IsLocal() {
+				if err := ensureNode(); err != nil {
+					return err
+				}
+			}
+
+			toID, err := client.ResolveSessionArg(target, args[0])
+			if err != nil {
+				return err
+			}
+
+			var fromID *uint32
+			if from != "" {
+				resolved, err := client.ResolveSessionArg(target, from)
+				if err != nil {
+					return err
+				}
+				fromID = &resolved
+			}
+
+			return client.Request(target, fromID, toID, args[1], timeout)
+		},
+	}
+
+	cmd.Flags().StringVar(&from, "from", "", "Sender session (ID or name)")
+	cmd.Flags().Uint64Var(&timeout, "timeout", 60, "Timeout in seconds")
+
+	return cmd
+}
+
+// ---------------------------------------------------------------------------
+// replyCmd — reply to a pending request
+// ---------------------------------------------------------------------------
+
+func replyCmd() *cobra.Command {
+	var from string
+
+	cmd := &cobra.Command{
+		Use:   "reply <request-id> <body>",
+		Short: "Reply to a pending request",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target, err := resolveTarget()
+			if err != nil {
+				return err
+			}
+
+			if target.IsLocal() {
+				if err := ensureNode(); err != nil {
+					return err
+				}
+			}
+
+			var fromID *uint32
+			if from != "" {
+				resolved, err := client.ResolveSessionArg(target, from)
+				if err != nil {
+					return err
+				}
+				fromID = &resolved
+			}
+
+			return client.Reply(target, fromID, args[0], args[1])
+		},
+	}
+
+	cmd.Flags().StringVar(&from, "from", "", "Sender session (ID or name)")
 
 	return cmd
 }

@@ -57,6 +57,15 @@ func handleClient(reader connection.FrameReader, writer connection.FrameWriter, 
 			})
 			return
 		}
+		if req.Name != "" {
+			if nameErr := manager.SetName(id, req.Name); nameErr != nil {
+				_ = writer.SendResponse(&protocol.Response{
+					Type:    "Error",
+					Message: nameErr.Error(),
+				})
+				return
+			}
+		}
 		_ = writer.SendResponse(&protocol.Response{
 			Type: "Launched",
 			ID:   &id,
@@ -291,6 +300,21 @@ func handleClient(reader connection.FrameReader, writer connection.FrameWriter, 
 
 	case "Wait":
 		handleWait(reader, writer, manager, req)
+
+	case "MsgSend":
+		handleMsgSend(writer, manager, req)
+
+	case "MsgRead":
+		handleMsgRead(writer, manager, req)
+
+	case "MsgRequest":
+		handleMsgRequest(reader, writer, manager, req)
+
+	case "MsgReply":
+		handleMsgReply(writer, manager, req)
+
+	case "MsgListen":
+		handleMsgListen(reader, writer, manager, req)
 
 	case "KVSet", "KVGet", "KVDelete", "KVList":
 		_ = writer.SendResponse(&protocol.Response{
@@ -733,4 +757,282 @@ func handleLogs(writer connection.FrameWriter, logPath string, follow bool, tail
 	}
 
 	return nil
+}
+
+// resolveRecipient resolves a message target to a session ID. If toID is set it
+// is used directly; otherwise toName is resolved via the session manager.
+func resolveRecipient(manager *session.SessionManager, toID *uint32, toName string) (uint32, error) {
+	if toID != nil {
+		return *toID, nil
+	}
+	if toName != "" {
+		name := strings.TrimPrefix(toName, "@")
+		return manager.ResolveByName(name)
+	}
+	return 0, fmt.Errorf("either to_id or to_name required")
+}
+
+// handleMsgSend processes a MsgSend request.
+func handleMsgSend(writer connection.FrameWriter, manager *session.SessionManager, req protocol.Request) {
+	toID, err := resolveRecipient(manager, req.ToID, req.ToName)
+	if err != nil {
+		_ = writer.SendResponse(&protocol.Response{Type: "Error", Message: err.Error()})
+		return
+	}
+
+	// Sender: use req.ID if set, otherwise default to 0 (CLI sender).
+	var fromID uint32
+	if req.ID != nil {
+		fromID = *req.ID
+	}
+
+	msgID, sendErr := manager.SendMessage(fromID, toID, req.Body)
+	if sendErr != nil {
+		_ = writer.SendResponse(&protocol.Response{Type: "Error", Message: sendErr.Error()})
+		return
+	}
+
+	ts := time.Now().UTC().Format(time.RFC3339Nano)
+	_ = writer.SendResponse(&protocol.Response{
+		Type:      "MsgSent",
+		MessageID: msgID,
+		Status:    ts,
+	})
+}
+
+// handleMsgRead processes a MsgRead request.
+func handleMsgRead(writer connection.FrameWriter, manager *session.SessionManager, req protocol.Request) {
+	var sessionID uint32
+	if req.ID != nil {
+		sessionID = *req.ID
+	} else if req.ToName != "" {
+		resolved, err := manager.ResolveByName(strings.TrimPrefix(req.ToName, "@"))
+		if err != nil {
+			_ = writer.SendResponse(&protocol.Response{Type: "Error", Message: err.Error()})
+			return
+		}
+		sessionID = resolved
+	} else {
+		_ = writer.SendResponse(&protocol.Response{Type: "Error", Message: "session id or name required"})
+		return
+	}
+
+	tail := 50
+	if req.Tail != nil {
+		tail = int(*req.Tail)
+	}
+
+	events, err := manager.ReadMessages(sessionID, tail)
+	if err != nil {
+		_ = writer.SendResponse(&protocol.Response{Type: "Error", Message: err.Error()})
+		return
+	}
+
+	messages := make([]protocol.MessageResponse, 0, len(events))
+	for _, e := range events {
+		mr := eventToMessageResponse(e)
+		if mr != nil {
+			messages = append(messages, *mr)
+		}
+	}
+
+	_ = writer.SendResponse(&protocol.Response{
+		Type:     "MsgReadResult",
+		Messages: &messages,
+	})
+}
+
+// eventToMessageResponse converts an Event to a MessageResponse, or nil if not a message event.
+func eventToMessageResponse(e session.Event) *protocol.MessageResponse {
+	switch e.Type {
+	case session.EventDirectMessage:
+		var d session.DirectMessageData
+		if json.Unmarshal(e.Data, &d) != nil {
+			return nil
+		}
+		return &protocol.MessageResponse{
+			MessageID: d.MessageID,
+			Timestamp: e.Timestamp.Format(time.RFC3339Nano),
+			From:      d.From,
+			FromName:  d.FromName,
+			To:        d.To,
+			ToName:    d.ToName,
+			Body:      d.Body,
+			EventType: string(e.Type),
+		}
+	case session.EventRequest:
+		var d session.RequestData
+		if json.Unmarshal(e.Data, &d) != nil {
+			return nil
+		}
+		return &protocol.MessageResponse{
+			MessageID: d.RequestID,
+			Timestamp: e.Timestamp.Format(time.RFC3339Nano),
+			From:      d.From,
+			FromName:  d.FromName,
+			To:        d.To,
+			ToName:    d.ToName,
+			Body:      d.Body,
+			EventType: string(e.Type),
+			RequestID: d.RequestID,
+		}
+	case session.EventReply:
+		var d session.ReplyData
+		if json.Unmarshal(e.Data, &d) != nil {
+			return nil
+		}
+		return &protocol.MessageResponse{
+			MessageID: d.RequestID,
+			Timestamp: e.Timestamp.Format(time.RFC3339Nano),
+			From:      d.From,
+			FromName:  d.FromName,
+			Body:      d.Body,
+			EventType: string(e.Type),
+			RequestID: d.RequestID,
+		}
+	default:
+		return nil
+	}
+}
+
+// handleMsgRequest processes a MsgRequest: sends a request to a session and
+// blocks until a reply is received or the timeout expires.
+func handleMsgRequest(
+	reader connection.FrameReader,
+	writer connection.FrameWriter,
+	manager *session.SessionManager,
+	req protocol.Request,
+) {
+	toID, err := resolveRecipient(manager, req.ToID, req.ToName)
+	if err != nil {
+		_ = writer.SendResponse(&protocol.Response{Type: "Error", Message: err.Error()})
+		return
+	}
+
+	var fromID uint32
+	if req.ID != nil {
+		fromID = *req.ID
+	}
+
+	requestID, replyCh, reqErr := manager.SendRequest(fromID, toID, req.Body)
+	if reqErr != nil {
+		_ = writer.SendResponse(&protocol.Response{Type: "Error", Message: reqErr.Error()})
+		return
+	}
+
+	timeoutSecs := 60
+	if req.TimeoutSeconds != nil && *req.TimeoutSeconds > 0 {
+		timeoutSecs = int(*req.TimeoutSeconds)
+	}
+	timer := time.NewTimer(time.Duration(timeoutSecs) * time.Second)
+	defer timer.Stop()
+
+	// Also detect client disconnect.
+	disconnectCh := make(chan struct{}, 1)
+	go func() {
+		for {
+			f, err := reader.ReadFrame()
+			if err != nil || f == nil {
+				close(disconnectCh)
+				return
+			}
+		}
+	}()
+
+	select {
+	case reply := <-replyCh:
+		fromReplyID := reply.From
+		_ = writer.SendResponse(&protocol.Response{
+			Type:      "MsgRequestResult",
+			RequestID: requestID,
+			ReplyBody: reply.Body,
+			FromID:    &fromReplyID,
+			FromName:  reply.FromName,
+		})
+	case <-timer.C:
+		manager.CleanupRequest(requestID)
+		_ = writer.SendResponse(&protocol.Response{
+			Type:    "Error",
+			Message: fmt.Sprintf("request %s timed out after %ds", requestID, timeoutSecs),
+		})
+	case <-disconnectCh:
+		manager.CleanupRequest(requestID)
+	}
+}
+
+// handleMsgListen subscribes to message events and streams them to the client.
+func handleMsgListen(
+	reader connection.FrameReader,
+	writer connection.FrameWriter,
+	manager *session.SessionManager,
+	req protocol.Request,
+) {
+	eventTypes := []session.EventType{
+		session.EventDirectMessage,
+		session.EventRequest,
+		session.EventReply,
+	}
+	sub := manager.Subscriptions.Subscribe(req.ID, nil, eventTypes)
+	defer manager.Subscriptions.Unsubscribe(sub.ID)
+
+	// Send ack.
+	_ = writer.SendResponse(&protocol.Response{
+		Type: "MsgListenAck",
+	})
+
+	// Detect client disconnect.
+	disconnectCh := make(chan struct{}, 1)
+	go func() {
+		for {
+			f, err := reader.ReadFrame()
+			if err != nil || f == nil {
+				close(disconnectCh)
+				return
+			}
+		}
+	}()
+
+	for {
+		select {
+		case se, ok := <-sub.Ch:
+			if !ok {
+				return
+			}
+			sessionID := se.SessionID
+			_ = writer.SendResponse(&protocol.Response{
+				Type:      "Event",
+				SessionID: &sessionID,
+				Event: &protocol.SessionEvent{
+					Timestamp: se.Event.Timestamp.Format(time.RFC3339Nano),
+					EventType: string(se.Event.Type),
+					Data:      se.Event.Data,
+				},
+			})
+		case <-disconnectCh:
+			return
+		}
+	}
+}
+
+// handleMsgReply processes a MsgReply: sends a reply to a pending request.
+func handleMsgReply(writer connection.FrameWriter, manager *session.SessionManager, req protocol.Request) {
+	if req.RequestID == "" {
+		_ = writer.SendResponse(&protocol.Response{Type: "Error", Message: "missing request_id"})
+		return
+	}
+
+	var fromID uint32
+	if req.ID != nil {
+		fromID = *req.ID
+	}
+
+	if err := manager.SendReply(fromID, req.RequestID, req.Body); err != nil {
+		_ = writer.SendResponse(&protocol.Response{Type: "Error", Message: err.Error()})
+		return
+	}
+
+	_ = writer.SendResponse(&protocol.Response{
+		Type:      "MsgReplySent",
+		RequestID: req.RequestID,
+	})
 }

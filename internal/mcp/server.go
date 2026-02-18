@@ -225,7 +225,7 @@ func getTools() []tool {
 		},
 		{
 			Name:        "codewire_launch_session",
-			Description: "Launch a new CodeWire session with optional tags for grouping and filtering",
+			Description: "Launch a new CodeWire session with optional name and tags for grouping and filtering",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
@@ -237,6 +237,10 @@ func getTools() []tool {
 					"working_dir": map[string]interface{}{
 						"type":        "string",
 						"description": "Working directory (defaults to current dir)",
+					},
+					"name": map[string]interface{}{
+						"type":        "string",
+						"description": "Unique name for the session (alphanumeric + hyphens, 1-32 chars)",
 					},
 					"tags": map[string]interface{}{
 						"type":        "array",
@@ -317,6 +321,101 @@ func getTools() []tool {
 						"description": "Timeout in seconds (default: 300)",
 					},
 				},
+			},
+		},
+		{
+			Name:        "codewire_msg",
+			Description: "Send a direct message to a session",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"to_session_id": map[string]interface{}{
+						"type":        "integer",
+						"description": "Recipient session ID",
+					},
+					"to_name": map[string]interface{}{
+						"type":        "string",
+						"description": "Recipient session name",
+					},
+					"from_session_id": map[string]interface{}{
+						"type":        "integer",
+						"description": "Sender session ID (optional)",
+					},
+					"body": map[string]interface{}{
+						"type":        "string",
+						"description": "Message body",
+					},
+				},
+				"required": []string{"body"},
+			},
+		},
+		{
+			Name:        "codewire_read_messages",
+			Description: "Read messages from a session's inbox. Includes pending requests at the top.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"session_id": map[string]interface{}{
+						"type":        "integer",
+						"description": "Session ID to read inbox of",
+					},
+					"tail": map[string]interface{}{
+						"type":        "integer",
+						"description": "Number of messages to return (default: 20)",
+					},
+				},
+			},
+		},
+		{
+			Name:        "codewire_request",
+			Description: "Send a request to a session and block until a reply is received",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"to_session_id": map[string]interface{}{
+						"type":        "integer",
+						"description": "Recipient session ID",
+					},
+					"to_name": map[string]interface{}{
+						"type":        "string",
+						"description": "Recipient session name",
+					},
+					"from_session_id": map[string]interface{}{
+						"type":        "integer",
+						"description": "Sender session ID (optional)",
+					},
+					"body": map[string]interface{}{
+						"type":        "string",
+						"description": "Request body",
+					},
+					"timeout_seconds": map[string]interface{}{
+						"type":        "integer",
+						"description": "Timeout in seconds (default: 60)",
+					},
+				},
+				"required": []string{"body"},
+			},
+		},
+		{
+			Name:        "codewire_reply",
+			Description: "Reply to a pending request",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"request_id": map[string]interface{}{
+						"type":        "string",
+						"description": "The request ID to reply to",
+					},
+					"body": map[string]interface{}{
+						"type":        "string",
+						"description": "Reply body",
+					},
+					"from_session_id": map[string]interface{}{
+						"type":        "integer",
+						"description": "Session ID sending the reply (optional)",
+					},
+				},
+				"required": []string{"request_id", "body"},
 			},
 		},
 		{
@@ -444,6 +543,14 @@ func handleToolCall(dataDir string, params json.RawMessage) (string, error) {
 		return toolSubscribe(dataDir, args)
 	case "codewire_wait_for":
 		return toolWaitFor(dataDir, args)
+	case "codewire_msg":
+		return toolMsg(dataDir, args)
+	case "codewire_read_messages":
+		return toolReadMessages(dataDir, args)
+	case "codewire_request":
+		return toolRequest(dataDir, args)
+	case "codewire_reply":
+		return toolReply(dataDir, args)
 	case "codewire_list_nodes":
 		return toolListNodes(dataDir, args)
 	case "codewire_kv_set":
@@ -683,6 +790,8 @@ func toolLaunchSession(dataDir string, args map[string]interface{}) (string, err
 		}
 	}
 
+	name, _ := args["name"].(string)
+
 	var tags []string
 	if tagsRaw, ok := args["tags"].([]interface{}); ok {
 		for _, v := range tagsRaw {
@@ -696,6 +805,7 @@ func toolLaunchSession(dataDir string, args map[string]interface{}) (string, err
 		Type:       "Launch",
 		Command:    command,
 		WorkingDir: workingDir,
+		Name:       name,
 		Tags:       tags,
 	})
 	if err != nil {
@@ -822,6 +932,177 @@ func toolWaitFor(dataDir string, args map[string]interface{}) (string, error) {
 	}
 
 	return waitForTimed(dataDir, sessionID, tags, condition, timeoutSecs)
+}
+
+func toolMsg(dataDir string, args map[string]interface{}) (string, error) {
+	body, _ := args["body"].(string)
+	if body == "" {
+		return "", fmt.Errorf("missing body")
+	}
+
+	req := &protocol.Request{
+		Type: "MsgSend",
+		Body: body,
+	}
+
+	if v, ok := args["to_session_id"].(float64); ok {
+		id := uint32(v)
+		req.ToID = &id
+	}
+	if v, ok := args["to_name"].(string); ok && v != "" {
+		req.ToName = v
+	}
+	if v, ok := args["from_session_id"].(float64); ok {
+		id := uint32(v)
+		req.ID = &id
+	}
+
+	resp, err := nodeRequest(dataDir, req)
+	if err != nil {
+		return "", err
+	}
+	if resp.Type == "Error" {
+		return fmt.Sprintf("Error: %s", resp.Message), nil
+	}
+	return fmt.Sprintf("Message sent: %s", resp.MessageID), nil
+}
+
+func toolReadMessages(dataDir string, args map[string]interface{}) (string, error) {
+	var sessionID *uint32
+	if v, ok := args["session_id"].(float64); ok {
+		id := uint32(v)
+		sessionID = &id
+	}
+
+	tail := uint(20)
+	if v, ok := args["tail"].(float64); ok {
+		tail = uint(v)
+	}
+
+	req := &protocol.Request{
+		Type: "MsgRead",
+		ID:   sessionID,
+		Tail: &tail,
+	}
+
+	resp, err := nodeRequest(dataDir, req)
+	if err != nil {
+		return "", err
+	}
+	if resp.Type == "Error" {
+		return fmt.Sprintf("Error: %s", resp.Message), nil
+	}
+	if resp.Messages == nil {
+		return "[]", nil
+	}
+	out, err := json.MarshalIndent(resp.Messages, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
+func toolRequest(dataDir string, args map[string]interface{}) (string, error) {
+	body, _ := args["body"].(string)
+	if body == "" {
+		return "", fmt.Errorf("missing body")
+	}
+
+	timeoutSecs := uint64(60)
+	if v, ok := args["timeout_seconds"].(float64); ok {
+		timeoutSecs = uint64(v)
+	}
+
+	req := &protocol.Request{
+		Type:           "MsgRequest",
+		Body:           body,
+		TimeoutSeconds: &timeoutSecs,
+	}
+	if v, ok := args["to_session_id"].(float64); ok {
+		id := uint32(v)
+		req.ToID = &id
+	}
+	if v, ok := args["to_name"].(string); ok && v != "" {
+		req.ToName = v
+	}
+	if v, ok := args["from_session_id"].(float64); ok {
+		id := uint32(v)
+		req.ID = &id
+	}
+
+	// This blocks until reply or timeout — use a long-lived connection.
+	sockPath := filepath.Join(dataDir, "codewire.sock")
+	conn, err := net.Dial("unix", sockPath)
+	if err != nil {
+		return "", fmt.Errorf("connecting to node: %w", err)
+	}
+	defer conn.Close()
+
+	reader := connection.NewUnixReader(conn)
+	writer := connection.NewUnixWriter(conn)
+
+	if err := writer.SendRequest(req); err != nil {
+		return "", err
+	}
+
+	// Read response (blocks until reply or timeout).
+	f, err := reader.ReadFrame()
+	if err != nil {
+		return "", err
+	}
+	if f == nil {
+		return "", fmt.Errorf("connection closed before response")
+	}
+	if f.Type != protocol.FrameControl {
+		return "", fmt.Errorf("unexpected data frame")
+	}
+
+	var resp protocol.Response
+	if err := json.Unmarshal(f.Payload, &resp); err != nil {
+		return "", err
+	}
+
+	switch resp.Type {
+	case "MsgRequestResult":
+		fromLabel := "unknown"
+		if resp.FromName != "" {
+			fromLabel = resp.FromName
+		} else if resp.FromID != nil {
+			fromLabel = fmt.Sprintf("session %d", *resp.FromID)
+		}
+		return fmt.Sprintf("Reply from %s: %s", fromLabel, resp.ReplyBody), nil
+	case "Error":
+		return fmt.Sprintf("Error: %s", resp.Message), nil
+	default:
+		return fmt.Sprintf("Unexpected response: %s", resp.Type), nil
+	}
+}
+
+func toolReply(dataDir string, args map[string]interface{}) (string, error) {
+	requestID, _ := args["request_id"].(string)
+	if requestID == "" {
+		return "", fmt.Errorf("missing request_id")
+	}
+	body, _ := args["body"].(string)
+
+	req := &protocol.Request{
+		Type:      "MsgReply",
+		RequestID: requestID,
+		Body:      body,
+	}
+	if v, ok := args["from_session_id"].(float64); ok {
+		id := uint32(v)
+		req.ID = &id
+	}
+
+	resp, err := nodeRequest(dataDir, req)
+	if err != nil {
+		return "", err
+	}
+	if resp.Type == "Error" {
+		return fmt.Sprintf("Error: %s", resp.Message), nil
+	}
+	return fmt.Sprintf("Reply sent for request %s", requestID), nil
 }
 
 func toolListNodes(dataDir string, _ map[string]interface{}) (string, error) {

@@ -191,6 +191,50 @@ td code{font-size:12px}
   color:var(--fg-dim);
 }
 
+/* ── Terminal Demo ── */
+.term-demo{
+  max-width:640px;margin:32px auto 0;border-radius:var(--radius);
+  border:1px solid var(--border);overflow:hidden;text-align:left;
+  background:var(--bg-code);
+}
+.term-chrome{
+  display:flex;align-items:center;gap:8px;
+  padding:10px 14px;background:var(--bg-alt);
+  border-bottom:1px solid var(--border);
+}
+.term-dot{width:10px;height:10px;border-radius:50%}
+.term-dot.red{background:#ff5f57}
+.term-dot.yellow{background:#ffbd2e}
+.term-dot.green{background:#28c840}
+.term-title{
+  flex:1;text-align:center;
+  font-family:var(--font-mono);font-size:11px;color:var(--fg-dim);
+  margin-right:38px;
+}
+.term-body{
+  padding:14px 16px;min-height:260px;
+  font-family:var(--font-mono);font-size:13px;line-height:1.55;
+  position:relative;overflow:hidden;
+}
+.term-lines{color:var(--fg)}
+.term-line{white-space:pre-wrap;word-break:break-all}
+.term-line .prompt-mark{color:var(--fg-dim);user-select:none}
+.term-line .output{color:var(--fg-dim)}
+.term-line .table-header{color:var(--fg-dim)}
+.term-line .table-row{color:var(--fg)}
+.term-line .accent{color:var(--accent)}
+.term-input-line{display:flex;white-space:pre}
+.term-prompt{color:var(--fg-dim);user-select:none}
+.term-typed{color:var(--fg-bright)}
+.term-cursor{
+  display:inline-block;width:7px;height:15px;
+  background:var(--fg-bright);vertical-align:text-bottom;
+  animation:blink 1s step-end infinite;
+}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+.term-demo.fade-out .term-body{animation:fadeOut .6s ease-out forwards}
+@keyframes fadeOut{to{opacity:0}}
+
 /* ── Responsive ── */
 @media(max-width:600px){
   header{padding:0 16px}
@@ -200,6 +244,8 @@ td code{font-size:12px}
   .diagram{padding:14px 16px;font-size:11px}
   table{font-size:12px}
   th,td{padding:6px 8px}
+  .term-body{min-height:220px;font-size:12px;padding:10px 12px}
+  .term-demo{margin:24px auto 0}
 }
 </style>
 </head>
@@ -212,6 +258,7 @@ td code{font-size:12px}
     <div class="nav-links">
       <a href="#quickstart">Quick Start</a>
       <a href="#commands">Commands</a>
+      <a href="#messaging">Messaging</a>
       <a href="#orchestration">Orchestration</a>
       <a href="#relay">Relay</a>
       <a href="#mcp">MCP</a>
@@ -238,6 +285,23 @@ td code{font-size:12px}
     <code>brew install codespacesh/codewire/codewire</code>
     <button class="copy-btn" onclick="copyText('brew install codespacesh/codewire/codewire',this)">copy</button>
   </div>
+
+  <div class="term-demo" id="term-demo">
+    <div class="term-chrome">
+      <span class="term-dot red"></span>
+      <span class="term-dot yellow"></span>
+      <span class="term-dot green"></span>
+      <span class="term-title">codewire demo</span>
+    </div>
+    <div class="term-body">
+      <div class="term-lines"></div>
+      <div class="term-input-line">
+        <span class="term-prompt">$ </span>
+        <span class="term-typed"></span>
+        <span class="term-cursor"></span>
+      </div>
+    </div>
+  </div>
 </section>
 
 <!-- ════════════════════════ Quick Start ════════════════════════ -->
@@ -259,9 +323,9 @@ td code{font-size:12px}
       <p>See all running and completed sessions with their status, tags, and age.</p>
       <div class="code-block"><pre><code><span class="cmd">cw list</span>
 
- <span class="dim">ID  STATUS     TAGS           AGE     PROMPT</span>
-  1  running    worker,build   2m ago  claude -p "refactor the auth module"
-  2  completed  worker         45s     claude -p "write unit tests"</code></pre><button class="copy-btn" onclick="copyText('cw list',this)">copy</button></div>
+ <span class="dim">ID  NAME      STATUS     TAGS           AGE     COMMAND</span>
+  1  planner   running    worker,build   2m ago  claude -p "refactor the auth module"
+  2  coder     running    worker         45s     claude -p "implement changes"</code></pre><button class="copy-btn" onclick="copyText('cw list',this)">copy</button></div>
     </div>
     <div class="step">
       <h3>Wait or kill</h3>
@@ -281,8 +345,8 @@ td code{font-size:12px}
   <h3>Sessions</h3>
   <div class="cmd-group">
     <div class="cmd-entry">
-      <div class="cmd-sig">cw launch <span class="optional">[--dir &lt;dir&gt;] [--tag &lt;tag&gt;...]</span> -- &lt;command&gt; <span class="optional">[args...]</span></div>
-      <div class="cmd-desc">Start a new session in a persistent PTY. Tags enable filtering and orchestration.</div>
+      <div class="cmd-sig">cw launch <span class="optional">[--name &lt;name&gt;] [--dir &lt;dir&gt;] [--tag &lt;tag&gt;...]</span> -- &lt;command&gt; <span class="optional">[args...]</span></div>
+      <div class="cmd-desc">Start a new session in a persistent PTY. Name gives a stable identifier for messaging. Tags enable filtering and orchestration.</div>
     </div>
     <div class="cmd-entry">
       <div class="cmd-sig">cw attach <span class="optional">[&lt;id&gt;] [--no-history]</span></div>
@@ -323,6 +387,30 @@ td code{font-size:12px}
     <div class="cmd-entry">
       <div class="cmd-sig">cw wait <span class="optional">[node:]&lt;id&gt; [--tag &lt;tag&gt;] [--condition all|any] [--timeout &lt;s&gt;]</span></div>
       <div class="cmd-desc">Block until sessions complete. Wait by ID, tag, or both.</div>
+    </div>
+  </div>
+
+  <h3 id="messaging">Messaging</h3>
+  <div class="cmd-group">
+    <div class="cmd-entry">
+      <div class="cmd-sig">cw msg &lt;target&gt; &lt;body&gt; <span class="optional">[--from &lt;session&gt;]</span></div>
+      <div class="cmd-desc">Send a direct message to a session. Target can be a session ID or name.</div>
+    </div>
+    <div class="cmd-entry">
+      <div class="cmd-sig">cw inbox &lt;session&gt; <span class="optional">[--tail &lt;N&gt;]</span></div>
+      <div class="cmd-desc">Read messages from a session's inbox. Shows direct messages and pending requests.</div>
+    </div>
+    <div class="cmd-entry">
+      <div class="cmd-sig">cw request &lt;target&gt; &lt;body&gt; <span class="optional">[--from &lt;session&gt;] [--timeout &lt;s&gt;]</span></div>
+      <div class="cmd-desc">Send a request and block until a reply arrives. Synchronous coordination between agents.</div>
+    </div>
+    <div class="cmd-entry">
+      <div class="cmd-sig">cw reply &lt;request-id&gt; &lt;body&gt; <span class="optional">[--from &lt;session&gt;]</span></div>
+      <div class="cmd-desc">Reply to a pending request. Request ID comes from <code>cw inbox</code> or <code>message.request</code> events.</div>
+    </div>
+    <div class="cmd-entry">
+      <div class="cmd-sig">cw listen <span class="optional">[--session &lt;session&gt;]</span></div>
+      <div class="cmd-desc">Stream all message traffic in real-time. Shows messages, requests, and replies as they happen.</div>
     </div>
   </div>
 
@@ -406,13 +494,29 @@ td code{font-size:12px}
   <p>Stream structured, typed events from sessions in real-time.</p>
   <div class="code-block"><pre><code><span class="cmd">cw subscribe</span> <span class="flag">--tag</span> worker <span class="flag">--event</span> session.status
 <span class="cmd">cw subscribe</span> <span class="flag">--session</span> <span class="num">3</span></code></pre><button class="copy-btn" onclick="copySnippet(this)">copy</button></div>
-  <p>Event types: <code>session.created</code>, <code>session.status</code>, <code>session.output_summary</code>, <code>session.input</code>, <code>session.attached</code>, <code>session.detached</code></p>
+  <p>Event types: <code>session.created</code>, <code>session.status</code>, <code>session.output_summary</code>, <code>session.input</code>, <code>session.attached</code>, <code>session.detached</code>, <code>direct.message</code>, <code>message.request</code>, <code>message.reply</code></p>
 
   <h3>Wait for Completion</h3>
   <p>Block until sessions finish &mdash; replaces polling.</p>
   <div class="code-block"><pre><code><span class="cmd">cw wait</span> <span class="num">3</span>                                         <span class="cmt"># wait for session 3</span>
 <span class="cmd">cw wait</span> <span class="flag">--tag</span> worker <span class="flag">--condition</span> all              <span class="cmt"># ALL workers</span>
 <span class="cmd">cw wait</span> <span class="flag">--tag</span> worker <span class="flag">--condition</span> any <span class="flag">--timeout</span> <span class="num">60</span> <span class="cmt"># ANY, 60s</span></code></pre><button class="copy-btn" onclick="copySnippet(this)">copy</button></div>
+
+  <h3>Agent Messaging</h3>
+  <p>Named agents exchange structured messages &mdash; direct messages for fire-and-forget, request/reply for synchronous coordination.</p>
+  <div class="code-block"><pre><code><span class="cmt"># Launch named agents</span>
+<span class="cmd">cw launch</span> <span class="flag">--name</span> planner <span class="flag">--</span> claude <span class="flag">-p</span> <span class="str">"plan the refactor"</span>
+<span class="cmd">cw launch</span> <span class="flag">--name</span> coder <span class="flag">--</span> claude <span class="flag">-p</span> <span class="str">"implement changes"</span>
+
+<span class="cmt"># Send a direct message</span>
+<span class="cmd">cw msg</span> <span class="flag">--from</span> planner coder <span class="str">"start with the auth module"</span>
+
+<span class="cmt"># Request/reply — synchronous coordination</span>
+<span class="cmd">cw request</span> <span class="flag">--from</span> planner coder <span class="str">"ready for review?"</span>
+<span class="cmt"># [reply from coder] yes, PR #42 is up</span>
+
+<span class="cmt"># Monitor all message traffic</span>
+<span class="cmd">cw listen</span></code></pre><button class="copy-btn" onclick="copySnippet(this)">copy</button></div>
 
   <h3>Supervisor Pattern</h3>
   <div class="code-block"><pre><code><span class="cmt"># Launch tagged workers</span>
@@ -427,6 +531,7 @@ td code{font-size:12px}
 
   <h3>Multi-Agent Patterns</h3>
   <ul>
+    <li><strong>Agent Messaging</strong> &mdash; Named agents exchange messages with <code>cw msg</code>, coordinate with <code>cw request</code>/<code>cw reply</code></li>
     <li><strong>Multiple Attachments</strong> &mdash; Multiple clients can attach to the same session simultaneously</li>
     <li><strong>Supervisor</strong> &mdash; One orchestrator launches and waits on tagged worker sessions</li>
     <li><strong>Agent Swarms</strong> &mdash; Parallel agents with event subscriptions for coordination</li>
@@ -661,6 +766,26 @@ td code{font-size:12px}
         <td><code>session_id</code>, <code>tags</code>, <code>condition</code>, <code>timeout</code></td>
       </tr>
       <tr>
+        <td><code>codewire_msg</code></td>
+        <td>Send a direct message</td>
+        <td><code>to_session_id</code> | <code>to_name</code>, <code>body</code>, <code>from_session_id</code></td>
+      </tr>
+      <tr>
+        <td><code>codewire_read_messages</code></td>
+        <td>Read session inbox</td>
+        <td><code>session_id</code>, <code>tail</code></td>
+      </tr>
+      <tr>
+        <td><code>codewire_request</code></td>
+        <td>Request and block for reply</td>
+        <td><code>to_session_id</code> | <code>to_name</code>, <code>body</code>, <code>timeout_seconds</code></td>
+      </tr>
+      <tr>
+        <td><code>codewire_reply</code></td>
+        <td>Reply to a pending request</td>
+        <td><code>request_id</code>, <code>body</code>, <code>from_session_id</code></td>
+      </tr>
+      <tr>
         <td><code>codewire_list_nodes</code></td>
         <td>List relay nodes</td>
         <td>&mdash;</td>
@@ -784,6 +909,133 @@ function copySnippet(btn) {
   const text = pre.textContent;
   copyText(text, btn);
 }
+
+// ── Terminal Demo ──
+(function() {
+  const MAX_LINES = 16;
+  const el = document.getElementById('term-demo');
+  if (!el) return;
+
+  const linesEl = el.querySelector('.term-lines');
+  const typedEl = el.querySelector('.term-typed');
+  const cursorEl = el.querySelector('.term-cursor');
+  const inputLine = el.querySelector('.term-input-line');
+
+  let running = true;
+  let paused = false;
+
+  // Pause when offscreen.
+  const obs = new IntersectionObserver(([e]) => { paused = !e.isIntersecting; }, { threshold: 0.1 });
+  obs.observe(el);
+
+  function sleep(ms) {
+    return new Promise(r => {
+      const check = () => { if (paused) { setTimeout(check, 100); } else { setTimeout(r, ms); } };
+      check();
+    });
+  }
+
+  function addLine(html) {
+    const div = document.createElement('div');
+    div.className = 'term-line';
+    div.innerHTML = html;
+    linesEl.appendChild(div);
+    // Evict old lines.
+    while (linesEl.children.length > MAX_LINES) linesEl.removeChild(linesEl.firstChild);
+  }
+
+  async function typeCmd(text) {
+    inputLine.style.display = 'flex';
+    typedEl.textContent = '';
+    cursorEl.style.display = '';
+    for (const ch of text) {
+      typedEl.textContent += ch;
+      await sleep(35 + Math.random() * 25);
+    }
+    await sleep(300);
+    // Move typed command to lines area.
+    addLine('<span class="prompt-mark">$ </span>' + escHtml(text));
+    typedEl.textContent = '';
+  }
+
+  function output(text, cls) {
+    addLine('<span class="' + (cls || 'output') + '">' + escHtml(text) + '</span>');
+  }
+
+  function escHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  const script = [
+    { type:'cmd', text:'cw launch --name planner -- claude -p "plan the refactor"' },
+    { type:'out', text:'Session 1 launched: claude -p "plan the refactor"' },
+    { type:'pause', ms:400 },
+    { type:'cmd', text:'cw launch --name coder -- claude -p "implement changes"' },
+    { type:'out', text:'Session 2 launched: claude -p "implement changes"' },
+    { type:'pause', ms:500 },
+    { type:'cmd', text:'cw list' },
+    { type:'raw', html:'<span class="table-header">ID     NAME             COMMAND              STATUS       CREATED</span>' },
+    { type:'raw', html:'<span class="table-row">1      planner          claude -p "plan...   running      2m ago</span>' },
+    { type:'raw', html:'<span class="table-row">2      coder            claude -p "impl...   running      30s ago</span>' },
+    { type:'pause', ms:600 },
+    { type:'cmd', text:'cw msg --from planner coder "start with the auth module"' },
+    { type:'out', text:'Message sent: msg_a1b2c3d4' },
+    { type:'pause', ms:500 },
+    { type:'cmd', text:'cw request --from planner coder "ready for review?"' },
+    { type:'pause', ms:1200 },
+    { type:'raw', html:'<span class="accent">[reply from coder] yes, PR #42 is up</span>' },
+    { type:'pause', ms:600 },
+    { type:'cmd', text:'cw listen' },
+    { type:'pause', ms:400 },
+    { type:'stream', html:'<span class="accent">[planner \u2192 coder] implement the login endpoint</span>', delay:600 },
+    { type:'stream', html:'<span class="accent">[coder \u2192 planner] REQUEST (req_x7y8): need DB schema?</span>', delay:800 },
+    { type:'stream', html:'<span class="accent">[planner] REPLY (req_x7y8): use the existing users table</span>', delay:700 },
+    { type:'pause', ms:1500 },
+    { type:'clear' },
+  ];
+
+  async function run() {
+    while (running) {
+      for (const step of script) {
+        if (!running) return;
+        switch (step.type) {
+          case 'cmd':
+            await typeCmd(step.text);
+            break;
+          case 'out':
+            output(step.text);
+            await sleep(100);
+            break;
+          case 'raw':
+            addLine(step.html);
+            await sleep(60);
+            break;
+          case 'stream':
+            await sleep(step.delay || 500);
+            addLine(step.html);
+            break;
+          case 'pause':
+            await sleep(step.ms);
+            break;
+          case 'clear':
+            cursorEl.style.display = 'none';
+            inputLine.style.display = 'none';
+            el.classList.add('fade-out');
+            await sleep(800);
+            linesEl.innerHTML = '';
+            typedEl.textContent = '';
+            el.classList.remove('fade-out');
+            inputLine.style.display = 'flex';
+            cursorEl.style.display = '';
+            await sleep(600);
+            break;
+        }
+      }
+    }
+  }
+
+  run();
+})();
 </script>
 </body>
 </html>

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -20,6 +21,9 @@ import (
 
 	"github.com/codespacesh/codewire/internal/protocol"
 )
+
+// namePattern validates session names: alphanumeric + hyphens, 1-32 chars.
+var namePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9-]{0,31}$`)
 
 // ---------------------------------------------------------------------------
 // Broadcaster — replaces tokio::sync::broadcast
@@ -159,6 +163,7 @@ func StatusKilled() SessionStatus { return SessionStatus{State: "killed"} }
 // dataDir/sessions.json so that session IDs survive restarts.
 type SessionMeta struct {
 	ID          uint32     `json:"id"`
+	Name        string     `json:"name,omitempty"`
 	Prompt      string     `json:"prompt"`
 	WorkingDir  string     `json:"working_dir"`
 	CreatedAt   time.Time  `json:"created_at"`
@@ -189,6 +194,7 @@ type Session struct {
 	outputLines  atomic.Uint64
 	lastOutputAt atomic.Int64 // unix nano
 	eventLog     *EventLog
+	messageLog   *EventLog // JSONL at sessions/{id}/messages.jsonl
 }
 
 // ---------------------------------------------------------------------------
@@ -211,10 +217,14 @@ type AttachChannels struct {
 type SessionManager struct {
 	mu            sync.RWMutex
 	sessions      map[uint32]*Session
+	nameIndex     map[string]uint32 // name → session ID (guarded by mu)
 	nextID        atomic.Uint32
 	dataDir       string
 	PersistCh     chan struct{} // exported: the node package drains this to trigger writes
 	Subscriptions *SubscriptionManager
+
+	pendingRequestsMu sync.Mutex
+	pendingRequests   map[string]chan ReplyData // requestID → reply channel
 }
 
 // NewSessionManager creates a SessionManager rooted at dataDir. It reads
@@ -254,13 +264,254 @@ func NewSessionManager(dataDir string) (*SessionManager, error) {
 	// If the file does not exist we silently start from ID 1.
 
 	sm := &SessionManager{
-		sessions:      make(map[uint32]*Session),
-		dataDir:       dataDir,
-		PersistCh:     make(chan struct{}, 1),
-		Subscriptions: NewSubscriptionManager(),
+		sessions:        make(map[uint32]*Session),
+		nameIndex:       make(map[string]uint32),
+		dataDir:         dataDir,
+		PersistCh:       make(chan struct{}, 1),
+		Subscriptions:   NewSubscriptionManager(),
+		pendingRequests: make(map[string]chan ReplyData),
 	}
 	sm.nextID.Store(startID)
 	return sm, nil
+}
+
+// SetName assigns a unique name to a session. Returns an error if the name is
+// invalid or already taken by another session.
+func (m *SessionManager) SetName(id uint32, name string) error {
+	if !namePattern.MatchString(name) {
+		return fmt.Errorf("invalid name %q: must be 1-32 alphanumeric characters or hyphens, starting with alphanumeric", name)
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	sess, ok := m.sessions[id]
+	if !ok {
+		return fmt.Errorf("session %d not found", id)
+	}
+
+	if existing, taken := m.nameIndex[name]; taken && existing != id {
+		return fmt.Errorf("name %q already in use by session %d", name, existing)
+	}
+
+	// Remove old name from index if renaming.
+	sess.mu.Lock()
+	oldName := sess.Meta.Name
+	sess.Meta.Name = name
+	sess.mu.Unlock()
+
+	if oldName != "" && oldName != name {
+		delete(m.nameIndex, oldName)
+	}
+	m.nameIndex[name] = id
+
+	return nil
+}
+
+// ResolveByName looks up a session ID by name. Returns an error if no session
+// has the given name.
+func (m *SessionManager) ResolveByName(name string) (uint32, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	id, ok := m.nameIndex[name]
+	if !ok {
+		return 0, fmt.Errorf("no session named %q", name)
+	}
+	return id, nil
+}
+
+// GetName returns the name for a session, or empty string if unnamed.
+func (m *SessionManager) GetName(id uint32) string {
+	m.mu.RLock()
+	sess, ok := m.sessions[id]
+	m.mu.RUnlock()
+	if !ok {
+		return ""
+	}
+	sess.mu.Lock()
+	defer sess.mu.Unlock()
+	return sess.Meta.Name
+}
+
+// SendMessage sends a direct message from one session to another, recording it
+// in both sessions' message logs and publishing it via the SubscriptionManager.
+func (m *SessionManager) SendMessage(fromID, toID uint32, body string) (string, error) {
+	m.mu.RLock()
+	fromSess, fromOK := m.sessions[fromID]
+	toSess, toOK := m.sessions[toID]
+	m.mu.RUnlock()
+
+	if !fromOK {
+		return "", fmt.Errorf("sender session %d not found", fromID)
+	}
+	if !toOK {
+		return "", fmt.Errorf("recipient session %d not found", toID)
+	}
+
+	msgID := fmt.Sprintf("msg_%d_%d_%d", fromID, toID, time.Now().UnixNano())
+
+	fromSess.mu.Lock()
+	fromName := fromSess.Meta.Name
+	fromSess.mu.Unlock()
+
+	toSess.mu.Lock()
+	toName := toSess.Meta.Name
+	toSess.mu.Unlock()
+
+	msgData := DirectMessageData{
+		MessageID: msgID,
+		From:      fromID,
+		FromName:  fromName,
+		To:        toID,
+		ToName:    toName,
+		Body:      body,
+	}
+	event := NewDirectMessageEvent(msgData)
+
+	// Write to both sessions' message logs.
+	if fromSess.messageLog != nil {
+		fromSess.messageLog.Append(event)
+	}
+	if toSess.messageLog != nil {
+		toSess.messageLog.Append(event)
+	}
+
+	// Publish to subscriptions (on the recipient's session ID).
+	m.Subscriptions.Publish(toID, toSess.Meta.Tags, event)
+	// Also publish on sender so listen can see sent messages.
+	if fromID != toID {
+		m.Subscriptions.Publish(fromID, fromSess.Meta.Tags, event)
+	}
+
+	return msgID, nil
+}
+
+// ReadMessages reads messages from a session's message log, returning the last
+// `tail` events. If tail <= 0, all messages are returned.
+func (m *SessionManager) ReadMessages(sessionID uint32, tail int) ([]Event, error) {
+	m.mu.RLock()
+	sess, ok := m.sessions[sessionID]
+	m.mu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("session %d not found", sessionID)
+	}
+	if sess.messageLog == nil {
+		return nil, nil
+	}
+	return sess.messageLog.ReadTail(tail)
+}
+
+// SendRequest sends a request from one session to another and returns a channel
+// that will receive the reply. The caller should block on the channel with a timeout.
+func (m *SessionManager) SendRequest(fromID, toID uint32, body string) (string, <-chan ReplyData, error) {
+	m.mu.RLock()
+	fromSess, fromOK := m.sessions[fromID]
+	toSess, toOK := m.sessions[toID]
+	m.mu.RUnlock()
+
+	if !fromOK {
+		return "", nil, fmt.Errorf("sender session %d not found", fromID)
+	}
+	if !toOK {
+		return "", nil, fmt.Errorf("recipient session %d not found", toID)
+	}
+
+	requestID := fmt.Sprintf("req_%d_%d_%d", fromID, toID, time.Now().UnixNano())
+
+	fromSess.mu.Lock()
+	fromName := fromSess.Meta.Name
+	fromSess.mu.Unlock()
+
+	toSess.mu.Lock()
+	toName := toSess.Meta.Name
+	toSess.mu.Unlock()
+
+	reqData := RequestData{
+		RequestID: requestID,
+		From:      fromID,
+		FromName:  fromName,
+		To:        toID,
+		ToName:    toName,
+		Body:      body,
+	}
+	event := NewRequestEvent(reqData)
+
+	// Write to recipient's message log and publish.
+	if toSess.messageLog != nil {
+		toSess.messageLog.Append(event)
+	}
+	m.Subscriptions.Publish(toID, toSess.Meta.Tags, event)
+	// Also publish on sender.
+	if fromID != toID {
+		if fromSess.messageLog != nil {
+			fromSess.messageLog.Append(event)
+		}
+		m.Subscriptions.Publish(fromID, fromSess.Meta.Tags, event)
+	}
+
+	// Register reply channel.
+	replyCh := make(chan ReplyData, 1)
+	m.pendingRequestsMu.Lock()
+	m.pendingRequests[requestID] = replyCh
+	m.pendingRequestsMu.Unlock()
+
+	return requestID, replyCh, nil
+}
+
+// SendReply sends a reply to a pending request. It looks up the reply channel,
+// sends the reply, and records the reply event in both sessions' message logs.
+func (m *SessionManager) SendReply(fromID uint32, requestID string, body string) error {
+	m.pendingRequestsMu.Lock()
+	replyCh, ok := m.pendingRequests[requestID]
+	if ok {
+		delete(m.pendingRequests, requestID)
+	}
+	m.pendingRequestsMu.Unlock()
+
+	if !ok {
+		return fmt.Errorf("no pending request with ID %q", requestID)
+	}
+
+	m.mu.RLock()
+	fromSess, fromOK := m.sessions[fromID]
+	m.mu.RUnlock()
+
+	var fromName string
+	if fromOK {
+		fromSess.mu.Lock()
+		fromName = fromSess.Meta.Name
+		fromSess.mu.Unlock()
+	}
+
+	replyData := ReplyData{
+		RequestID: requestID,
+		From:      fromID,
+		FromName:  fromName,
+		Body:      body,
+	}
+	event := NewReplyEvent(replyData)
+
+	// Write to sender's message log.
+	if fromOK && fromSess.messageLog != nil {
+		fromSess.messageLog.Append(event)
+	}
+	m.Subscriptions.Publish(fromID, nil, event)
+
+	// Send to the reply channel (non-blocking in case caller timed out).
+	select {
+	case replyCh <- replyData:
+	default:
+	}
+
+	return nil
+}
+
+// CleanupRequest removes a pending request entry (called on timeout).
+func (m *SessionManager) CleanupRequest(requestID string) {
+	m.pendingRequestsMu.Lock()
+	delete(m.pendingRequests, requestID)
+	m.pendingRequestsMu.Unlock()
 }
 
 // triggerPersist sends a non-blocking signal on PersistCh.
@@ -339,6 +590,13 @@ func (m *SessionManager) Launch(command []string, workingDir string, tags ...str
 		slog.Error("failed to open event log", "id", id, "err", evErr)
 	}
 
+	// Open message log.
+	messagesPath := filepath.Join(logDir, "messages.jsonl")
+	messageLog, msgErr := NewEventLog(messagesPath)
+	if msgErr != nil {
+		slog.Error("failed to open message log", "id", id, "err", msgErr)
+	}
+
 	if tags == nil {
 		tags = []string{}
 	}
@@ -359,6 +617,7 @@ func (m *SessionManager) Launch(command []string, workingDir string, tags ...str
 		statusWatcher: statusWatcher,
 		logPath:       logPath,
 		eventLog:      eventLog,
+		messageLog:    messageLog,
 	}
 
 	m.mu.Lock()
@@ -725,6 +984,7 @@ func (m *SessionManager) buildSessionInfo(s *Session) protocol.SessionInfo {
 
 	info := protocol.SessionInfo{
 		ID:            s.Meta.ID,
+		Name:          s.Meta.Name,
 		Prompt:        s.Meta.Prompt,
 		WorkingDir:    s.Meta.WorkingDir,
 		CreatedAt:     s.Meta.CreatedAt.Format(time.RFC3339),
