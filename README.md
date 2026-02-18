@@ -404,6 +404,57 @@ cw nodes
 docker compose down
 ```
 
+## Deployment
+
+### Helm Chart (Kubernetes)
+
+```bash
+helm install my-relay oci://ghcr.io/codespacesh/charts/codewire-relay \
+  --set relay.baseURL=https://relay.example.com
+```
+
+See [`charts/codewire-relay/values.yaml`](charts/codewire-relay/values.yaml) for full configuration. Verify with `helm test my-relay`.
+
+### Kubernetes Operator
+
+For multi-tenant clusters or automated provisioning. Install the operator, then create a `CodewireRelay` CR:
+
+```bash
+kubectl apply -f operator/config/crd/codewire.io_codewirerelays.yaml
+kubectl apply -f operator/config/manager/deployment.yaml
+```
+
+```yaml
+apiVersion: codewire.io/v1alpha1
+kind: CodewireRelay
+metadata:
+  name: production
+spec:
+  baseURL: https://relay.example.com
+  authMode: token
+  ingress:
+    className: nginx
+```
+
+### systemd (VPS / Bare Metal)
+
+```bash
+# Install the binary
+curl -fsSL https://codewire.dev/install.sh | sh
+
+# Configure
+sudo cp deploy/systemd/codewire-relay.service /etc/systemd/system/
+sudo cp deploy/systemd/codewire-relay.env /etc/codewire-relay/env
+sudo editor /etc/codewire-relay/env  # set CW_BASE_URL, CW_AUTH_TOKEN
+
+# Start
+sudo systemctl enable --now codewire-relay
+```
+
+### Docker Compose
+
+See [Local Development (Docker Compose)](#local-development-docker-compose) above for a ready-to-use `docker-compose.yml`.
+
 ## LLM Orchestration
 
 CodeWire is designed for LLM-driven multi-agent workflows. Tags, subscriptions, and wait provide structured coordination primitives.
