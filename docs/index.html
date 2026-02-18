@@ -311,7 +311,7 @@ td code{font-size:12px}
     <div class="step">
       <h3>Launch a session</h3>
       <p>Start a persistent process in a PTY. It runs in the background even if you disconnect.</p>
-      <div class="code-block"><pre><code><span class="cmd">cw launch</span> <span class="flag">--dir</span> ~/project <span class="flag">--tag</span> worker <span class="flag">--</span> claude <span class="flag">-p</span> <span class="str">"refactor the auth module"</span></code></pre><button class="copy-btn" onclick="copyText('cw launch --dir ~/project --tag worker -- claude -p &quot;refactor the auth module&quot;',this)">copy</button></div>
+      <div class="code-block"><pre><code><span class="cmd">cw launch</span> worker <span class="flag">--dir</span> ~/project <span class="flag">--tag</span> build <span class="flag">--</span> claude <span class="flag">-p</span> <span class="str">"refactor the auth module"</span></code></pre><button class="copy-btn" onclick="copyText('cw launch worker --dir ~/project --tag build -- claude -p &quot;refactor the auth module&quot;',this)">copy</button></div>
     </div>
     <div class="step">
       <h3>Attach to it</h3>
@@ -345,8 +345,8 @@ td code{font-size:12px}
   <h3>Sessions</h3>
   <div class="cmd-group">
     <div class="cmd-entry">
-      <div class="cmd-sig">cw launch <span class="optional">[--name &lt;name&gt;] [--dir &lt;dir&gt;] [--tag &lt;tag&gt;...]</span> -- &lt;command&gt; <span class="optional">[args...]</span></div>
-      <div class="cmd-desc">Start a new session in a persistent PTY. Name gives a stable identifier for messaging. Tags enable filtering and orchestration.</div>
+      <div class="cmd-sig">cw launch <span class="optional">[name]</span> <span class="optional">[--dir &lt;dir&gt;] [--tag &lt;tag&gt;...]</span> -- &lt;command&gt; <span class="optional">[args...]</span></div>
+      <div class="cmd-desc">Start a new session in a persistent PTY. Optional positional name before <code>--</code> gives a stable identifier for messaging. Tags enable filtering and orchestration.</div>
     </div>
     <div class="cmd-entry">
       <div class="cmd-sig">cw attach <span class="optional">[&lt;id&gt;] [--no-history]</span></div>
@@ -393,19 +393,19 @@ td code{font-size:12px}
   <h3 id="messaging">Messaging</h3>
   <div class="cmd-group">
     <div class="cmd-entry">
-      <div class="cmd-sig">cw msg &lt;target&gt; &lt;body&gt; <span class="optional">[--from &lt;session&gt;]</span></div>
+      <div class="cmd-sig">cw msg &lt;target&gt; &lt;body&gt; <span class="optional">[-f &lt;session&gt;]</span></div>
       <div class="cmd-desc">Send a direct message to a session. Target can be a session ID or name.</div>
     </div>
     <div class="cmd-entry">
-      <div class="cmd-sig">cw inbox &lt;session&gt; <span class="optional">[--tail &lt;N&gt;]</span></div>
+      <div class="cmd-sig">cw inbox &lt;session&gt; <span class="optional">[-t &lt;N&gt;]</span></div>
       <div class="cmd-desc">Read messages from a session's inbox. Shows direct messages and pending requests.</div>
     </div>
     <div class="cmd-entry">
-      <div class="cmd-sig">cw request &lt;target&gt; &lt;body&gt; <span class="optional">[--from &lt;session&gt;] [--timeout &lt;s&gt;]</span></div>
+      <div class="cmd-sig">cw request &lt;target&gt; &lt;body&gt; <span class="optional">[-f &lt;session&gt;] [--timeout &lt;s&gt;]</span></div>
       <div class="cmd-desc">Send a request and block until a reply arrives. Synchronous coordination between agents.</div>
     </div>
     <div class="cmd-entry">
-      <div class="cmd-sig">cw reply &lt;request-id&gt; &lt;body&gt; <span class="optional">[--from &lt;session&gt;]</span></div>
+      <div class="cmd-sig">cw reply &lt;request-id&gt; &lt;body&gt; <span class="optional">[-f &lt;session&gt;]</span></div>
       <div class="cmd-desc">Reply to a pending request. Request ID comes from <code>cw inbox</code> or <code>message.request</code> events.</div>
     </div>
     <div class="cmd-entry">
@@ -505,14 +505,14 @@ td code{font-size:12px}
   <h3>Agent Messaging</h3>
   <p>Named agents exchange structured messages &mdash; direct messages for fire-and-forget, request/reply for synchronous coordination.</p>
   <div class="code-block"><pre><code><span class="cmt"># Launch named agents</span>
-<span class="cmd">cw launch</span> <span class="flag">--name</span> planner <span class="flag">--</span> claude <span class="flag">-p</span> <span class="str">"plan the refactor"</span>
-<span class="cmd">cw launch</span> <span class="flag">--name</span> coder <span class="flag">--</span> claude <span class="flag">-p</span> <span class="str">"implement changes"</span>
+<span class="cmd">cw launch</span> planner <span class="flag">--</span> claude <span class="flag">-p</span> <span class="str">"plan the refactor"</span>
+<span class="cmd">cw launch</span> coder <span class="flag">--</span> claude <span class="flag">-p</span> <span class="str">"implement changes"</span>
 
 <span class="cmt"># Send a direct message</span>
-<span class="cmd">cw msg</span> <span class="flag">--from</span> planner coder <span class="str">"start with the auth module"</span>
+<span class="cmd">cw msg</span> <span class="flag">-f</span> planner coder <span class="str">"start with the auth module"</span>
 
 <span class="cmt"># Request/reply — synchronous coordination</span>
-<span class="cmd">cw request</span> <span class="flag">--from</span> planner coder <span class="str">"ready for review?"</span>
+<span class="cmd">cw request</span> <span class="flag">-f</span> planner coder <span class="str">"ready for review?"</span>
 <span class="cmt"># [reply from coder] yes, PR #42 is up</span>
 
 <span class="cmt"># Monitor all message traffic</span>
@@ -967,21 +967,21 @@ function copySnippet(btn) {
   }
 
   const script = [
-    { type:'cmd', text:'cw launch --name planner -- claude -p "plan the refactor"' },
+    { type:'cmd', text:'cw launch planner -- claude -p "plan the refactor"' },
     { type:'out', text:'Session 1 launched: claude -p "plan the refactor"' },
     { type:'pause', ms:400 },
-    { type:'cmd', text:'cw launch --name coder -- claude -p "implement changes"' },
+    { type:'cmd', text:'cw launch coder -- claude -p "implement changes"' },
     { type:'out', text:'Session 2 launched: claude -p "implement changes"' },
     { type:'pause', ms:500 },
     { type:'cmd', text:'cw list' },
-    { type:'raw', html:'<span class="table-header">ID     NAME             COMMAND              STATUS       CREATED</span>' },
-    { type:'raw', html:'<span class="table-row">1      planner          claude -p "plan...   running      2m ago</span>' },
-    { type:'raw', html:'<span class="table-row">2      coder            claude -p "impl...   running      30s ago</span>' },
+    { type:'raw', html:'<span class="table-header">ID   NAME           COMMAND                          STATUS     AGE</span>' },
+    { type:'raw', html:'<span class="table-row">1    planner        claude -p "plan the refactor"    running    2m ago</span>' },
+    { type:'raw', html:'<span class="table-row">2    coder          claude -p "implement changes"    running    30s ago</span>' },
     { type:'pause', ms:600 },
-    { type:'cmd', text:'cw msg --from planner coder "start with the auth module"' },
+    { type:'cmd', text:'cw msg -f planner coder "start with the auth module"' },
     { type:'out', text:'Message sent: msg_a1b2c3d4' },
     { type:'pause', ms:500 },
-    { type:'cmd', text:'cw request --from planner coder "ready for review?"' },
+    { type:'cmd', text:'cw request -f planner coder "ready for review?"' },
     { type:'pause', ms:1200 },
     { type:'raw', html:'<span class="accent">[reply from coder] yes, PR #42 is up</span>' },
     { type:'pause', ms:600 },

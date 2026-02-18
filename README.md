@@ -72,20 +72,21 @@ cw logs 1
 
 ## Commands
 
-### `cw launch [--name <name>] [--dir <dir>] [--tag <tag>...] -- <command> [args...]`
+### `cw launch [name] [--dir <dir>] [--tag <tag>...] -- <command> [args...]`
 
-Start a new session running the given command in a persistent PTY. Everything after `--` is the command and its arguments. Names give sessions stable identifiers for messaging. Tags enable filtering and coordination.
+Start a new session running the given command in a persistent PTY. Everything after `--` is the command and its arguments. An optional positional name before `--` gives the session a stable identifier for messaging. Tags enable filtering and coordination.
 
 ```bash
 cw launch -- claude -p "refactor the database layer"
-cw launch --name planner -- claude -p "plan the refactor"
+cw launch planner -- claude -p "plan the refactor"
 cw launch --dir /home/coder/project -- claude -p "add unit tests for auth"
 cw launch --tag worker --tag build -- claude -p "fix tests"
 cw launch -- bash -c "npm test && npm run lint"
 ```
 
 Options:
-- `--name` — Unique name for the session (alphanumeric + hyphens, 1-32 chars). Used for addressing in messaging.
+- Positional name (before `--`) — Unique name for the session (alphanumeric + hyphens, 1-32 chars). Used for addressing in messaging. Equivalent to `--name`.
+- `--name` — Alternative to positional name (useful for programmatic/MCP use)
 - `--dir`, `-d` — Working directory (defaults to current dir)
 - `--tag`, `-t` — Tag the session (repeatable)
 
@@ -95,9 +96,9 @@ Show all sessions with their name, status, age, and command.
 
 ```bash
 cw list
-# ID     NAME             COMMAND              STATUS       CREATED    ATTACHED
-# 1      planner          claude -p "plan ...  running      2m ago     no
-# 2      coder            claude -p "impl...   running      45s ago    no
+# ID   NAME           COMMAND                          STATUS     AGE
+# 1    planner        claude -p "plan the refactor"    running    2m ago
+# 2    coder          claude -p "implement changes"    running    45s ago
 
 cw list --json   # machine-readable output
 ```
@@ -152,42 +153,42 @@ cw watch 1 --no-history         # Only new output
 cw watch 1 --timeout 60         # Auto-exit after 60 seconds
 ```
 
-### `cw msg <target> <body> [--from <session>]`
+### `cw msg <target> <body> [-f <session>]`
 
 Send a direct message to a session. Target can be a session ID or name.
 
 ```bash
 cw msg coder "start with the auth module"              # by name
 cw msg 2 "start with the auth module"                  # by ID
-cw msg --from planner coder "start with the auth module"  # with sender
+cw msg -f planner coder "start with the auth module"   # with sender
 ```
 
-### `cw inbox <session> [--tail <N>]`
+### `cw inbox <session> [-t <N>]`
 
 Read messages from a session's inbox. Shows direct messages and pending requests.
 
 ```bash
 cw inbox coder                # latest 50 messages
-cw inbox planner --tail 10    # last 10 messages
+cw inbox planner -t 10        # last 10 messages
 ```
 
-### `cw request <target> <body> [--from <session>] [--timeout <s>]`
+### `cw request <target> <body> [-f <session>] [--timeout <s>]`
 
 Send a request to a session and block until a reply arrives. Like `msg` but synchronous — the caller waits for a response.
 
 ```bash
-cw request --from planner coder "ready for review?"
+cw request -f planner coder "ready for review?"
 # [reply from coder] yes, PR #42 is up
 
 cw request coder "status?" --timeout 30    # 30s timeout (default: 60s)
 ```
 
-### `cw reply <request-id> <body> [--from <session>]`
+### `cw reply <request-id> <body> [-f <session>]`
 
 Reply to a pending request. The request ID comes from `cw inbox` or from a `message.request` event.
 
 ```bash
-cw reply req_x7y8z9 "yes, PR #42 is up" --from coder
+cw reply req_x7y8z9 "yes, PR #42 is up" -f coder
 ```
 
 ### `cw listen [--session <session>]`
@@ -581,14 +582,14 @@ cw list
 
 ```bash
 # Launch named agents
-cw launch --name planner -- claude -p "plan the refactor"
-cw launch --name coder -- claude -p "implement changes"
+cw launch planner -- claude -p "plan the refactor"
+cw launch coder -- claude -p "implement changes"
 
 # Send a direct message
-cw msg --from planner coder "start with the auth module"
+cw msg -f planner coder "start with the auth module"
 
 # Request/reply — synchronous coordination
-cw request --from planner coder "ready for review?"
+cw request -f planner coder "ready for review?"
 # [reply from coder] yes, PR #42 is up
 
 # Monitor all message traffic

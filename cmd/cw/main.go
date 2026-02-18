@@ -151,7 +151,7 @@ func runCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:     "run [-- command...]",
+		Use:     "run [name] -- command...",
 		Aliases: []string{"launch"},
 		Short:   "Launch a new session",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -166,11 +166,30 @@ func runCmd() *cobra.Command {
 				}
 			}
 
-			if len(args) == 0 {
+			dash := cmd.ArgsLenAtDash()
+			if dash == -1 {
 				return fmt.Errorf("command required after --")
 			}
 
-			return client.Run(target, args, workDir, name, tags...)
+			var command []string
+			if dash == 1 {
+				// cw launch planner -- claude -p "..."
+				if name == "" {
+					name = args[0]
+				}
+				command = args[1:]
+			} else if dash == 0 {
+				// cw launch -- claude -p "..."
+				command = args
+			} else {
+				return fmt.Errorf("expected at most one name before --")
+			}
+
+			if len(command) == 0 {
+				return fmt.Errorf("command required after --")
+			}
+
+			return client.Run(target, command, workDir, name, tags...)
 		},
 	}
 
@@ -583,8 +602,8 @@ func waitSessionCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "wait [session-id]",
-		Short: "Wait for session(s) to complete",
+		Use:   "wait [session]",
+		Short: "Wait for session(s) to complete (by ID or name)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target, err := resolveTarget()
 			if err != nil {
@@ -599,12 +618,11 @@ func waitSessionCmd() *cobra.Command {
 
 			var sid *uint32
 			if len(args) > 0 {
-				parsed, err := strconv.ParseUint(args[0], 10, 32)
+				resolved, err := client.ResolveSessionArg(target, args[0])
 				if err != nil {
-					return fmt.Errorf("invalid session id: %w", err)
+					return err
 				}
-				v := uint32(parsed)
-				sid = &v
+				sid = &resolved
 			}
 
 			var timeoutPtr *uint64
@@ -1014,7 +1032,7 @@ func msgCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&from, "from", "", "Sender session (ID or name)")
+	cmd.Flags().StringVarP(&from, "from", "f", "", "Sender session (ID or name)")
 
 	return cmd
 }
@@ -1051,7 +1069,7 @@ func inboxCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().IntVar(&tail, "tail", 50, "Number of messages to show")
+	cmd.Flags().IntVarP(&tail, "tail", "t", 50, "Number of messages to show")
 
 	return cmd
 }
@@ -1140,7 +1158,7 @@ func requestCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&from, "from", "", "Sender session (ID or name)")
+	cmd.Flags().StringVarP(&from, "from", "f", "", "Sender session (ID or name)")
 	cmd.Flags().Uint64Var(&timeout, "timeout", 60, "Timeout in seconds")
 
 	return cmd
@@ -1182,7 +1200,7 @@ func replyCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&from, "from", "", "Sender session (ID or name)")
+	cmd.Flags().StringVarP(&from, "from", "f", "", "Sender session (ID or name)")
 
 	return cmd
 }

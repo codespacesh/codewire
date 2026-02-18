@@ -731,26 +731,22 @@ func GetStatus(target *Target, id uint32, jsonOutput bool) error {
 // printSessionTable prints a formatted table of sessions.
 func printSessionTable(sessions []protocol.SessionInfo) {
 	// Column headers.
-	fmt.Printf("%-6s %-16s %-20s %-12s %-10s %-8s\n", "ID", "NAME", "COMMAND", "STATUS", "CREATED", "ATTACHED")
+	fmt.Printf("%-4s %-14s %-32s %-10s %-8s\n", "ID", "NAME", "COMMAND", "STATUS", "AGE")
 
 	for _, s := range sessions {
 		name := s.Name
 		if name == "" {
 			name = "-"
 		}
-		if len(name) > 16 {
-			name = name[:13] + "..."
+		if len(name) > 14 {
+			name = name[:11] + "..."
 		}
 		prompt := s.Prompt
-		if len(prompt) > 20 {
-			prompt = prompt[:17] + "..."
+		if len(prompt) > 32 {
+			prompt = prompt[:29] + "..."
 		}
-		created := formatRelativeTime(s.CreatedAt)
-		attached := "no"
-		if s.Attached {
-			attached = "yes"
-		}
-		fmt.Printf("%-6d %-16s %-20s %-12s %-10s %-8s\n", s.ID, name, prompt, s.Status, created, attached)
+		age := formatRelativeTime(s.CreatedAt)
+		fmt.Printf("%-4d %-14s %-32s %-10s %-8s\n", s.ID, name, prompt, s.Status, age)
 	}
 }
 
