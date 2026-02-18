@@ -71,7 +71,7 @@ func main() {
 	mux.HandleFunc("GET /api/session", corsMiddleware(cfg.AllowedOrigin, pool.HandleSession))
 
 	// WebSocket proxy to demo pod: /ws/{pod-name}?token={token}
-	mux.HandleFunc("/ws/", corsMiddleware(cfg.AllowedOrigin, pool.HandleWS))
+	mux.HandleFunc("GET /ws/", corsMiddleware(cfg.AllowedOrigin, pool.HandleWS))
 
 	// CORS preflight
 	mux.HandleFunc("OPTIONS /", func(w http.ResponseWriter, r *http.Request) {
