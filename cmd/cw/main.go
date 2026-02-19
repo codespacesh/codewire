@@ -345,6 +345,7 @@ func logsCmd() *cobra.Command {
 	var (
 		follow bool
 		tail   int
+		raw    bool
 	)
 
 	cmd := &cobra.Command{
@@ -373,12 +374,13 @@ func logsCmd() *cobra.Command {
 				tailPtr = &tail
 			}
 
-			return client.Logs(target, resolved, follow, tailPtr)
+			return client.Logs(target, resolved, follow, tailPtr, raw)
 		},
 	}
 
 	cmd.Flags().BoolVarP(&follow, "follow", "f", false, "Follow log output")
 	cmd.Flags().IntVarP(&tail, "tail", "t", 0, "Number of lines to show from end")
+	cmd.Flags().BoolVar(&raw, "raw", false, "Output raw log data without stripping ANSI escape codes")
 
 	return cmd
 }

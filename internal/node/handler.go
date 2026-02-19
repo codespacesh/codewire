@@ -179,7 +179,8 @@ func handleClient(reader connection.FrameReader, writer connection.FrameWriter, 
 			return
 		}
 		follow := req.Follow != nil && *req.Follow
-		if logsErr := handleLogs(writer, logPath, follow, req.Tail); logsErr != nil {
+		strip := req.StripANSI == nil || *req.StripANSI // default: strip
+		if logsErr := handleLogs(writer, logPath, follow, req.Tail, strip); logsErr != nil {
 			slog.Debug("logs handler ended", "id", *req.ID, "err", logsErr)
 		}
 
@@ -674,7 +675,7 @@ func handleWait(
 
 // handleLogs reads a session's log file and sends it to the client. If follow
 // is true, it polls for new data every 500ms until the connection is closed.
-func handleLogs(writer connection.FrameWriter, logPath string, follow bool, tail *uint) error {
+func handleLogs(writer connection.FrameWriter, logPath string, follow bool, tail *uint, strip bool) error {
 	content, err := os.ReadFile(logPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -688,6 +689,9 @@ func handleLogs(writer connection.FrameWriter, logPath string, follow bool, tail
 	}
 
 	data := string(content)
+	if strip {
+		data = stripANSI(data)
+	}
 
 	// Apply tail.
 	if tail != nil && len(content) > 0 {
@@ -746,6 +750,9 @@ func handleLogs(writer connection.FrameWriter, logPath string, follow bool, tail
 
 		offset += int64(n)
 		chunk := string(buf[:n])
+		if strip {
+			chunk = stripANSI(chunk)
+		}
 		notDone := false
 		if sendErr := writer.SendResponse(&protocol.Response{
 			Type: "LogData",
