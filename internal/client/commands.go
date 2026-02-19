@@ -13,6 +13,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/BurntSushi/toml"
+	qrcode "github.com/skip2/go-qrcode"
+
 	"github.com/codespacesh/codewire/internal/connection"
 	"github.com/codespacesh/codewire/internal/protocol"
 	"github.com/codespacesh/codewire/internal/statusbar"
@@ -1431,6 +1434,154 @@ func printMessageEvent(sessionID *uint32, event *protocol.SessionEvent) {
 		}
 		fmt.Printf("[%s] REPLY (%s): %s\n", fromLabel, d.RequestID, d.Body)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Invite — create an invite code via relay API
+// ---------------------------------------------------------------------------
+
+// Invite creates an invite code on the relay and optionally prints a QR code.
+func Invite(dataDir string, uses int, ttl string, showQR bool) error {
+	relayURL, authToken, err := loadRelayAuth(dataDir)
+	if err != nil {
+		return err
+	}
+
+	reqBody, _ := json.Marshal(map[string]interface{}{
+		"uses": uses,
+		"ttl":  ttl,
+	})
+
+	req, err := http.NewRequest(http.MethodPost, relayURL+"/api/v1/invites", strings.NewReader(string(reqBody)))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+authToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("contacting relay: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return fmt.Errorf("failed to create invite: %s", string(body))
+	}
+
+	var invite struct {
+		Token         string    `json:"token"`
+		UsesRemaining int       `json:"uses_remaining"`
+		ExpiresAt     time.Time `json:"expires_at"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&invite); err != nil {
+		return fmt.Errorf("parsing response: %w", err)
+	}
+
+	joinURL := relayURL + "/join?invite=" + invite.Token
+
+	fmt.Fprintf(os.Stderr, "Invite created!\n\n")
+	fmt.Fprintf(os.Stderr, "  Token:   %s\n", invite.Token)
+	fmt.Fprintf(os.Stderr, "  Uses:    %d\n", invite.UsesRemaining)
+	fmt.Fprintf(os.Stderr, "  Expires: %s\n", invite.ExpiresAt.Format(time.RFC3339))
+	fmt.Fprintf(os.Stderr, "  URL:     %s\n\n", joinURL)
+	fmt.Fprintf(os.Stderr, "To setup another device:\n")
+	fmt.Fprintf(os.Stderr, "  cw setup %s --invite %s\n", relayURL, invite.Token)
+
+	if showQR {
+		printQR(joinURL)
+	}
+
+	return nil
+}
+
+// printQR renders a QR code to the terminal using Unicode half-blocks.
+func printQR(content string) {
+	q, err := qrcode.New(content, qrcode.Medium)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "\n(QR generation failed: %v)\n", err)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "\n%s\n", q.ToSmallString(false))
+}
+
+// ---------------------------------------------------------------------------
+// Revoke — revoke a node's access via relay API
+// ---------------------------------------------------------------------------
+
+// Revoke removes a node from the relay and adds its key to the revoked list.
+func Revoke(dataDir string, nodeName string) error {
+	relayURL, authToken, err := loadRelayAuth(dataDir)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, relayURL+"/api/v1/nodes/"+nodeName, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+authToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("contacting relay: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return fmt.Errorf("failed to revoke node: %s", string(body))
+	}
+
+	fmt.Fprintf(os.Stderr, "Node %q revoked\n", nodeName)
+	return nil
+}
+
+// loadRelayAuth loads the relay URL and auth token from config.
+func loadRelayAuth(dataDir string) (relayURL, authToken string, err error) {
+	cfg, err := loadConfigFromDir(dataDir)
+	if err != nil {
+		return "", "", err
+	}
+	if cfg.relayURL == "" {
+		return "", "", fmt.Errorf("relay not configured (run 'cw setup <relay-url>')")
+	}
+	return cfg.relayURL, cfg.authToken, nil
+}
+
+type relayAuthConfig struct {
+	relayURL  string
+	authToken string
+}
+
+func loadConfigFromDir(dataDir string) (*relayAuthConfig, error) {
+	// Read config.toml for relay_url and relay_session.
+	configPath := dataDir + "/config.toml"
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("reading config: %w", err)
+	}
+
+	// Simple extraction — parse the TOML manually for the fields we need.
+	var cfg struct {
+		RelayURL     *string `toml:"relay_url"`
+		RelaySession *string `toml:"relay_session"`
+	}
+
+	if _, err := toml.Decode(string(data), &cfg); err != nil {
+		return nil, fmt.Errorf("parsing config: %w", err)
+	}
+
+	result := &relayAuthConfig{}
+	if cfg.RelayURL != nil {
+		result.relayURL = *cfg.RelayURL
+	}
+	if cfg.RelaySession != nil {
+		result.authToken = *cfg.RelaySession
+	}
+
+	return result, nil
 }
 
 // formatRelativeTime converts an RFC3339 timestamp to a human-readable

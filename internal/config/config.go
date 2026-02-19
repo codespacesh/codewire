@@ -11,8 +11,9 @@ import (
 
 // Config is the top-level configuration loaded from config.toml.
 type Config struct {
-	Node     NodeConfig `toml:"node"`
-	RelayURL *string    `toml:"relay_url,omitempty"`
+	Node         NodeConfig `toml:"node"`
+	RelayURL     *string    `toml:"relay_url,omitempty"`
+	RelaySession *string    `toml:"relay_session,omitempty"` // OAuth session token
 }
 
 // NodeConfig describes the local node identity and network settings.
