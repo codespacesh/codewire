@@ -458,12 +458,13 @@ func watchCmd() *cobra.Command {
 		tail      int
 		noHistory bool
 		timeout   uint64
+		tags      []string
 	)
 
 	cmd := &cobra.Command{
-		Use:   "watch <session>",
-		Short: "Watch session output in real-time (by ID or name)",
-		Args:  cobra.ExactArgs(1),
+		Use:   "watch [session]",
+		Short: "Watch session output in real-time (by ID, name, or --tag for multi-session)",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target, err := resolveTarget()
 			if err != nil {
@@ -474,6 +475,19 @@ func watchCmd() *cobra.Command {
 				if err := ensureNode(); err != nil {
 					return err
 				}
+			}
+
+			// Multi-session watch by tag.
+			if len(tags) > 0 {
+				var timeoutPtr *uint64
+				if cmd.Flags().Changed("timeout") {
+					timeoutPtr = &timeout
+				}
+				return client.WatchMultiByTag(target, tags[0], os.Stdout, timeoutPtr)
+			}
+
+			if len(args) == 0 {
+				return fmt.Errorf("session id or name required (or use --tag)")
 			}
 
 			resolved, err := client.ResolveSessionArg(target, args[0])
@@ -498,6 +512,7 @@ func watchCmd() *cobra.Command {
 	cmd.Flags().IntVarP(&tail, "tail", "t", 0, "Number of lines to show from end")
 	cmd.Flags().BoolVar(&noHistory, "no-history", false, "Do not replay session history")
 	cmd.Flags().Uint64Var(&timeout, "timeout", 0, "Timeout in seconds")
+	cmd.Flags().StringSliceVar(&tags, "tag", nil, "Watch all sessions matching tag (multiplexed)")
 
 	return cmd
 }

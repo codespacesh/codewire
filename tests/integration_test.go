@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/codespacesh/codewire/internal/client"
 	"github.com/codespacesh/codewire/internal/connection"
 	"github.com/codespacesh/codewire/internal/node"
 	"github.com/codespacesh/codewire/internal/protocol"
@@ -1046,6 +1047,44 @@ func TestLaunchWithStdinData(t *testing.T) {
 	})
 	if !strings.Contains(resp.Data, "PROMPT_CONTENT_12345") {
 		t.Fatalf("expected stdin content in output, got: %q", resp.Data)
+	}
+}
+
+func TestMultiplexedWatch(t *testing.T) {
+	dir := tempDir(t, "mux-watch")
+	sock := startTestNode(t, dir)
+
+	// Launch two tagged sessions.
+	for i, msg := range []string{"OUTPUT_A", "OUTPUT_B"} {
+		resp := requestResponse(t, sock, &protocol.Request{
+			Type:       "Launch",
+			Command:    []string{"bash", "-c", fmt.Sprintf("echo %s && sleep 1", msg)},
+			WorkingDir: "/tmp",
+			Tags:       []string{"mux-test"},
+			Name:       fmt.Sprintf("mux-%d", i),
+		})
+		if resp.Type != "Launched" {
+			t.Fatalf("expected Launched, got %s: %s", resp.Type, resp.Message)
+		}
+	}
+
+	time.Sleep(500 * time.Millisecond)
+
+	// Use WatchMultiByTag with a writer to capture output.
+	target := &client.Target{Local: dir}
+	var buf strings.Builder
+	timeout := uint64(5)
+	err := client.WatchMultiByTag(target, "mux-test", &buf, &timeout)
+	if err != nil {
+		t.Fatalf("WatchMultiByTag: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "OUTPUT_A") {
+		t.Fatalf("missing OUTPUT_A: %q", output)
+	}
+	if !strings.Contains(output, "OUTPUT_B") {
+		t.Fatalf("missing OUTPUT_B: %q", output)
 	}
 }
 
