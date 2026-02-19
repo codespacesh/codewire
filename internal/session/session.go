@@ -563,6 +563,7 @@ func (m *SessionManager) Launch(command []string, workingDir string, tags ...str
 	// Build exec.Cmd.
 	cmd := exec.Command(command[0], command[1:]...)
 	cmd.Dir = workingDir
+	cmd.Env = buildEnv(nil)
 
 	// Start with a PTY.
 	ptmx, err := pty.Start(cmd)
@@ -1077,6 +1078,43 @@ func (m *SessionManager) KillByTags(tags []string) int {
 		m.Kill(id)
 	}
 	return len(ids)
+}
+
+// buildEnv constructs child env from os.Environ() with CLAUDECODE stripped
+// and optional KEY=VALUE overrides applied.
+func buildEnv(overrides []string) []string {
+	base := os.Environ()
+	filtered := make([]string, 0, len(base))
+	for _, e := range base {
+		if !strings.HasPrefix(e, "CLAUDECODE=") {
+			filtered = append(filtered, e)
+		}
+	}
+	if len(overrides) == 0 {
+		return filtered
+	}
+	keyIdx := make(map[string]int, len(filtered))
+	for i, e := range filtered {
+		if eq := strings.IndexByte(e, '='); eq >= 0 {
+			keyIdx[e[:eq]] = i
+		}
+	}
+	result := make([]string, len(filtered))
+	copy(result, filtered)
+	for _, ov := range overrides {
+		eq := strings.IndexByte(ov, '=')
+		if eq < 0 {
+			continue
+		}
+		key := ov[:eq]
+		if idx, exists := keyIdx[key]; exists {
+			result[idx] = ov
+		} else {
+			result = append(result, ov)
+			keyIdx[key] = len(result) - 1
+		}
+	}
+	return result
 }
 
 // isEIO returns true if err is an EIO (errno 5) wrapped in an *os.PathError.
