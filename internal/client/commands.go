@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/codespacesh/codewire/internal/connection"
@@ -672,6 +673,164 @@ func readFrames(reader connection.FrameReader, ch chan<- frameEvent) {
 		f, err := reader.ReadFrame()
 		ch <- frameEvent{frame: f, err: err}
 		if err != nil || f == nil {
+			return
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// WatchMultiByTag — multiplexed watch
+// ---------------------------------------------------------------------------
+
+type watchLine struct {
+	label string
+	data  string
+	done  bool
+	err   error
+}
+
+var watchColors = []string{
+	"\x1b[32m", "\x1b[33m", "\x1b[34m",
+	"\x1b[35m", "\x1b[36m", "\x1b[31m",
+}
+
+const colorReset = "\x1b[0m"
+
+// WatchMultiByTag watches all sessions matching a tag, merging their output
+// with colored prefixes. It writes to w (os.Stdout for CLI, or a buffer for
+// tests). If timeout is non-nil, it stops after that many seconds.
+func WatchMultiByTag(target *Target, tag string, w io.Writer, timeout *uint64) error {
+	// 1. List sessions, filter by tag.
+	resp, err := requestResponse(target, &protocol.Request{Type: "ListSessions"})
+	if err != nil {
+		return err
+	}
+	if resp.Type == "Error" {
+		return fmt.Errorf("%s", formatError(resp.Message))
+	}
+	if resp.Sessions == nil {
+		return fmt.Errorf("unexpected response type: %s", resp.Type)
+	}
+
+	var matched []protocol.SessionInfo
+	for _, s := range *resp.Sessions {
+		for _, t := range s.Tags {
+			if t == tag {
+				matched = append(matched, s)
+				break
+			}
+		}
+	}
+
+	if len(matched) == 0 {
+		return fmt.Errorf("no sessions found with tag %q", tag)
+	}
+
+	// 2. For each matched session, spawn a goroutine to watch it.
+	merged := make(chan watchLine, len(matched)*64)
+	var wg sync.WaitGroup
+
+	for idx, s := range matched {
+		wg.Add(1)
+		label := s.Name
+		if label == "" {
+			label = fmt.Sprintf("%d", s.ID)
+		}
+		color := watchColors[idx%len(watchColors)]
+		sessionID := s.ID
+
+		go func() {
+			defer wg.Done()
+			watchSingleToChannel(target, sessionID, label, color, merged)
+		}()
+	}
+
+	// Close merged channel when all watchers are done.
+	go func() {
+		wg.Wait()
+		close(merged)
+	}()
+
+	// 3. Set up timeout.
+	var timeoutDuration time.Duration
+	if timeout != nil {
+		timeoutDuration = time.Duration(*timeout) * time.Second
+	} else {
+		timeoutDuration = time.Duration(math.MaxInt64)
+	}
+	timer := time.NewTimer(timeoutDuration)
+	defer timer.Stop()
+
+	// 4. Drain merged channel, write prefixed output to w.
+	for {
+		select {
+		case line, ok := <-merged:
+			if !ok {
+				return nil // all watchers done
+			}
+			if line.err != nil {
+				fmt.Fprintf(w, "%s[%s]%s error: %v\n", line.label, line.label, colorReset, line.err)
+				continue
+			}
+			if line.data != "" {
+				fmt.Fprintf(w, "%s[%s]%s %s", line.label, line.label, colorReset, line.data)
+			}
+		case <-timer.C:
+			fmt.Fprintf(os.Stderr, "\n[cw] watch timeout reached\n")
+			return nil
+		}
+	}
+}
+
+// watchSingleToChannel connects to a single session's WatchSession stream
+// and sends output lines to the merged channel.
+func watchSingleToChannel(target *Target, sessionID uint32, label, color string, merged chan<- watchLine) {
+	reader, writer, err := target.Connect()
+	if err != nil {
+		merged <- watchLine{label: color, err: err}
+		return
+	}
+	defer reader.Close()
+	defer writer.Close()
+
+	includeHistory := true
+	req := &protocol.Request{
+		Type:           "WatchSession",
+		ID:             &sessionID,
+		IncludeHistory: &includeHistory,
+	}
+	if err := writer.SendRequest(req); err != nil {
+		merged <- watchLine{label: color, err: err}
+		return
+	}
+
+	frameCh := make(chan frameEvent, 1)
+	go readFrames(reader, frameCh)
+
+	for fe := range frameCh {
+		if fe.err != nil {
+			return
+		}
+		if fe.frame == nil {
+			return
+		}
+		if fe.frame.Type != protocol.FrameControl {
+			continue
+		}
+		var resp protocol.Response
+		if json.Unmarshal(fe.frame.Payload, &resp) != nil {
+			continue
+		}
+		if resp.Type == "WatchUpdate" {
+			if resp.Output != nil && *resp.Output != "" {
+				merged <- watchLine{label: color, data: *resp.Output}
+			}
+			if resp.Done != nil && *resp.Done {
+				return
+			}
+		}
+		if resp.Type == "Error" {
+			merged <- watchLine{label: color, err: fmt.Errorf("%s", resp.Message)}
 			return
 		}
 	}
