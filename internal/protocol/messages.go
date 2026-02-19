@@ -48,6 +48,9 @@ type Request struct {
 	// Environment variable overrides for Launch (KEY=VALUE strings).
 	Env []string `json:"env,omitempty"`
 
+	// StdinData is injected into the session's PTY after launch.
+	StdinData []byte `json:"stdin_data,omitempty"`
+
 	// StripANSI controls ANSI escape stripping in Logs responses (default: true).
 	StripANSI *bool `json:"strip_ansi,omitempty"`
 

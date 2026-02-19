@@ -93,13 +93,14 @@ func List(target *Target, jsonOutput bool) error {
 // Run launches a new session on the node with the given command, working
 // directory, and optional tags. If name is non-empty, the session is assigned
 // that name for addressing.
-func Run(target *Target, command []string, workingDir string, name string, env []string, tags ...string) error {
+func Run(target *Target, command []string, workingDir string, name string, env []string, stdinData []byte, tags ...string) error {
 	resp, err := requestResponse(target, &protocol.Request{
 		Type:       "Launch",
 		Command:    command,
 		WorkingDir: workingDir,
 		Name:       name,
 		Env:        env,
+		StdinData:  stdinData,
 		Tags:       tags,
 	})
 	if err != nil {
