@@ -13,7 +13,7 @@ import (
 // It kills the session on test cleanup.
 func launchSleep(t *testing.T, sm *SessionManager) uint32 {
 	t.Helper()
-	id, err := sm.Launch([]string{"sleep", "5"}, "/tmp", nil)
+	id, err := sm.Launch([]string{"sleep", "5"}, "/tmp", nil, nil)
 	if err != nil {
 		t.Fatalf("Launch failed: %v", err)
 	}
@@ -219,7 +219,7 @@ func TestNameReleasedOnNaturalExit(t *testing.T) {
 		t.Fatalf("NewSessionManager: %v", err)
 	}
 
-	id, err := sm.Launch([]string{"true"}, "/tmp", nil)
+	id, err := sm.Launch([]string{"true"}, "/tmp", nil, nil)
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
 	}

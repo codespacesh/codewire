@@ -1023,6 +1023,32 @@ func TestLaunchWithEnv(t *testing.T) {
 	}
 }
 
+func TestLaunchWithStdinData(t *testing.T) {
+	dir := tempDir(t, "stdin-data")
+	sock := startTestNode(t, dir)
+
+	resp := requestResponse(t, sock, &protocol.Request{
+		Type:       "Launch",
+		Command:    []string{"cat"},
+		WorkingDir: "/tmp",
+		StdinData:  []byte("PROMPT_CONTENT_12345\n"),
+	})
+	if resp.Type != "Launched" {
+		t.Fatalf("expected Launched, got %s: %s", resp.Type, resp.Message)
+	}
+	id := *resp.ID
+	time.Sleep(2 * time.Second)
+
+	resp = requestResponse(t, sock, &protocol.Request{
+		Type:   "Logs",
+		ID:     uint32Ptr(id),
+		Follow: boolPtr(false),
+	})
+	if !strings.Contains(resp.Data, "PROMPT_CONTENT_12345") {
+		t.Fatalf("expected stdin content in output, got: %q", resp.Data)
+	}
+}
+
 func TestEventDrivenPersistence(t *testing.T) {
 	dir := tempDir(t, "evt-persist")
 	sock := startTestNode(t, dir)

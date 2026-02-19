@@ -542,7 +542,7 @@ func (m *SessionManager) triggerPersist() {
 
 // Launch starts a new PTY session executing command in workingDir.
 // tags are optional labels for filtering/grouping.
-func (m *SessionManager) Launch(command []string, workingDir string, env []string, tags ...string) (uint32, error) {
+func (m *SessionManager) Launch(command []string, workingDir string, env []string, stdinData []byte, tags ...string) (uint32, error) {
 	if len(command) == 0 {
 		return 0, fmt.Errorf("command must not be empty")
 	}
@@ -707,6 +707,20 @@ func (m *SessionManager) Launch(command []string, workingDir string, env []strin
 		}
 		slog.Info("input writer exited", "id", id)
 	}()
+
+	// Inject stdinData into the session after a short delay.
+	if len(stdinData) > 0 {
+		go func() {
+			time.Sleep(200 * time.Millisecond)
+			chunk := make([]byte, len(stdinData))
+			copy(chunk, stdinData)
+			select {
+			case inputCh <- chunk:
+			default:
+				slog.Warn("input channel full when injecting stdin_data", "id", id)
+			}
+		}()
+	}
 
 	// Goroutine 3: wait for process exit → update status + emit events.
 	go func() {

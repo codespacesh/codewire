@@ -150,6 +150,7 @@ func runCmd() *cobra.Command {
 		name        string
 		envVars     []string
 		autoApprove bool
+		promptFile  string
 	)
 
 	cmd := &cobra.Command{
@@ -201,7 +202,16 @@ func runCmd() *cobra.Command {
 				workDir, _ = os.Getwd()
 			}
 
-			return client.Run(target, command, workDir, name, envVars, tags...)
+			var stdinData []byte
+			if promptFile != "" {
+				var readErr error
+				stdinData, readErr = os.ReadFile(promptFile)
+				if readErr != nil {
+					return fmt.Errorf("reading prompt file: %w", readErr)
+				}
+			}
+
+			return client.Run(target, command, workDir, name, envVars, stdinData, tags...)
 		},
 	}
 
@@ -210,6 +220,7 @@ func runCmd() *cobra.Command {
 	cmd.Flags().StringVar(&name, "name", "", "Unique name for the session (alphanumeric + hyphens, 1-32 chars)")
 	cmd.Flags().StringArrayVar(&envVars, "env", nil, "Environment variable overrides (KEY=VALUE, can be repeated)")
 	cmd.Flags().BoolVar(&autoApprove, "auto-approve", false, "Inject --dangerously-skip-permissions after the command binary")
+	cmd.Flags().StringVar(&promptFile, "prompt-file", "", "File whose contents are injected as stdin after launch")
 
 	return cmd
 }
