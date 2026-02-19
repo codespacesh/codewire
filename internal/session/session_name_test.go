@@ -189,6 +189,52 @@ func TestNameCleanupOnRename(t *testing.T) {
 	}
 }
 
+func TestNameReleasedOnKill(t *testing.T) {
+	dir := t.TempDir()
+	sm, err := NewSessionManager(dir)
+	if err != nil {
+		t.Fatalf("NewSessionManager: %v", err)
+	}
+
+	id1 := launchSleep(t, sm)
+	if err := sm.SetName(id1, "reuse-me"); err != nil {
+		t.Fatalf("SetName: %v", err)
+	}
+
+	if err := sm.Kill(id1); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+	time.Sleep(200 * time.Millisecond)
+
+	id2 := launchSleep(t, sm)
+	if err := sm.SetName(id2, "reuse-me"); err != nil {
+		t.Fatalf("SetName on id2 after kill should succeed: %v", err)
+	}
+}
+
+func TestNameReleasedOnNaturalExit(t *testing.T) {
+	dir := t.TempDir()
+	sm, err := NewSessionManager(dir)
+	if err != nil {
+		t.Fatalf("NewSessionManager: %v", err)
+	}
+
+	id, err := sm.Launch([]string{"true"}, "/tmp")
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	if err := sm.SetName(id, "short-lived"); err != nil {
+		t.Fatalf("SetName: %v", err)
+	}
+
+	time.Sleep(1 * time.Second)
+
+	id2 := launchSleep(t, sm)
+	if err := sm.SetName(id2, "short-lived"); err != nil {
+		t.Fatalf("SetName after exit should succeed: %v", err)
+	}
+}
+
 func TestNamePersistence(t *testing.T) {
 	dir := t.TempDir()
 	sm, err := NewSessionManager(dir)

@@ -308,6 +308,24 @@ func (m *SessionManager) SetName(id uint32, name string) error {
 	return nil
 }
 
+// releaseName removes a session's name from nameIndex if it owns it.
+func (m *SessionManager) releaseName(id uint32) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	sess, ok := m.sessions[id]
+	if !ok {
+		return
+	}
+	sess.mu.Lock()
+	name := sess.Meta.Name
+	sess.mu.Unlock()
+	if name != "" {
+		if existing, ok := m.nameIndex[name]; ok && existing == id {
+			delete(m.nameIndex, name)
+		}
+	}
+}
+
 // ResolveByName looks up a session ID by name. Returns an error if no session
 // has the given name.
 func (m *SessionManager) ResolveByName(name string) (uint32, error) {
@@ -720,6 +738,8 @@ func (m *SessionManager) Launch(command []string, workingDir string, tags ...str
 			sess.eventLog.Append(statusEvent)
 		}
 		m.Subscriptions.Publish(id, tags, statusEvent)
+
+		m.releaseName(id)
 	}()
 
 	slog.Info("session launched", "id", id)
@@ -807,6 +827,7 @@ func (m *SessionManager) Kill(id uint32) error {
 	sess.mu.Unlock()
 
 	m.triggerPersist()
+	m.releaseName(id)
 	return nil
 }
 
