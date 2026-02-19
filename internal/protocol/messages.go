@@ -48,6 +48,9 @@ type Request struct {
 	// Environment variable overrides for Launch (KEY=VALUE strings).
 	Env []string `json:"env,omitempty"`
 
+	// StripANSI controls ANSI escape stripping in Logs responses (default: true).
+	StripANSI *bool `json:"strip_ansi,omitempty"`
+
 	// New fields for enriched protocol.
 	Tags           []string `json:"tags,omitempty"`
 	EventTypes     []string `json:"event_types,omitempty"`

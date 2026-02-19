@@ -472,7 +472,7 @@ func KillAll(target *Target) error {
 // Logs retrieves the output log for a session. When follow is true, the client
 // streams new output as it arrives until the session ends or the connection
 // drops.
-func Logs(target *Target, id uint32, follow bool, tail *int) error {
+func Logs(target *Target, id uint32, follow bool, tail *int, raw bool) error {
 	reader, writer, err := target.Connect()
 	if err != nil {
 		return err
@@ -488,6 +488,10 @@ func Logs(target *Target, id uint32, follow bool, tail *int) error {
 	if tail != nil {
 		t := uint(*tail)
 		req.Tail = &t
+	}
+	if raw {
+		f := false
+		req.StripANSI = &f
 	}
 
 	if err := writer.SendRequest(req); err != nil {
