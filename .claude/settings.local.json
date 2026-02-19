@@ -23,7 +23,18 @@
       "Bash(docker build:*)",
       "WebSearch",
       "WebFetch(domain:github.com)",
-      "Bash(open:*)"
+      "Bash(open:*)",
+      "Bash(git remote add:*)",
+      "Bash(gh api:*)",
+      "Bash(atmos terraform validate:*)",
+      "Bash(scripts/atmos-run terraform import:*)",
+      "Bash(scripts/atmos-run terraform import codewire:*)",
+      "Bash(scripts/atmos-run terraform import codewire -s orgs/app/platform -- kubernetes_deployment.demo_broker codewire-demo/demo-broker)",
+      "Bash(scripts/atmos-run terraform import codewire -s orgs/app/platform -- kubernetes_service.demo_broker codewire-demo/demo-broker)",
+      "Bash(scripts/atmos-run:*)",
+      "WebFetch(domain:docs.gitea.com)",
+      "Bash(KUBECONFIG=/Users/noel/src/sonica/infra/kubeconfig-app.yaml kubectl get:*)",
+      "Bash(KUBECONFIG=/Users/noel/src/sonica/infra/kubeconfig-app.yaml kubectl describe:*)"
     ]
   },
   "enableAllProjectMcpServers": true
