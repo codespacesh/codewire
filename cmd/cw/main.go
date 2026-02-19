@@ -145,9 +145,11 @@ func stopCmd() *cobra.Command {
 
 func runCmd() *cobra.Command {
 	var (
-		workDir string
-		tags    []string
-		name    string
+		workDir     string
+		tags        []string
+		name        string
+		envVars     []string
+		autoApprove bool
 	)
 
 	cmd := &cobra.Command{
@@ -189,18 +191,25 @@ func runCmd() *cobra.Command {
 				return fmt.Errorf("command required after --")
 			}
 
+			// If --auto-approve, inject --dangerously-skip-permissions after the binary.
+			if autoApprove && len(command) > 0 {
+				command = append([]string{command[0], "--dangerously-skip-permissions"}, command[1:]...)
+			}
+
 			// Default to current working directory if --dir not specified.
 			if workDir == "" {
 				workDir, _ = os.Getwd()
 			}
 
-			return client.Run(target, command, workDir, name, tags...)
+			return client.Run(target, command, workDir, name, envVars, tags...)
 		},
 	}
 
 	cmd.Flags().StringVarP(&workDir, "dir", "d", "", "Working directory for the session")
 	cmd.Flags().StringSliceVar(&tags, "tag", nil, "Tags for the session (can be repeated)")
 	cmd.Flags().StringVar(&name, "name", "", "Unique name for the session (alphanumeric + hyphens, 1-32 chars)")
+	cmd.Flags().StringArrayVar(&envVars, "env", nil, "Environment variable overrides (KEY=VALUE, can be repeated)")
+	cmd.Flags().BoolVar(&autoApprove, "auto-approve", false, "Inject --dangerously-skip-permissions after the command binary")
 
 	return cmd
 }

@@ -542,7 +542,7 @@ func (m *SessionManager) triggerPersist() {
 
 // Launch starts a new PTY session executing command in workingDir.
 // tags are optional labels for filtering/grouping.
-func (m *SessionManager) Launch(command []string, workingDir string, tags ...string) (uint32, error) {
+func (m *SessionManager) Launch(command []string, workingDir string, env []string, tags ...string) (uint32, error) {
 	if len(command) == 0 {
 		return 0, fmt.Errorf("command must not be empty")
 	}
@@ -581,7 +581,7 @@ func (m *SessionManager) Launch(command []string, workingDir string, tags ...str
 	// Build exec.Cmd.
 	cmd := exec.Command(command[0], command[1:]...)
 	cmd.Dir = workingDir
-	cmd.Env = buildEnv(nil)
+	cmd.Env = buildEnv(env)
 
 	// Start with a PTY.
 	ptmx, err := pty.Start(cmd)

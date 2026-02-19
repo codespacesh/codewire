@@ -48,7 +48,7 @@ func handleClient(reader connection.FrameReader, writer connection.FrameWriter, 
 		})
 
 	case "Launch":
-		id, launchErr := manager.Launch(req.Command, req.WorkingDir, req.Tags...)
+		id, launchErr := manager.Launch(req.Command, req.WorkingDir, req.Env, req.Tags...)
 		if launchErr != nil {
 			msg := launchErr.Error()
 			_ = writer.SendResponse(&protocol.Response{
