@@ -45,6 +45,9 @@ type Request struct {
 	// Session name for Launch and name-based addressing.
 	Name string `json:"name,omitempty"`
 
+	// Environment variable overrides for Launch (KEY=VALUE strings).
+	Env []string `json:"env,omitempty"`
+
 	// New fields for enriched protocol.
 	Tags           []string `json:"tags,omitempty"`
 	EventTypes     []string `json:"event_types,omitempty"`

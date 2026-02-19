@@ -997,6 +997,32 @@ loop:
 	}
 }
 
+func TestLaunchWithEnv(t *testing.T) {
+	dir := tempDir(t, "launch-env")
+	sock := startTestNode(t, dir)
+
+	resp := requestResponse(t, sock, &protocol.Request{
+		Type:       "Launch",
+		Command:    []string{"bash", "-c", "echo MY_VAR=$MY_TEST_VAR"},
+		WorkingDir: "/tmp",
+		Env:        []string{"MY_TEST_VAR=hello-codewire"},
+	})
+	if resp.Type != "Launched" {
+		t.Fatalf("expected Launched, got %s: %s", resp.Type, resp.Message)
+	}
+	id := *resp.ID
+	time.Sleep(2 * time.Second)
+
+	resp = requestResponse(t, sock, &protocol.Request{
+		Type:   "Logs",
+		ID:     uint32Ptr(id),
+		Follow: boolPtr(false),
+	})
+	if !strings.Contains(resp.Data, "MY_VAR=hello-codewire") {
+		t.Fatalf("expected env var in output, got: %q", resp.Data)
+	}
+}
+
 func TestEventDrivenPersistence(t *testing.T) {
 	dir := tempDir(t, "evt-persist")
 	sock := startTestNode(t, dir)

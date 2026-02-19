@@ -11,7 +11,7 @@ import (
 // session when the test finishes.
 func launchSleepSession(t *testing.T, sm *SessionManager) uint32 {
 	t.Helper()
-	id, err := sm.Launch([]string{"sleep", "30"}, "/tmp")
+	id, err := sm.Launch([]string{"sleep", "30"}, "/tmp", nil)
 	if err != nil {
 		t.Fatalf("failed to launch session: %v", err)
 	}
