@@ -54,6 +54,8 @@ func main() {
 		serverCmd(),
 		relayCmd(),
 		setupCmd(),
+		inviteCmd(),
+		revokeCmd(),
 		msgCmd(),
 		inboxCmd(),
 		requestCmd(),
@@ -938,9 +940,15 @@ func serverListCmd() *cobra.Command {
 // ---------------------------------------------------------------------------
 
 func setupCmd() *cobra.Command {
-	return &cobra.Command{
+	var (
+		inviteToken string
+		authToken   string
+	)
+
+	cmd := &cobra.Command{
 		Use:   "setup [relay-url]",
-		Short: "Connect this node to a relay via device authorization",
+		Short: "Connect this node to a relay",
+		Long:  "Connect this node to a relay via GitHub OAuth, invite code, or admin token.",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			relayURL := "https://relay.codespace.sh"
@@ -963,9 +971,19 @@ func setupCmd() *cobra.Command {
 				cancel()
 			}()
 
-			return tunnel.RunSetup(ctx, relayURL, dir)
+			return tunnel.RunSetup(ctx, tunnel.SetupOptions{
+				RelayURL:    relayURL,
+				DataDir:     dir,
+				InviteToken: inviteToken,
+				AuthToken:   authToken,
+			})
 		},
 	}
+
+	cmd.Flags().StringVar(&inviteToken, "invite", "", "Invite token for device onboarding")
+	cmd.Flags().StringVar(&authToken, "token", "", "Admin auth token (headless/CI)")
+
+	return cmd
 }
 
 // ---------------------------------------------------------------------------
@@ -974,13 +992,16 @@ func setupCmd() *cobra.Command {
 
 func relayCmd() *cobra.Command {
 	var (
-		baseURL     string
-		wgPort      uint16
-		wgEndpoint  string
-		listen      string
-		relayDir    string
-		authMode    string
-		authToken   string
+		baseURL            string
+		wgPort             uint16
+		wgEndpoint         string
+		listen             string
+		relayDir           string
+		authMode           string
+		authToken          string
+		allowedUsers       []string
+		githubClientID     string
+		githubClientSecret string
 	)
 
 	cmd := &cobra.Command{
@@ -1011,13 +1032,16 @@ func relayCmd() *cobra.Command {
 			}()
 
 			return tunnel.RunRelay(ctx, tunnel.RelayConfig{
-				BaseURL:           baseURL,
-				WireguardEndpoint: wgEndpoint,
-				WireguardPort:     wgPort,
-				ListenAddr:        listen,
-				DataDir:           relayDir,
-				AuthMode:          authMode,
-				AuthToken:         authToken,
+				BaseURL:            baseURL,
+				WireguardEndpoint:  wgEndpoint,
+				WireguardPort:      wgPort,
+				ListenAddr:         listen,
+				DataDir:            relayDir,
+				AuthMode:           authMode,
+				AuthToken:          authToken,
+				AllowedUsers:       allowedUsers,
+				GitHubClientID:     githubClientID,
+				GitHubClientSecret: githubClientSecret,
 			})
 		},
 	}
@@ -1027,10 +1051,54 @@ func relayCmd() *cobra.Command {
 	cmd.Flags().StringVar(&wgEndpoint, "wg-endpoint", "", "WireGuard endpoint to advertise (defaults to base-url hostname:wg-port)")
 	cmd.Flags().StringVar(&listen, "listen", ":8080", "HTTP listen address")
 	cmd.Flags().StringVar(&relayDir, "data-dir", "", "Data directory for relay (default: ~/.codewire/relay)")
-	cmd.Flags().StringVar(&authMode, "auth-mode", "none", "Auth mode: token, none")
-	cmd.Flags().StringVar(&authToken, "auth-token", "", "Shared auth token (required when --auth-mode=token)")
+	cmd.Flags().StringVar(&authMode, "auth-mode", "none", "Auth mode: github, token, none")
+	cmd.Flags().StringVar(&authToken, "auth-token", "", "Admin auth token (for --auth-mode=token or as fallback for headless/CI)")
+	cmd.Flags().StringSliceVar(&allowedUsers, "allowed-users", nil, "GitHub usernames allowed to authenticate (GitHub mode)")
+	cmd.Flags().StringVar(&githubClientID, "github-client-id", "", "Manual GitHub OAuth App client ID (for private networks)")
+	cmd.Flags().StringVar(&githubClientSecret, "github-client-secret", "", "Manual GitHub OAuth App client secret")
 
 	return cmd
+}
+
+// ---------------------------------------------------------------------------
+// inviteCmd — create an invite code for device onboarding
+// ---------------------------------------------------------------------------
+
+func inviteCmd() *cobra.Command {
+	var (
+		uses int
+		ttl  string
+		qr   bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "invite",
+		Short: "Create an invite code for device onboarding",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return client.Invite(dataDir(), uses, ttl, qr)
+		},
+	}
+
+	cmd.Flags().IntVar(&uses, "uses", 1, "Number of times the invite can be used")
+	cmd.Flags().StringVar(&ttl, "ttl", "1h", "Time-to-live for the invite (e.g. 5m, 1h, 24h)")
+	cmd.Flags().BoolVar(&qr, "qr", false, "Print QR code for the invite URL")
+
+	return cmd
+}
+
+// ---------------------------------------------------------------------------
+// revokeCmd — revoke a node's access
+// ---------------------------------------------------------------------------
+
+func revokeCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "revoke <node-name>",
+		Short: "Revoke a node's relay access",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return client.Revoke(dataDir(), args[0])
+		},
+	}
 }
 
 // ---------------------------------------------------------------------------

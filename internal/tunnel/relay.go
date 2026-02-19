@@ -20,6 +20,7 @@ import (
 	"github.com/coder/wgtunnel/tunneld"
 	"github.com/coder/wgtunnel/tunnelsdk"
 
+	"github.com/codespacesh/codewire/internal/oauth"
 	"github.com/codespacesh/codewire/internal/store"
 )
 
@@ -85,10 +86,16 @@ type RelayConfig struct {
 	ListenAddr string
 	// DataDir is where relay.db lives.
 	DataDir string
-	// AuthMode controls registration: "token", "none".
+	// AuthMode controls registration: "github", "token", "none".
 	AuthMode string
-	// AuthToken is the shared secret when AuthMode is "token".
+	// AuthToken is the shared secret when AuthMode is "token" or as fallback for headless/CI.
 	AuthToken string
+	// AllowedUsers is a list of GitHub usernames allowed to authenticate (GitHub mode).
+	AllowedUsers []string
+	// GitHubClientID is a manual override for GitHub OAuth App client ID (private networks).
+	GitHubClientID string
+	// GitHubClientSecret is a manual override for GitHub OAuth App client secret.
+	GitHubClientSecret string
 }
 
 // RunRelay starts the relay server. It blocks until ctx is cancelled.
@@ -144,38 +151,87 @@ func RunRelay(ctx context.Context, cfg RelayConfig) error {
 	}
 	defer api.Close()
 
-	// Rate limiter: 5 device registrations per IP per minute.
+	// Rate limiters.
 	deviceRL := newRateLimiter(5, time.Minute)
+	joinRL := newRateLimiter(10, time.Minute)
+
+	// Auth middleware for protected API routes.
+	authMiddleware := oauth.RequireAuth(st, cfg.AuthToken)
 
 	// Build HTTP mux: our API routes + wgtunnel's reverse proxy router.
 	mux := http.NewServeMux()
 
-	// Device authorization endpoints.
+	// --- GitHub App Manifest flow (setup) ---
+	if cfg.AuthMode == "github" {
+		mux.HandleFunc("GET /auth/github/manifest/callback", oauth.ManifestCallbackHandler(st, cfg.BaseURL))
+		mux.HandleFunc("GET /auth/github", oauth.LoginHandler(st, cfg.BaseURL, cfg.AllowedUsers))
+		mux.HandleFunc("GET /auth/github/callback", oauth.CallbackHandler(st, cfg.BaseURL, cfg.AllowedUsers))
+		mux.HandleFunc("GET /auth/session", oauth.SessionInfoHandler(st))
+
+		// If manual GitHub credentials were provided, store them on first run.
+		if cfg.GitHubClientID != "" && cfg.GitHubClientSecret != "" {
+			existing, _ := st.GitHubAppGet(context.Background())
+			if existing == nil {
+				st.GitHubAppSet(context.Background(), store.GitHubApp{
+					ClientID:     cfg.GitHubClientID,
+					ClientSecret: cfg.GitHubClientSecret,
+					Owner:        "manual",
+					CreatedAt:    time.Now().UTC(),
+				})
+			}
+		}
+	}
+
+	// --- Device authorization endpoints (legacy flow) ---
 	mux.HandleFunc("POST /api/v1/device/authorize", rateLimitMiddleware(deviceRL, deviceAuthorizeHandler(st, opts, cfg)))
 	mux.HandleFunc("GET /api/v1/device/poll/{code}", devicePollHandler(st))
 	mux.HandleFunc("GET /auth/device", devicePageHandler())
 	mux.HandleFunc("POST /auth/device/confirm", deviceConfirmHandler(st))
 
-	// Node discovery.
+	// --- Device registration (new auth-aware endpoint) ---
+	mux.Handle("POST /api/v1/register", authMiddleware(http.HandlerFunc(registerHandler(st, opts, cfg))))
+
+	// --- Invite endpoints ---
+	mux.Handle("POST /api/v1/invites", authMiddleware(http.HandlerFunc(inviteCreateHandler(st))))
+	mux.Handle("GET /api/v1/invites", authMiddleware(http.HandlerFunc(inviteListHandler(st))))
+	mux.Handle("DELETE /api/v1/invites/{token}", authMiddleware(http.HandlerFunc(inviteDeleteHandler(st))))
+
+	// --- Invite redemption (public, rate-limited) ---
+	mux.HandleFunc("POST /api/v1/join", rateLimitMiddleware(joinRL, joinHandler(st, opts, cfg)))
+	mux.HandleFunc("GET /join", joinPageHandler(cfg.BaseURL))
+
+	// --- Node management ---
+	mux.Handle("DELETE /api/v1/nodes/{name}", authMiddleware(http.HandlerFunc(nodeRevokeHandler(st))))
+
+	// --- Node discovery ---
 	mux.HandleFunc("GET /api/v1/nodes", nodesListHandler(st))
 
-	// KV API.
+	// --- KV API ---
 	mux.HandleFunc("PUT /api/v1/kv/{namespace}/{key}", kvSetHandler(st, cfg))
 	mux.HandleFunc("GET /api/v1/kv/{namespace}/{key}", kvGetHandler(st, cfg))
 	mux.HandleFunc("DELETE /api/v1/kv/{namespace}/{key}", kvDeleteHandler(st, cfg))
 	mux.HandleFunc("GET /api/v1/kv/{namespace}", kvListHandler(st, cfg))
 
-	// Health check.
+	// --- Health check ---
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
 	})
 
-	// Fall through to wgtunnel router for tunnel reverse-proxy.
+	// --- Root page: setup (github mode) or tunnel passthrough ---
 	tunnelRouter := api.Router()
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		tunnelRouter.ServeHTTP(w, r)
-	})
+	if cfg.AuthMode == "github" {
+		setupPage := oauth.SetupPageHandler(st, cfg.BaseURL)
+		mux.HandleFunc("GET /{$}", setupPage)
+		// Non-root paths fall through to wgtunnel router.
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			tunnelRouter.ServeHTTP(w, r)
+		})
+	} else {
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			tunnelRouter.ServeHTTP(w, r)
+		})
+	}
 
 	server := &http.Server{
 		Addr:    cfg.ListenAddr,
@@ -359,6 +415,271 @@ func deviceConfirmHandler(st store.Store) http.HandlerFunc {
 <style>body{font-family:system-ui;max-width:400px;margin:80px auto;text-align:center}</style>
 </head><body><h2>Device Authorized</h2><p>You can close this window.</p></body></html>`)
 		}
+	}
+}
+
+// --- Device Registration (auth-aware) ---
+
+type registerRequest struct {
+	PublicKey string `json:"public_key"`
+	NodeName  string `json:"node_name"`
+}
+
+func registerHandler(st store.Store, opts *tunneld.Options, cfg RelayConfig) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req registerRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+
+		if req.PublicKey == "" || req.NodeName == "" {
+			http.Error(w, "public_key and node_name required", http.StatusBadRequest)
+			return
+		}
+
+		// Check if key is revoked.
+		revoked, _ := st.RevokedKeyCheck(r.Context(), req.PublicKey)
+		if revoked {
+			http.Error(w, "this device key has been revoked", http.StatusForbidden)
+			return
+		}
+
+		auth := oauth.GetAuth(r.Context())
+		var githubID *int64
+		if auth != nil && auth.UserID != 0 {
+			githubID = &auth.UserID
+		}
+
+		pubKey, err := tunnelsdk.ParsePublicKey(req.PublicKey)
+		if err != nil {
+			http.Error(w, "invalid public key", http.StatusBadRequest)
+			return
+		}
+
+		tunnelURL, _ := PublicKeyToTunnelURL(pubKey, cfg.BaseURL)
+
+		node := store.NodeRecord{
+			Name:         req.NodeName,
+			PublicKey:    req.PublicKey,
+			TunnelURL:    tunnelURL,
+			GitHubID:     githubID,
+			AuthorizedAt: time.Now().UTC(),
+			LastSeenAt:   time.Now().UTC(),
+		}
+
+		if err := st.NodeRegister(r.Context(), node); err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":     "registered",
+			"tunnel_url": tunnelURL,
+		})
+	}
+}
+
+// --- Invite Handlers ---
+
+type inviteCreateRequest struct {
+	Uses int    `json:"uses"`
+	TTL  string `json:"ttl"`
+}
+
+func inviteCreateHandler(st store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req inviteCreateRequest
+		json.NewDecoder(r.Body).Decode(&req)
+
+		if req.Uses <= 0 {
+			req.Uses = 1
+		}
+
+		ttl := time.Hour
+		if req.TTL != "" {
+			parsed, err := time.ParseDuration(req.TTL)
+			if err != nil {
+				http.Error(w, "invalid ttl", http.StatusBadRequest)
+				return
+			}
+			ttl = parsed
+		}
+
+		auth := oauth.GetAuth(r.Context())
+		var createdBy *int64
+		if auth != nil && auth.UserID != 0 {
+			createdBy = &auth.UserID
+		}
+
+		now := time.Now().UTC()
+		invite := store.Invite{
+			Token:         oauth.GenerateInviteToken(),
+			CreatedBy:     createdBy,
+			UsesRemaining: req.Uses,
+			ExpiresAt:     now.Add(ttl),
+			CreatedAt:     now,
+		}
+
+		if err := st.InviteCreate(r.Context(), invite); err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(invite)
+	}
+}
+
+func inviteListHandler(st store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		invites, err := st.InviteList(r.Context())
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(invites)
+	}
+}
+
+func inviteDeleteHandler(st store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		token := r.PathValue("token")
+		if err := st.InviteDelete(r.Context(), token); err != nil {
+			http.Error(w, "invite not found", http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// --- Invite Redemption (public) ---
+
+type joinRequest struct {
+	PublicKey   string `json:"public_key"`
+	NodeName    string `json:"node_name"`
+	InviteToken string `json:"invite_token"`
+}
+
+func joinHandler(st store.Store, opts *tunneld.Options, cfg RelayConfig) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req joinRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+
+		if req.PublicKey == "" || req.NodeName == "" || req.InviteToken == "" {
+			http.Error(w, "public_key, node_name, and invite_token required", http.StatusBadRequest)
+			return
+		}
+
+		// Consume invite (validates and decrements).
+		if err := st.InviteConsume(r.Context(), req.InviteToken); err != nil {
+			http.Error(w, "invalid or expired invite", http.StatusForbidden)
+			return
+		}
+
+		// Check if key is revoked.
+		revoked, _ := st.RevokedKeyCheck(r.Context(), req.PublicKey)
+		if revoked {
+			http.Error(w, "this device key has been revoked", http.StatusForbidden)
+			return
+		}
+
+		// Look up who created the invite to associate the node with.
+		invite, _ := st.InviteGet(r.Context(), req.InviteToken)
+		var githubID *int64
+		if invite != nil && invite.CreatedBy != nil {
+			githubID = invite.CreatedBy
+		}
+
+		pubKey, err := tunnelsdk.ParsePublicKey(req.PublicKey)
+		if err != nil {
+			http.Error(w, "invalid public key", http.StatusBadRequest)
+			return
+		}
+
+		tunnelURL, _ := PublicKeyToTunnelURL(pubKey, cfg.BaseURL)
+
+		node := store.NodeRecord{
+			Name:         req.NodeName,
+			PublicKey:    req.PublicKey,
+			TunnelURL:    tunnelURL,
+			GitHubID:     githubID,
+			AuthorizedAt: time.Now().UTC(),
+			LastSeenAt:   time.Now().UTC(),
+		}
+
+		if err := st.NodeRegister(r.Context(), node); err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":     "registered",
+			"tunnel_url": tunnelURL,
+		})
+	}
+}
+
+func joinPageHandler(baseURL string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		invite := r.URL.Query().Get("invite")
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprintf(w, `<!DOCTYPE html>
+<html><head><title>Join CodeWire Relay</title>
+<style>body{font-family:system-ui;max-width:480px;margin:80px auto;text-align:center;color:#1a1a1a}
+h2{font-weight:600}
+.code{font-family:monospace;background:#f5f5f5;padding:8px 16px;border-radius:6px;display:inline-block;margin:12px 0;word-break:break-all}
+p{color:#525252;line-height:1.6}
+</style></head><body>
+<h2>Join CodeWire Relay</h2>
+<p>Use this invite code to register your device:</p>
+<div class="code">%s</div>
+<p>Run on your device:</p>
+<div class="code">cw setup %s --invite %s</div>
+</body></html>`, invite, baseURL, invite)
+	}
+}
+
+// --- Node Revocation ---
+
+func nodeRevokeHandler(st store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		name := r.PathValue("name")
+
+		node, err := st.NodeGet(r.Context(), name)
+		if err != nil || node == nil {
+			http.Error(w, "node not found", http.StatusNotFound)
+			return
+		}
+
+		// Add key to revoked list.
+		if err := st.RevokedKeyAdd(r.Context(), store.RevokedKey{
+			PublicKey: node.PublicKey,
+			RevokedAt: time.Now().UTC(),
+			Reason:    "revoked via API",
+		}); err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+
+		// Delete the node record.
+		if err := st.NodeDelete(r.Context(), name); err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"status": "revoked",
+			"node":   name,
+		})
 	}
 }
 
