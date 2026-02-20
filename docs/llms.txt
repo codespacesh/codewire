@@ -1,0 +1,26 @@
+# Codewire
+
+> Persistent process server for AI coding agents. Manages long-running PTY sessions
+> that survive disconnects. Use it to launch agents, detach, and reconnect later.
+> Sessions keep running even after your process exits — like tmux but built for
+> programmatic control.
+>
+> Also an MCP server: `claude mcp add --scope user codewire -- cw mcp-server`
+
+## Docs
+
+- [Quick start for LLMs](https://codewire.sh/quickstart.md): Install and first session
+  in under 2 minutes. What to use and when, detach chord, MCP setup.
+
+- [Full docs](https://codewire.sh/llms-full.txt): Everything in one file — install,
+  all CLI commands with flags and examples, all 18 MCP tools, multi-agent patterns
+  (supervisor, fan-out, request/reply), relay mode, common errors.
+
+- [MCP tool reference](https://codewire.sh/mcp.md): All 18 MCP tools with parameters,
+  types, defaults, and workflow examples.
+
+## Optional
+
+- [GitHub](https://github.com/codespacesh/codewire): Source, issues, releases,
+  Homebrew formula
+- [Homepage](https://codewire.sh): Human-facing docs and live demo

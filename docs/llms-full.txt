@@ -1,0 +1,726 @@
+# Codewire — Full Reference
+
+Codewire is a persistent process server for AI coding agents. Single binary (`cw`) manages
+PTY sessions that survive process exits — launch agents, detach, reconnect later.
+
+Source: https://github.com/codespacesh/codewire
+Homepage: https://codewire.sh
+
+---
+
+## Table of Contents
+
+1. Install
+2. Node lifecycle
+3. CLI commands (all flags and examples)
+4. MCP server setup
+5. MCP tool reference (18 tools)
+6. Multi-agent patterns
+7. Relay mode
+8. Common errors
+
+---
+
+## 1. Install
+
+```bash
+brew install codespacesh/tap/codewire
+```
+
+Or download from https://github.com/codespacesh/codewire/releases — binaries for
+linux/amd64, linux/arm64, darwin/amd64, darwin/arm64.
+
+Verify:
+```bash
+cw --version
+```
+
+---
+
+## 2. Node Lifecycle
+
+The **node** is the background server that manages sessions. Most CLI commands auto-start
+the node if it isn't running. The MCP server does NOT auto-start the node.
+
+```bash
+cw node          # start node in foreground (Ctrl+C to stop)
+cw node -d       # start node as background daemon
+cw stop          # stop the running node
+```
+
+**Socket location:** `~/.codewire/codewire.sock`
+
+The node persists sessions across terminal sessions. Killing your terminal does not kill
+your sessions. The node itself must be explicitly stopped.
+
+---
+
+## 3. CLI Commands
+
+### cw launch (alias: cw run)
+
+Start a new session. The `--` separator is **required** before the command.
+
+```bash
+cw launch -- <command> [args...]
+cw launch --name <name> -- <command>
+cw launch --name <name> --tag <tag> -- <command>
+```
+
+Flags:
+  `--name <name>`    Unique session name (alphanumeric + hyphens, 1-32 chars). Used to
+                     reference the session by name instead of ID.
+  `--tag <tag>`      Tag the session. Repeatable: `--tag a --tag b`. Used for group
+                     operations (wait, kill, subscribe).
+  `-d, --dir <dir>`  Working directory for the session. Defaults to current directory.
+
+Examples:
+```bash
+cw launch -- sleep 60
+cw launch --name build -- make test
+cw launch --name worker-1 --tag batch-42 -- ./worker.sh shard-1
+cw launch --name worker-2 --tag batch-42 -- ./worker.sh shard-2
+```
+
+**Note:** Omitting `--` causes flags in your command to be parsed by `cw`. If your
+command has flags (e.g. `bash -c`), you will see "unknown shorthand flag" errors.
+
+---
+
+### cw list
+
+List all sessions.
+
+```bash
+cw list
+```
+
+Output columns: ID, NAME, COMMAND (truncated), STATUS, AGE
+
+Status values: `running`, `completed (N)` (exit code N), `killed`
+
+No filtering flags on the CLI — to see only running sessions:
+```bash
+cw list | grep running
+```
+
+---
+
+### cw status
+
+Get detailed status for a single session.
+
+```bash
+cw status <id-or-name>
+cw status <id-or-name> --json
+```
+
+Output includes: command, working dir, status, created time, attached flag, PID,
+output size, last few lines of output.
+
+---
+
+### cw logs
+
+Read accumulated output from a session.
+
+```bash
+cw logs <id-or-name>
+cw logs <id-or-name> -t 50     # last 50 lines
+cw logs <id-or-name> -f        # follow (streaming, like tail -f)
+```
+
+Flags:
+  `-t, --tail <n>`   Show last N lines only
+  `-f, --follow`     Stream new output as it arrives
+
+Output is the raw PTY output — may contain terminal escape sequences. Use `--raw` if you
+need ANSI-stripped output (not available in all versions; check `cw logs --help`).
+
+---
+
+### cw watch
+
+Stream a session's output live, then exit when the session completes.
+
+```bash
+cw watch <id-or-name>
+```
+
+Unlike `logs -f`, `watch` exits automatically when the session ends. Use `watch` when you
+want to observe a session and know when it finishes. Use `logs -f` for continuous tailing.
+
+---
+
+### cw wait
+
+Block until session(s) complete.
+
+```bash
+cw wait <id-or-name>            # wait for one session
+cw wait --tag <tag>             # wait for all sessions with tag
+cw wait --tag <tag> --condition any   # wait until any one completes
+cw wait <id> --timeout 120      # timeout in seconds (default: no timeout)
+```
+
+Flags:
+  `--tag <tag>`              Wait for sessions matching tag. Repeatable.
+  `--condition all|any`      Default: `all`. Use `any` for first-to-finish.
+  `--timeout <seconds>`      Abort wait after N seconds.
+
+Returns session info when done. Exit code reflects session exit code (for single session).
+
+---
+
+### cw kill
+
+Terminate a session or group of sessions.
+
+```bash
+cw kill <id-or-name>
+cw kill --tag <tag>         # kill all sessions with tag
+cw kill --all               # kill all sessions
+```
+
+Sends SIGTERM. Session transitions to `killed` status.
+
+---
+
+### cw attach
+
+Attach an interactive TTY to a running session.
+
+```bash
+cw attach <id-or-name>
+```
+
+**Detach:** Press **Ctrl+B d** to detach without killing the session.
+**Warning:** Ctrl+C sends SIGINT to the session process — it will likely terminate.
+
+Use `cw send` to inject input without attaching.
+
+---
+
+### cw send
+
+Send input text to a session without attaching.
+
+```bash
+cw send <id-or-name> '<input text>'
+```
+
+Appends a newline by default (as if you pressed Enter). Useful for controlling
+interactive sessions programmatically.
+
+---
+
+### cw subscribe
+
+Subscribe to session lifecycle events.
+
+```bash
+cw subscribe
+cw subscribe --session <id>
+cw subscribe --tag <tag>
+cw subscribe --event session.status
+```
+
+Flags:
+  `--session <id>`       Filter by session ID
+  `--tag <tag>`          Filter by tag. Repeatable.
+  `--event <type>`       Filter by event type. Repeatable.
+
+Event types: `session.created`, `session.status`, `session.output_summary`
+
+Streams JSON events until Ctrl+C.
+
+---
+
+### cw msg
+
+Send a message to a session's inbox.
+
+```bash
+cw msg <target> '<body>'
+cw msg <target> '<body>' --from <sender-id-or-name>
+```
+
+Sessions read their inbox with `cw inbox`. Use for loose inter-session communication
+where you don't need a reply. For request/reply, use `cw request` / `cw reply`.
+
+---
+
+### cw inbox
+
+Read messages from a session's inbox.
+
+```bash
+cw inbox <id-or-name>
+cw inbox <id-or-name> -t 10     # last 10 messages
+```
+
+---
+
+### cw request
+
+Send a request to a session and block until it replies.
+
+```bash
+cw request <target> '<body>'
+cw request <target> '<body>' --timeout 60
+```
+
+The target session calls `cw reply <request-id> '<response>'` to unblock the caller.
+The request ID appears in `cw inbox` output.
+
+---
+
+### cw reply
+
+Reply to a pending request.
+
+```bash
+cw reply <request-id> '<response>'
+cw reply <request-id> '<response>' --from <session-id-or-name>
+```
+
+---
+
+### cw server / cw nodes / relay commands
+
+For fleet/relay mode — see "Relay mode" section below.
+
+---
+
+## 4. MCP Server Setup
+
+Register Codewire as an MCP server:
+
+```bash
+claude mcp add --scope user codewire -- cw mcp-server
+```
+
+This works with Claude Code. For other MCP clients, run `cw mcp-server` as a stdio
+subprocess.
+
+**The node must be running before MCP tools work:**
+```bash
+cw node -d
+```
+
+Unlike the CLI, the MCP server does NOT auto-start a node. Connection errors from MCP
+tools almost always mean the node isn't running.
+
+---
+
+## 5. MCP Tool Reference
+
+### Session Management
+
+#### codewire_list_sessions
+
+List all sessions.
+
+| Parameter | Type | Required | Default | Description |
+|---|---|---|---|---|
+| status_filter | string | no | "all" | Filter: "all", "running", or "completed" |
+
+Returns: array of sessions with id, name, status, command, tags, created_at.
+
+#### codewire_launch_session
+
+Launch a new session.
+
+| Parameter | Type | Required | Default | Description |
+|---|---|---|---|---|
+| command | string[] | **yes** | — | Command and arguments |
+| working_dir | string | no | current dir | Working directory |
+| name | string | no | — | Unique name (alphanumeric + hyphens, 1-32 chars) |
+| tags | string[] | no | — | Tags for grouping (e.g. ["worker", "batch-42"]) |
+
+Returns: session ID and confirmation.
+
+#### codewire_kill_session
+
+Kill a session or tagged group.
+
+| Parameter | Type | Required | Default | Description |
+|---|---|---|---|---|
+| session_id | integer | no | — | Session ID to kill |
+| tags | string[] | no | — | Kill all sessions with these tags |
+
+At least one of session_id or tags is required.
+
+#### codewire_get_session_status
+
+Get detailed status for one session.
+
+| Parameter | Type | Required | Default | Description |
+|---|---|---|---|---|
+| session_id | integer | **yes** | — | Session ID |
+
+Returns: command, working_dir, status, exit_code, created_at, pid, output_size.
+
+#### codewire_read_session_output
+
+Read output from a session (snapshot).
+
+| Parameter | Type | Required | Default | Description |
+|---|---|---|---|---|
+| session_id | integer | **yes** | — | Session ID |
+| tail | integer | no | — | Lines from end |
+| max_chars | integer | no | 50000 | Max characters to return |
+
+#### codewire_send_input
+
+Send input to a session without attaching.
+
+| Parameter | Type | Required | Default | Description |
+|---|---|---|---|---|
+| session_id | integer | **yes** | — | Session ID |
+| input | string | **yes** | — | Text to send |
+| auto_newline | boolean | no | true | Add newline after input |
+
+### Live Monitoring
+
+#### codewire_watch_session
+
+Stream live output from a session (time-bounded).
+
+| Parameter | Type | Required | Default | Description |
+|---|---|---|---|---|
+| session_id | integer | **yes** | — | Session ID |
+| include_history | boolean | no | true | Include recent history |
+| history_lines | integer | no | 50 | History lines to include |
+| max_duration_seconds | integer | no | 30 | Max watch duration |
+
+Returns buffered output collected during the watch period plus a completion status.
+
+#### codewire_subscribe
+
+Subscribe to session events (time-bounded).
+
+| Parameter | Type | Required | Default | Description |
+|---|---|---|---|---|
+| session_id | integer | no | — | Filter by session ID |
+| tags | string[] | no | — | Filter by tags |
+| event_types | string[] | no | — | Filter: "session.created", "session.status", etc. |
+| max_duration_seconds | integer | no | 30 | Max subscription duration |
+
+### Blocking / Sync
+
+#### codewire_wait_for
+
+Block until session(s) complete.
+
+| Parameter | Type | Required | Default | Description |
+|---|---|---|---|---|
+| session_id | integer | no | — | Wait for this session |
+| tags | string[] | no | — | Wait for sessions with these tags |
+| condition | string | no | "all" | "all" or "any" |
+| timeout_seconds | integer | no | 300 | Timeout in seconds |
+
+Returns enriched session info for each completed session. Use this instead of polling
+`codewire_get_session_status` in a loop.
+
+### Messaging
+
+#### codewire_msg
+
+Send a message to a session's inbox.
+
+| Parameter | Type | Required | Default | Description |
+|---|---|---|---|---|
+| to_session_id | integer | no | — | Recipient session ID |
+| to_name | string | no | — | Recipient session name |
+| from_session_id | integer | no | — | Sender session ID |
+| body | string | **yes** | — | Message body |
+
+#### codewire_read_messages
+
+Read messages from a session's inbox.
+
+| Parameter | Type | Required | Default | Description |
+|---|---|---|---|---|
+| session_id | integer | no | — | Session ID to read inbox of |
+| tail | integer | no | 20 | Messages to return |
+
+Pending requests appear at the top of the inbox.
+
+#### codewire_request
+
+Send a request and block until a reply arrives.
+
+| Parameter | Type | Required | Default | Description |
+|---|---|---|---|---|
+| to_session_id | integer | no | — | Recipient session ID |
+| to_name | string | no | — | Recipient session name |
+| from_session_id | integer | no | — | Sender session ID |
+| body | string | **yes** | — | Request body |
+| timeout_seconds | integer | no | 60 | Timeout |
+
+#### codewire_reply
+
+Reply to a pending request.
+
+| Parameter | Type | Required | Default | Description |
+|---|---|---|---|---|
+| request_id | string | **yes** | — | The request ID to reply to |
+| body | string | **yes** | — | Reply body |
+| from_session_id | integer | no | — | Sender session ID |
+
+### Fleet / Relay
+
+#### codewire_list_nodes
+
+List all nodes registered with the relay. Requires relay to be configured.
+
+No parameters.
+
+### Key-Value Store
+
+Requires relay connection. KV store is shared across all nodes in the fleet.
+
+#### codewire_kv_set
+
+| Parameter | Type | Required | Default | Description |
+|---|---|---|---|---|
+| key | string | **yes** | — | Key |
+| value | string | **yes** | — | Value |
+| namespace | string | no | "default" | Namespace |
+| ttl | string | no | — | Go duration, e.g. "60s", "5m" |
+
+#### codewire_kv_get
+
+| Parameter | Type | Required | Default | Description |
+|---|---|---|---|---|
+| key | string | **yes** | — | Key |
+| namespace | string | no | "default" | Namespace |
+
+#### codewire_kv_list
+
+| Parameter | Type | Required | Default | Description |
+|---|---|---|---|---|
+| prefix | string | no | — | Key prefix filter |
+| namespace | string | no | "default" | Namespace |
+
+#### codewire_kv_delete
+
+| Parameter | Type | Required | Default | Description |
+|---|---|---|---|---|
+| key | string | **yes** | — | Key |
+| namespace | string | no | "default" | Namespace |
+
+---
+
+## 6. Multi-Agent Patterns
+
+### Pattern 1: Launch, wait, read
+
+The basic loop. Launch a process, wait for it, read the output.
+
+```
+CLI:
+  cw launch --name build -- make test
+  cw wait build
+  cw logs build
+
+MCP:
+  codewire_launch_session(command=["make", "test"], name="build")
+  codewire_wait_for(session_id=<id>)
+  codewire_read_session_output(session_id=<id>)
+```
+
+Use this for any task where you need the output before proceeding.
+
+---
+
+### Pattern 2: Fan-out workers with tags
+
+Launch N parallel workers, wait for all, then cleanup.
+
+```
+CLI:
+  cw launch --tag batch-42 -- ./worker.sh shard-1
+  cw launch --tag batch-42 -- ./worker.sh shard-2
+  cw launch --tag batch-42 -- ./worker.sh shard-3
+  cw wait --tag batch-42
+  cw kill --tag batch-42     # cleanup stragglers
+
+MCP:
+  codewire_launch_session(command=["./worker.sh", "shard-1"], tags=["batch-42"])
+  codewire_launch_session(command=["./worker.sh", "shard-2"], tags=["batch-42"])
+  codewire_launch_session(command=["./worker.sh", "shard-3"], tags=["batch-42"])
+  codewire_wait_for(tags=["batch-42"], condition="all", timeout_seconds=600)
+  codewire_kill_session(tags=["batch-42"])
+```
+
+Use `condition="any"` to proceed as soon as the first worker finishes.
+
+---
+
+### Pattern 3: Supervisor + workers
+
+A supervisor session manages workers. Workers signal back via messages or KV.
+
+```
+1. Launch supervisor:
+   codewire_launch_session(command=["python", "supervisor.py"], name="supervisor")
+
+2. Supervisor launches workers internally (via cw CLI or MCP from within the session)
+
+3. Query supervisor progress:
+   codewire_read_messages(session_id=<supervisor-id>)
+
+4. Wait for supervisor to complete:
+   codewire_wait_for(session_id=<supervisor-id>)
+```
+
+---
+
+### Pattern 4: Request/reply between sessions
+
+Synchronous coordination without polling.
+
+```
+# From orchestrator (MCP or CLI):
+codewire_request(to_name="backend", body="status?", timeout_seconds=30)
+# → blocks until backend replies
+
+# From within the backend session (CLI):
+cw inbox backend                    # shows pending request with ID
+cw reply <request-id> 'all clear'  # unblocks orchestrator
+```
+
+This is more reliable than polling `codewire_read_session_output` waiting for a specific
+string to appear.
+
+---
+
+### Pattern 5: Subscribe to monitor a fleet
+
+Watch lifecycle events across all tagged sessions without polling.
+
+```
+codewire_subscribe(tags=["batch-42"], event_types=["session.status"], max_duration_seconds=120)
+# Returns events as sessions start, complete, or fail
+```
+
+---
+
+### Anti-patterns to avoid
+
+**Don't poll status:** Use `codewire_wait_for` instead of calling
+`codewire_get_session_status` in a loop.
+
+**Don't attach to read output:** Use `codewire_read_session_output` or `cw logs`.
+Attaching is for interactive use.
+
+**Don't use `cw watch` for completed sessions:** `watch` connects to the live stream.
+For completed sessions, use `cw logs` (the output is persisted server-side).
+
+---
+
+## 7. Relay Mode
+
+Relay mode enables remote access and fleet management across multiple nodes. Requires
+a relay server.
+
+### Connect a node to a relay
+
+```bash
+cw setup <relay-url>
+# Follow the device authorization flow in your browser
+```
+
+After setup, the node registers with the relay and joins the fleet.
+
+### Use a remote node
+
+```bash
+cw --server <node-name> list
+cw --server <node-name> launch -- make build
+```
+
+Or save a named connection:
+```bash
+cw server add mynode ws://mynode.example.com:8080
+cw --server mynode list
+```
+
+### Shared KV store
+
+The relay provides a KV store shared across all nodes:
+
+```bash
+cw kv set mykey myvalue
+cw kv get mykey
+cw kv list --prefix my
+cw kv delete mykey
+```
+
+Via MCP: use `codewire_kv_set/get/list/delete` (requires relay configured).
+
+---
+
+## 8. Common Errors
+
+### "connect: no such file or directory" / "connection refused"
+
+The node isn't running. Start it:
+```bash
+cw node -d
+```
+
+The MCP server does not auto-start the node. Always start the node before using MCP tools.
+
+### "session N not found"
+
+The session ID doesn't exist. Run `cw list` to see active sessions. Session IDs are not
+reused between node restarts.
+
+### "unknown shorthand flag: 'c' in -c"
+
+You forgot the `--` separator before your command:
+```bash
+# Wrong:
+cw launch -- bash -c 'echo hi'   # correct
+cw launch bash -c 'echo hi'      # wrong — -c parsed as cw flag
+```
+
+### "name already in use"
+
+Session names must be unique within a running node. Kill the old session or use a
+different name:
+```bash
+cw kill myapp
+cw launch --name myapp -- ./app
+```
+
+### Session shows "completed (-1)"
+
+Exit code -1 means the process was killed by a signal (e.g. SIGTERM from `cw kill`)
+rather than exiting normally. Not an error unless unexpected.
+
+### MCP tool returns empty output for a running session
+
+The session is still producing output. Use `codewire_wait_for` first, or
+`codewire_watch_session` to collect output in real-time.
+
+---
+
+## Configuration
+
+Config file: `~/.codewire/config.toml`
+
+Key settings:
+```toml
+[node]
+port = 8080         # WebSocket port (default: random)
+auth_token = ""     # Token for remote access
+
+[relay]
+url = ""            # Relay server URL (set by cw setup)
+```
+
+Most settings have environment variable overrides. See `cw node --help` for details.

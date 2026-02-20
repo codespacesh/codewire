@@ -63,7 +63,16 @@
       "Bash(git -C /Users/noel/src/sonica/codewire-demo diff)",
       "Bash(git -C /Users/noel/src/sonica/codewire-demo log --oneline -5)",
       "Bash(git -C /Users/noel/src/sonica/codewire add docs/Dockerfile docs/demo.html docs/index.html .claude/settings.local.json)",
-      "Bash(git -C /Users/noel/src/sonica/codewire commit -m \"docs: add GitHub icon to header, larger hero, fix Try it live button\")"
+      "Bash(git -C /Users/noel/src/sonica/codewire commit -m \"docs: add GitHub icon to header, larger hero, fix Try it live button\")",
+      "Bash(git -C /Users/noel/src/sonica/codewire tag v0.2.17)",
+      "Bash(git -C /Users/noel/src/sonica/codewire push)",
+      "Bash(git -C /Users/noel/src/sonica/codewire push origin v0.2.17)",
+      "Bash(git -C /Users/noel/src/sonica/codewire push origin main)",
+      "Bash(git -C /Users/noel/src/sonica/codewire status --short)",
+      "Bash(git -C /Users/noel/src/sonica/codewire stash)",
+      "Bash(git -C /Users/noel/src/sonica/codewire rebase origin/main)",
+      "Bash(git -C /Users/noel/src/sonica/codewire stash pop)",
+      "WebFetch(domain:llmstxt.org)"
     ]
   },
   "enableAllProjectMcpServers": true
