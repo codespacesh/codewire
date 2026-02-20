@@ -196,6 +196,10 @@ func (p *OIDCProvider) LoginHandler(st store.Store, baseURL string) http.Handler
 func (p *OIDCProvider) CallbackHandler(st store.Store, baseURL string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		state := r.URL.Query().Get("state")
+		if state == "" {
+			http.Error(w, "missing state parameter", http.StatusBadRequest)
+			return
+		}
 		if err := st.OAuthStateConsume(r.Context(), state); err != nil {
 			http.Error(w, "invalid or expired state parameter", http.StatusBadRequest)
 			return
@@ -270,6 +274,10 @@ func (p *OIDCProvider) OIDCSessionInfoHandler(st store.Store) http.HandlerFunc {
 			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 			return
 		}
+		if time.Now().After(sess.ExpiresAt) {
+			http.Error(w, `{"error":"session expired"}`, http.StatusUnauthorized)
+			return
+		}
 		user, err := st.OIDCUserGetBySub(r.Context(), sess.Sub)
 		if err != nil || user == nil {
 			http.Error(w, `{"error":"user not found"}`, http.StatusUnauthorized)
@@ -279,6 +287,7 @@ func (p *OIDCProvider) OIDCSessionInfoHandler(st store.Store) http.HandlerFunc {
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"sub":        user.Sub,
 			"username":   user.Username,
+			"avatar_url": user.AvatarURL,
 			"expires_at": sess.ExpiresAt,
 		})
 	}
