@@ -396,10 +396,10 @@ func deviceConfirmHandler(st store.Store) http.HandlerFunc {
 			pubKey, err := tunnelsdk.ParsePublicKey(dc.PublicKey)
 			if err == nil {
 				tunnelURL, _ := PublicKeyToTunnelURL(pubKey, "https://"+r.Host)
+				_ = tunnelURL
 				st.NodeRegister(r.Context(), store.NodeRecord{
 					Name:         dc.NodeName,
-					PublicKey:    dc.PublicKey,
-					TunnelURL:    tunnelURL,
+					Token:        dc.PublicKey,
 					AuthorizedAt: time.Now().UTC(),
 					LastSeenAt:   time.Now().UTC(),
 				})
@@ -461,8 +461,7 @@ func registerHandler(st store.Store, opts *tunneld.Options, cfg RelayConfig) htt
 
 		node := store.NodeRecord{
 			Name:         req.NodeName,
-			PublicKey:    req.PublicKey,
-			TunnelURL:    tunnelURL,
+			Token:        req.PublicKey,
 			GitHubID:     githubID,
 			AuthorizedAt: time.Now().UTC(),
 			LastSeenAt:   time.Now().UTC(),
@@ -607,8 +606,7 @@ func joinHandler(st store.Store, opts *tunneld.Options, cfg RelayConfig) http.Ha
 
 		node := store.NodeRecord{
 			Name:         req.NodeName,
-			PublicKey:    req.PublicKey,
-			TunnelURL:    tunnelURL,
+			Token:        req.PublicKey,
 			GitHubID:     githubID,
 			AuthorizedAt: time.Now().UTC(),
 			LastSeenAt:   time.Now().UTC(),
@@ -661,7 +659,7 @@ func nodeRevokeHandler(st store.Store) http.HandlerFunc {
 
 		// Add key to revoked list.
 		if err := st.RevokedKeyAdd(r.Context(), store.RevokedKey{
-			PublicKey: node.PublicKey,
+			PublicKey: node.Token,
 			RevokedAt: time.Now().UTC(),
 			Reason:    "revoked via API",
 		}); err != nil {
@@ -704,7 +702,7 @@ func nodesListHandler(st store.Store) http.HandlerFunc {
 			connected := time.Since(n.LastSeenAt) < 2*time.Minute
 			resp = append(resp, nodeResponse{
 				Name:      n.Name,
-				TunnelURL: n.TunnelURL,
+				TunnelURL: "",
 				Connected: connected,
 			})
 		}

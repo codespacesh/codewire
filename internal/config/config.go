@@ -14,6 +14,7 @@ type Config struct {
 	Node         NodeConfig `toml:"node"`
 	RelayURL     *string    `toml:"relay_url,omitempty"`
 	RelaySession *string    `toml:"relay_session,omitempty"` // OAuth session token
+	RelayToken   *string    `toml:"relay_token,omitempty"`   // node auth token for relay agent
 }
 
 // NodeConfig describes the local node identity and network settings.
@@ -113,6 +114,12 @@ func LoadConfig(dataDir string) (*Config, error) {
 	if cfg.RelayURL == nil {
 		if relayURL := os.Getenv("CODEWIRE_RELAY_URL"); relayURL != "" {
 			cfg.RelayURL = &relayURL
+		}
+	}
+	// Relay token from env var.
+	if cfg.RelayToken == nil {
+		if t := os.Getenv("CODEWIRE_RELAY_TOKEN"); t != "" {
+			cfg.RelayToken = &t
 		}
 	}
 
