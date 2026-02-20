@@ -1194,3 +1194,50 @@ func TestCorruptSessionsJsonRecovery(t *testing.T) {
 		t.Fatalf("expected Launched, got %s: %s", resp.Type, resp.Message)
 	}
 }
+
+func TestResolveSessionOrTag(t *testing.T) {
+	dir := tempDir(t, "resolve-tag")
+	sock := startTestNode(t, dir)
+	target := &client.Target{Local: dir}
+
+	// Launch two sessions with tag "batch-99"
+	r1 := requestResponse(t, sock, &protocol.Request{
+		Type: "Launch", Command: []string{"sleep", "5"}, WorkingDir: "/tmp",
+		Tags: []string{"batch-99"},
+	})
+	if r1.Type != "Launched" {
+		t.Fatalf("launch 1: %s", r1.Message)
+	}
+	r2 := requestResponse(t, sock, &protocol.Request{
+		Type: "Launch", Command: []string{"sleep", "5"}, WorkingDir: "/tmp",
+		Tags: []string{"batch-99"},
+	})
+	if r2.Type != "Launched" {
+		t.Fatalf("launch 2: %s", r2.Message)
+	}
+	time.Sleep(200 * time.Millisecond)
+
+	// "batch-99" is not a session name — should resolve to tag
+	id, tags, err := client.ResolveSessionOrTag(target, "batch-99")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if id != nil {
+		t.Fatalf("expected no session ID, got %d", *id)
+	}
+	if len(tags) != 1 || tags[0] != "batch-99" {
+		t.Fatalf("expected tags=[batch-99], got %v", tags)
+	}
+
+	// A numeric ID resolves as session
+	id2, tags2, err2 := client.ResolveSessionOrTag(target, fmt.Sprintf("%d", *r1.ID))
+	if err2 != nil {
+		t.Fatalf("unexpected error: %v", err2)
+	}
+	if id2 == nil || *id2 != *r1.ID {
+		t.Fatalf("expected session ID %d", *r1.ID)
+	}
+	if len(tags2) != 0 {
+		t.Fatalf("expected no tags, got %v", tags2)
+	}
+}

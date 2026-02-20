@@ -53,6 +53,39 @@ func ResolveSessionArg(target *Target, arg string) (uint32, error) {
 	return 0, fmt.Errorf("no session named %q", name)
 }
 
+// ResolveSessionOrTag tries to resolve arg as a session ID/name, then as a tag.
+// Returns (sessionID, tags, err). Exactly one of sessionID or tags will be non-nil/non-empty.
+func ResolveSessionOrTag(target *Target, arg string) (*uint32, []string, error) {
+	// Try as session ID or name first.
+	id, err := ResolveSessionArg(target, arg)
+	if err == nil {
+		return &id, nil, nil
+	}
+
+	// Only fall back to tag for "not found" errors, not connection errors.
+	lower := strings.ToLower(err.Error())
+	if !strings.Contains(lower, "not found") && !strings.Contains(lower, "no session named") {
+		return nil, nil, err
+	}
+
+	// Check if any sessions have this tag.
+	resp, listErr := requestResponse(target, &protocol.Request{Type: "ListSessions"})
+	if listErr != nil {
+		return nil, nil, err // return original error
+	}
+	if resp.Sessions != nil {
+		for _, s := range *resp.Sessions {
+			for _, t := range s.Tags {
+				if t == arg {
+					return nil, []string{arg}, nil
+				}
+			}
+		}
+	}
+
+	return nil, nil, fmt.Errorf("no session or tag named %q\n\nUse 'cw list' to see active sessions", arg)
+}
+
 // ---------------------------------------------------------------------------
 // List
 // ---------------------------------------------------------------------------
