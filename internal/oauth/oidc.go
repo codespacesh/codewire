@@ -76,6 +76,14 @@ func (p *OIDCProvider) DeviceEndpoint() string { return p.deviceEndpoint }
 // TokenEndpoint returns the discovered token endpoint URL.
 func (p *OIDCProvider) TokenEndpoint() string { return p.tokenEndpoint }
 
+// SetEndpointsForTest injects endpoints directly without calling Discover.
+// Intended only for use in tests.
+func (p *OIDCProvider) SetEndpointsForTest(deviceEndpoint, tokenEndpoint, userinfoEndpoint string) {
+	p.deviceEndpoint = deviceEndpoint
+	p.tokenEndpoint = tokenEndpoint
+	p.userinfoEndpoint = userinfoEndpoint
+}
+
 // CheckGroups returns nil if the user is allowed. If AllowedGroups is empty,
 // all authenticated users are allowed. Otherwise, the user must be in at least
 // one of the allowed groups.
