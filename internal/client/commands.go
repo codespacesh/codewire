@@ -90,21 +90,12 @@ func ResolveSessionOrTag(target *Target, arg string) (*uint32, []string, error) 
 // List
 // ---------------------------------------------------------------------------
 
-// List retrieves all sessions from the node and prints them as a table or JSON.
-func List(target *Target, jsonOutput bool) error {
-	resp, err := requestResponse(target, &protocol.Request{Type: "ListSessions"})
+// List retrieves sessions, optionally filtered by status.
+func List(target *Target, jsonOutput bool, statusFilter string) error {
+	sessions, err := ListFiltered(target, statusFilter)
 	if err != nil {
 		return err
 	}
-	if resp.Type == "Error" {
-		return fmt.Errorf("%s", formatError(resp.Message))
-	}
-	if resp.Sessions == nil {
-		return fmt.Errorf("unexpected response type: %s", resp.Type)
-	}
-
-	sessions := *resp.Sessions
-
 	if jsonOutput {
 		data, err := json.MarshalIndent(sessions, "", "  ")
 		if err != nil {
@@ -113,14 +104,41 @@ func List(target *Target, jsonOutput bool) error {
 		fmt.Println(string(data))
 		return nil
 	}
-
 	if len(sessions) == 0 {
-		fmt.Println("No active sessions")
+		fmt.Println("No sessions")
 		return nil
 	}
-
 	printSessionTable(sessions)
 	return nil
+}
+
+// ListFiltered returns sessions filtered by status: "all", "running", "completed", "killed".
+func ListFiltered(target *Target, statusFilter string) ([]protocol.SessionInfo, error) {
+	resp, err := requestResponse(target, &protocol.Request{Type: "ListSessions"})
+	if err != nil {
+		return nil, err
+	}
+	if resp.Type == "Error" {
+		return nil, fmt.Errorf("%s", formatError(resp.Message))
+	}
+	if resp.Sessions == nil {
+		return nil, fmt.Errorf("unexpected response type: %s", resp.Type)
+	}
+	sessions := *resp.Sessions
+	if statusFilter == "" || statusFilter == "all" {
+		return sessions, nil
+	}
+	var filtered []protocol.SessionInfo
+	for _, s := range sessions {
+		if statusFilter == "completed" {
+			if strings.HasPrefix(s.Status, "completed") {
+				filtered = append(filtered, s)
+			}
+		} else if strings.HasPrefix(s.Status, statusFilter) {
+			filtered = append(filtered, s)
+		}
+	}
+	return filtered, nil
 }
 
 // ---------------------------------------------------------------------------

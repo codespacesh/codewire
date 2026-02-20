@@ -1273,3 +1273,32 @@ func TestWaitByTagPositional(t *testing.T) {
 		t.Fatal("timeout waiting for tagged sessions")
 	}
 }
+
+func TestListStatusFilter(t *testing.T) {
+	dir := tempDir(t, "list-status")
+	sock := startTestNode(t, dir)
+	target := &client.Target{Local: dir}
+
+	// Launch one long-running and one short session
+	requestResponse(t, sock, &protocol.Request{
+		Type: "Launch", Command: []string{"sleep", "30"}, WorkingDir: "/tmp",
+	})
+	requestResponse(t, sock, &protocol.Request{
+		Type: "Launch", Command: []string{"bash", "-c", "exit 0"}, WorkingDir: "/tmp",
+	})
+	time.Sleep(300 * time.Millisecond)
+
+	// Filter running — should see only running sessions
+	sessions, err := client.ListFiltered(target, "running")
+	if err != nil {
+		t.Fatalf("ListFiltered: %v", err)
+	}
+	for _, s := range sessions {
+		if s.Status != "running" {
+			t.Fatalf("expected only running sessions, got %s", s.Status)
+		}
+	}
+	if len(sessions) < 1 {
+		t.Fatal("expected at least 1 running session")
+	}
+}
