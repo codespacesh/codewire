@@ -153,8 +153,7 @@ func TestNodeCRUD(t *testing.T) {
 
 	node := NodeRecord{
 		Name:         "dev-1",
-		PublicKey:    "abc123",
-		TunnelURL:    "https://abc123.relay.example.com",
+		Token:        "abc123token",
 		AuthorizedAt: now,
 		LastSeenAt:   now,
 	}
@@ -169,7 +168,7 @@ func TestNodeCRUD(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got == nil || got.Name != "dev-1" || got.PublicKey != "abc123" {
+	if got == nil || got.Name != "dev-1" || got.Token != "abc123token" {
 		t.Fatalf("unexpected node: %+v", got)
 	}
 
@@ -192,14 +191,14 @@ func TestNodeCRUD(t *testing.T) {
 		t.Fatal("last_seen_at not updated")
 	}
 
-	// Re-register (upsert).
-	node.TunnelURL = "https://updated.relay.example.com"
+	// Re-register (upsert) with updated token.
+	node.Token = "updatedtoken"
 	if err := s.NodeRegister(ctx, node); err != nil {
 		t.Fatal(err)
 	}
 	got3, _ := s.NodeGet(ctx, "dev-1")
-	if got3.TunnelURL != "https://updated.relay.example.com" {
-		t.Fatalf("upsert failed: %s", got3.TunnelURL)
+	if got3.Token != "updatedtoken" {
+		t.Fatalf("upsert failed: %s", got3.Token)
 	}
 
 	// Delete.
@@ -221,6 +220,37 @@ func TestNodeCRUD(t *testing.T) {
 	}
 	if got5 != nil {
 		t.Fatal("expected nil for nonexistent node")
+	}
+}
+
+func TestNodeToken(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	err := s.NodeRegister(ctx, NodeRecord{
+		Name:         "mynode",
+		Token:        "secrettoken",
+		AuthorizedAt: time.Now(),
+		LastSeenAt:   time.Now(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.NodeGetByToken(ctx, "secrettoken")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || got.Name != "mynode" {
+		t.Fatalf("expected mynode, got %+v", got)
+	}
+
+	got2, err := s.NodeGetByToken(ctx, "wrongtoken")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got2 != nil {
+		t.Fatalf("expected nil for wrong token, got %+v", got2)
 	}
 }
 

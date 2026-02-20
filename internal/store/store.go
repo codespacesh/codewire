@@ -18,8 +18,7 @@ type KVEntry struct {
 // NodeRecord is a registered relay node.
 type NodeRecord struct {
 	Name         string    `json:"name"`
-	PublicKey    string    `json:"public_key"`
-	TunnelURL    string    `json:"tunnel_url"`
+	Token        string    `json:"token"`          // random auth token (replaces WireGuard public key)
 	GitHubID     *int64    `json:"github_id,omitempty"`
 	AuthorizedAt time.Time `json:"authorized_at"`
 	LastSeenAt   time.Time `json:"last_seen_at"`
@@ -98,6 +97,7 @@ type Store interface {
 	NodeRegister(ctx context.Context, node NodeRecord) error
 	NodeList(ctx context.Context) ([]NodeRecord, error)
 	NodeGet(ctx context.Context, name string) (*NodeRecord, error)
+	NodeGetByToken(ctx context.Context, token string) (*NodeRecord, error)
 	NodeDelete(ctx context.Context, name string) error
 	NodeUpdateLastSeen(ctx context.Context, name string) error
 

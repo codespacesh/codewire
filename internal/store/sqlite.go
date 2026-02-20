@@ -52,8 +52,7 @@ func (s *SQLiteStore) migrate() error {
 	migrations := []string{
 		`CREATE TABLE IF NOT EXISTS nodes (
 			name TEXT PRIMARY KEY,
-			public_key TEXT NOT NULL UNIQUE,
-			tunnel_url TEXT NOT NULL,
+			token TEXT NOT NULL UNIQUE,
 			authorized_at DATETIME NOT NULL,
 			last_seen_at DATETIME NOT NULL
 		)`,
@@ -121,9 +120,13 @@ func (s *SQLiteStore) migrate() error {
 		}
 	}
 
-	// Add github_id column to nodes if it doesn't exist.
-	// ALTER TABLE ADD COLUMN errors if the column already exists; we ignore that.
+	// Add columns that may not exist in older databases.
 	s.addColumnIfNotExists("nodes", "github_id", "INTEGER REFERENCES users(github_id)")
+	// token column replaces public_key/tunnel_url in the new relay architecture.
+	s.addColumnIfNotExists("nodes", "token", "TEXT NOT NULL DEFAULT ''")
+
+	// Ensure unique index on token for NodeGetByToken.
+	s.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_nodes_token ON nodes(token) WHERE token != ''`)
 
 	return nil
 }
@@ -232,14 +235,13 @@ func (s *SQLiteStore) NodeRegister(_ context.Context, node NodeRecord) error {
 	defer s.mu.Unlock()
 
 	_, err := s.db.Exec(
-		`INSERT INTO nodes (name, public_key, tunnel_url, github_id, authorized_at, last_seen_at)
-		 VALUES (?, ?, ?, ?, ?, ?)
+		`INSERT INTO nodes (name, token, github_id, authorized_at, last_seen_at)
+		 VALUES (?, ?, ?, ?, ?)
 		 ON CONFLICT (name) DO UPDATE SET
-		   public_key = excluded.public_key,
-		   tunnel_url = excluded.tunnel_url,
+		   token = excluded.token,
 		   github_id = excluded.github_id,
 		   last_seen_at = excluded.last_seen_at`,
-		node.Name, node.PublicKey, node.TunnelURL, node.GitHubID, node.AuthorizedAt, node.LastSeenAt,
+		node.Name, node.Token, node.GitHubID, node.AuthorizedAt, node.LastSeenAt,
 	)
 	return err
 }
@@ -248,7 +250,7 @@ func (s *SQLiteStore) NodeList(_ context.Context) ([]NodeRecord, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	rows, err := s.db.Query("SELECT name, public_key, tunnel_url, github_id, authorized_at, last_seen_at FROM nodes ORDER BY name")
+	rows, err := s.db.Query("SELECT name, token, github_id, authorized_at, last_seen_at FROM nodes ORDER BY name")
 	if err != nil {
 		return nil, err
 	}
@@ -257,7 +259,7 @@ func (s *SQLiteStore) NodeList(_ context.Context) ([]NodeRecord, error) {
 	var nodes []NodeRecord
 	for rows.Next() {
 		var n NodeRecord
-		if err := rows.Scan(&n.Name, &n.PublicKey, &n.TunnelURL, &n.GitHubID, &n.AuthorizedAt, &n.LastSeenAt); err != nil {
+		if err := rows.Scan(&n.Name, &n.Token, &n.GitHubID, &n.AuthorizedAt, &n.LastSeenAt); err != nil {
 			return nil, err
 		}
 		nodes = append(nodes, n)
@@ -271,9 +273,27 @@ func (s *SQLiteStore) NodeGet(_ context.Context, name string) (*NodeRecord, erro
 
 	var n NodeRecord
 	err := s.db.QueryRow(
-		"SELECT name, public_key, tunnel_url, github_id, authorized_at, last_seen_at FROM nodes WHERE name = ?",
+		"SELECT name, token, github_id, authorized_at, last_seen_at FROM nodes WHERE name = ?",
 		name,
-	).Scan(&n.Name, &n.PublicKey, &n.TunnelURL, &n.GitHubID, &n.AuthorizedAt, &n.LastSeenAt)
+	).Scan(&n.Name, &n.Token, &n.GitHubID, &n.AuthorizedAt, &n.LastSeenAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &n, nil
+}
+
+func (s *SQLiteStore) NodeGetByToken(_ context.Context, token string) (*NodeRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var n NodeRecord
+	err := s.db.QueryRow(
+		"SELECT name, token, github_id, authorized_at, last_seen_at FROM nodes WHERE token = ?",
+		token,
+	).Scan(&n.Name, &n.Token, &n.GitHubID, &n.AuthorizedAt, &n.LastSeenAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
