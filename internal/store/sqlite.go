@@ -783,11 +783,18 @@ func (s *SQLiteStore) OIDCDeviceFlowGet(_ context.Context, pollToken string) (*O
 func (s *SQLiteStore) OIDCDeviceFlowComplete(_ context.Context, pollToken, nodeToken string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, err := s.db.Exec(
-		"UPDATE oidc_device_flows SET node_token = ? WHERE poll_token = ?",
-		nodeToken, pollToken,
+	res, err := s.db.Exec(
+		"UPDATE oidc_device_flows SET node_token = ? WHERE poll_token = ? AND expires_at > ?",
+		nodeToken, pollToken, time.Now().UTC(),
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("oidc device flow not found or expired")
+	}
+	return nil
 }
 
 // Close shuts down the cleanup goroutine and closes the database.

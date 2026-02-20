@@ -467,6 +467,11 @@ func TestOIDCDeviceFlow(t *testing.T) {
 	if got2.NodeToken != "node_tok_123" {
 		t.Errorf("node_token = %q, want %q", got2.NodeToken, "node_tok_123")
 	}
+
+	// Complete with a bogus poll token must return an error.
+	if err := s.OIDCDeviceFlowComplete(ctx, "bogus_poll_token", "some_tok"); err == nil {
+		t.Fatal("expected error when completing with a nonexistent poll token")
+	}
 }
 
 func TestOIDCSessionExpiry(t *testing.T) {
