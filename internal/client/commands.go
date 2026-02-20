@@ -1704,6 +1704,16 @@ func Gateway(target *Target, name, execCmd, notifyMethod string) error {
 		return fmt.Errorf("subscribing: %w", err)
 	}
 
+	// Read and validate SubscribeAck before entering the event loop.
+	ackFrame, err := reader.ReadFrame()
+	if err != nil || ackFrame == nil {
+		return fmt.Errorf("waiting for SubscribeAck: %w", err)
+	}
+	var ack protocol.Response
+	if err := json.Unmarshal(ackFrame.Payload, &ack); err != nil || ack.Type != "SubscribeAck" {
+		return fmt.Errorf("expected SubscribeAck, got %q", ack.Type)
+	}
+
 	// 4. Event loop
 	frameCh := make(chan *protocol.Frame, 16)
 	readErr := make(chan error, 1)
@@ -1754,13 +1764,13 @@ func Gateway(target *Target, name, execCmd, notifyMethod string) error {
 			if err := json.Unmarshal(resp.Event.Data, &reqData); err != nil {
 				continue
 			}
-			go gatewayHandleRequest(target, execCmd, notifyMethod, reqData.RequestID, reqData.Body, reqData.FromName)
+			go gatewayHandleRequest(ctx, target, execCmd, notifyMethod, reqData.RequestID, reqData.Body, reqData.FromName)
 		}
 	}
 }
 
-func gatewayHandleRequest(target *Target, execCmd, notifyMethod, requestID, body, fromName string) {
-	reply := gatewayEvaluate(execCmd, body, fromName)
+func gatewayHandleRequest(ctx context.Context, target *Target, execCmd, notifyMethod, requestID, body, fromName string) {
+	reply := gatewayEvaluate(ctx, execCmd, body, fromName)
 	upperReply := strings.ToUpper(reply)
 
 	if strings.HasPrefix(upperReply, "ESCALATE") && notifyMethod != "" {
@@ -1778,11 +1788,11 @@ func gatewayHandleRequest(target *Target, execCmd, notifyMethod, requestID, body
 	}
 }
 
-func gatewayEvaluate(execCmd, body, fromName string) string {
+func gatewayEvaluate(ctx context.Context, execCmd, body, fromName string) string {
 	if execCmd == "" {
 		return "APPROVED"
 	}
-	cmd := exec.Command("sh", "-c", execCmd)
+	cmd := exec.CommandContext(ctx, "sh", "-c", execCmd)
 	cmd.Stdin = strings.NewReader(body)
 	cmd.Env = append(os.Environ(),
 		"CW_REQUEST_BODY="+body,
