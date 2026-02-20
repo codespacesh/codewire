@@ -361,6 +361,32 @@ func TestOIDCUserUpsertAndGet(t *testing.T) {
 	if got.Username != "noel" {
 		t.Errorf("username = %q, want %q", got.Username, "noel")
 	}
+
+	// Test the update path: upsert with the same sub but different username and last_login_at.
+	updatedLoginAt := user.LastLoginAt.Add(time.Hour)
+	updated := OIDCUser{
+		Sub:         user.Sub,
+		Username:    "noel-updated",
+		AvatarURL:   user.AvatarURL,
+		CreatedAt:   user.CreatedAt,
+		LastLoginAt: updatedLoginAt,
+	}
+	if err := s.OIDCUserUpsert(ctx, updated); err != nil {
+		t.Fatalf("OIDCUserUpsert (update): %v", err)
+	}
+	got2, err := s.OIDCUserGetBySub(ctx, user.Sub)
+	if err != nil {
+		t.Fatalf("OIDCUserGetBySub after update: %v", err)
+	}
+	if got2 == nil {
+		t.Fatal("expected user after update, got nil")
+	}
+	if got2.Username != "noel-updated" {
+		t.Errorf("updated username = %q, want %q", got2.Username, "noel-updated")
+	}
+	if !got2.LastLoginAt.Equal(updatedLoginAt) {
+		t.Errorf("updated last_login_at = %v, want %v", got2.LastLoginAt, updatedLoginAt)
+	}
 }
 
 func TestOIDCSessionCreateGet(t *testing.T) {
@@ -368,10 +394,12 @@ func TestOIDCSessionCreateGet(t *testing.T) {
 	ctx := context.Background()
 
 	// Must upsert user first (FK constraint).
-	s.OIDCUserUpsert(ctx, OIDCUser{
+	if err := s.OIDCUserUpsert(ctx, OIDCUser{
 		Sub: "sub123", Username: "alice",
 		CreatedAt: time.Now().UTC(), LastLoginAt: time.Now().UTC(),
-	})
+	}); err != nil {
+		t.Fatalf("OIDCUserUpsert (setup): %v", err)
+	}
 
 	sess := OIDCSession{
 		Token:     "sess_abc123",
@@ -438,5 +466,59 @@ func TestOIDCDeviceFlow(t *testing.T) {
 	}
 	if got2.NodeToken != "node_tok_123" {
 		t.Errorf("node_token = %q, want %q", got2.NodeToken, "node_tok_123")
+	}
+}
+
+func TestOIDCSessionExpiry(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	// Must upsert user first (FK constraint).
+	if err := s.OIDCUserUpsert(ctx, OIDCUser{
+		Sub: "sub_expire", Username: "expireuser",
+		CreatedAt: time.Now().UTC(), LastLoginAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("OIDCUserUpsert (setup): %v", err)
+	}
+
+	sess := OIDCSession{
+		Token:     "sess_expired",
+		Sub:       "sub_expire",
+		CreatedAt: time.Now().UTC(),
+		ExpiresAt: time.Now().UTC().Add(-time.Second), // already expired
+	}
+	if err := s.OIDCSessionCreate(ctx, sess); err != nil {
+		t.Fatalf("OIDCSessionCreate: %v", err)
+	}
+
+	got, err := s.OIDCSessionGet(ctx, "sess_expired")
+	if err != nil {
+		t.Fatalf("OIDCSessionGet: %v", err)
+	}
+	if got != nil {
+		t.Error("expected nil for expired session, got a result")
+	}
+}
+
+func TestOIDCDeviceFlowExpiry(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	flow := OIDCDeviceFlow{
+		PollToken:  "poll_expired",
+		DeviceCode: "dex_expired_code",
+		NodeName:   "some-node",
+		ExpiresAt:  time.Now().UTC().Add(-time.Second), // already expired
+	}
+	if err := s.OIDCDeviceFlowCreate(ctx, flow); err != nil {
+		t.Fatalf("OIDCDeviceFlowCreate: %v", err)
+	}
+
+	got, err := s.OIDCDeviceFlowGet(ctx, "poll_expired")
+	if err != nil {
+		t.Fatalf("OIDCDeviceFlowGet: %v", err)
+	}
+	if got != nil {
+		t.Error("expected nil for expired device flow, got a result")
 	}
 }

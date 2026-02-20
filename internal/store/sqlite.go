@@ -112,6 +112,26 @@ func (s *SQLiteStore) migrate() error {
 			revoked_at DATETIME NOT NULL,
 			reason TEXT NOT NULL DEFAULT ''
 		)`,
+		`CREATE TABLE IF NOT EXISTS oidc_users (
+			sub          TEXT PRIMARY KEY,
+			username     TEXT NOT NULL,
+			avatar_url   TEXT NOT NULL DEFAULT '',
+			created_at   DATETIME NOT NULL,
+			last_login_at DATETIME NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS oidc_sessions (
+			token      TEXT PRIMARY KEY,
+			sub        TEXT NOT NULL REFERENCES oidc_users(sub) ON DELETE CASCADE,
+			created_at DATETIME NOT NULL,
+			expires_at DATETIME NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS oidc_device_flows (
+			poll_token  TEXT PRIMARY KEY,
+			device_code TEXT NOT NULL UNIQUE,
+			node_name   TEXT NOT NULL DEFAULT '',
+			node_token  TEXT NOT NULL DEFAULT '',
+			expires_at  DATETIME NOT NULL
+		)`,
 	}
 
 	for _, m := range migrations {
@@ -157,6 +177,8 @@ func (s *SQLiteStore) cleanupLoop() {
 			s.db.Exec("DELETE FROM sessions WHERE expires_at < ?", now)
 			s.db.Exec("DELETE FROM oauth_state WHERE expires_at < ?", now)
 			s.db.Exec("DELETE FROM invites WHERE expires_at < ?", now)
+			s.db.Exec("DELETE FROM oidc_sessions WHERE expires_at < ?", now)
+			s.db.Exec("DELETE FROM oidc_device_flows WHERE expires_at < ?", now)
 			s.mu.Unlock()
 		}
 	}
@@ -651,6 +673,121 @@ func (s *SQLiteStore) RevokedKeyCheck(_ context.Context, publicKey string) (bool
 		return false, err
 	}
 	return count > 0, nil
+}
+
+// --- OIDC Users ---
+
+func (s *SQLiteStore) OIDCUserUpsert(_ context.Context, user OIDCUser) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(
+		`INSERT INTO oidc_users (sub, username, avatar_url, created_at, last_login_at)
+		 VALUES (?, ?, ?, ?, ?)
+		 ON CONFLICT (sub) DO UPDATE SET
+		   username = excluded.username,
+		   avatar_url = excluded.avatar_url,
+		   last_login_at = excluded.last_login_at`,
+		user.Sub, user.Username, user.AvatarURL, user.CreatedAt, user.LastLoginAt,
+	)
+	return err
+}
+
+func (s *SQLiteStore) OIDCUserGetBySub(_ context.Context, sub string) (*OIDCUser, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var u OIDCUser
+	err := s.db.QueryRow(
+		"SELECT sub, username, avatar_url, created_at, last_login_at FROM oidc_users WHERE sub = ?",
+		sub,
+	).Scan(&u.Sub, &u.Username, &u.AvatarURL, &u.CreatedAt, &u.LastLoginAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
+// --- OIDC Sessions ---
+
+func (s *SQLiteStore) OIDCSessionCreate(_ context.Context, sess OIDCSession) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(
+		"INSERT INTO oidc_sessions (token, sub, created_at, expires_at) VALUES (?, ?, ?, ?)",
+		sess.Token, sess.Sub, sess.CreatedAt, sess.ExpiresAt,
+	)
+	return err
+}
+
+func (s *SQLiteStore) OIDCSessionGet(_ context.Context, token string) (*OIDCSession, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var sess OIDCSession
+	err := s.db.QueryRow(
+		"SELECT token, sub, created_at, expires_at FROM oidc_sessions WHERE token = ? AND expires_at > ?",
+		token, time.Now().UTC(),
+	).Scan(&sess.Token, &sess.Sub, &sess.CreatedAt, &sess.ExpiresAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &sess, nil
+}
+
+func (s *SQLiteStore) OIDCSessionDelete(_ context.Context, token string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec("DELETE FROM oidc_sessions WHERE token = ?", token)
+	return err
+}
+
+// --- OIDC Device Flows ---
+
+func (s *SQLiteStore) OIDCDeviceFlowCreate(_ context.Context, flow OIDCDeviceFlow) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(
+		"INSERT INTO oidc_device_flows (poll_token, device_code, node_name, node_token, expires_at) VALUES (?, ?, ?, ?, ?)",
+		flow.PollToken, flow.DeviceCode, flow.NodeName, flow.NodeToken, flow.ExpiresAt,
+	)
+	return err
+}
+
+func (s *SQLiteStore) OIDCDeviceFlowGet(_ context.Context, pollToken string) (*OIDCDeviceFlow, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var flow OIDCDeviceFlow
+	err := s.db.QueryRow(
+		"SELECT poll_token, device_code, node_name, node_token, expires_at FROM oidc_device_flows WHERE poll_token = ? AND expires_at > ?",
+		pollToken, time.Now().UTC(),
+	).Scan(&flow.PollToken, &flow.DeviceCode, &flow.NodeName, &flow.NodeToken, &flow.ExpiresAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &flow, nil
+}
+
+func (s *SQLiteStore) OIDCDeviceFlowComplete(_ context.Context, pollToken, nodeToken string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(
+		"UPDATE oidc_device_flows SET node_token = ? WHERE poll_token = ?",
+		nodeToken, pollToken,
+	)
+	return err
 }
 
 // Close shuts down the cleanup goroutine and closes the database.
