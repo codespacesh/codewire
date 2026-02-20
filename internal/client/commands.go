@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -1661,8 +1662,8 @@ func Gateway(target *Target, name, execCmd, notifyMethod string) error {
 	if err != nil {
 		return fmt.Errorf("launching gateway session: %w", err)
 	}
-	if resp.Type == "Error" {
-		return fmt.Errorf("%s", resp.Message)
+	if resp.Type != "Launched" || resp.ID == nil {
+		return fmt.Errorf("launching gateway session: unexpected response %q", resp.Type)
 	}
 	stubID := *resp.ID
 	fmt.Fprintf(os.Stderr, "[cw gateway] listening as %q (session %d)\n", name, stubID)
@@ -1787,8 +1788,13 @@ func gatewayEvaluate(execCmd, body, fromName string) string {
 		"CW_REQUEST_BODY="+body,
 		"CW_REQUEST_FROM="+fromName,
 	)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
+		if stderr.Len() > 0 {
+			fmt.Fprintf(os.Stderr, "[cw gateway] eval stderr: %s\n", stderr.String())
+		}
 		return fmt.Sprintf("DENIED: exec error: %v", err)
 	}
 	reply := strings.TrimSpace(string(out))

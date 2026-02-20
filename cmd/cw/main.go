@@ -1390,7 +1390,7 @@ Combined (LLM first, macOS notification on ESCALATE):
 		},
 	}
 	cmd.Flags().StringVar(&name, "name", "gateway", "Session name to register as")
-	cmd.Flags().StringVar(&execCmd, "exec", "", "Shell command to evaluate requests (body on stdin)")
+	cmd.Flags().StringVar(&execCmd, "exec", "", "Shell command to evaluate requests (body on stdin); default auto-approves all")
 	cmd.Flags().StringVar(&notify, "notify", "", "Notification method: macos or ntfy:<url>")
 	return cmd
 }
