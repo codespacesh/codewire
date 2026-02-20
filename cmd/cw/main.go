@@ -173,7 +173,10 @@ func runCmd() *cobra.Command {
 
 			dash := cmd.ArgsLenAtDash()
 			if dash == -1 {
-				return fmt.Errorf("command required after --")
+				if len(args) > 0 {
+					return fmt.Errorf("missing '--' before command\n\nDid you mean: cw run -- %s\n\nUsage: cw run [name] -- <command> [args...]", strings.Join(args, " "))
+				}
+				return fmt.Errorf("command required\n\nUsage: cw run [name] -- <command> [args...]")
 			}
 
 			var command []string
@@ -233,6 +236,7 @@ func runCmd() *cobra.Command {
 
 func listCmd() *cobra.Command {
 	var jsonOutput bool
+	var statusFilter string
 
 	cmd := &cobra.Command{
 		Use:   "list",
@@ -249,11 +253,12 @@ func listCmd() *cobra.Command {
 				}
 			}
 
-			return client.List(target, jsonOutput)
+			return client.List(target, jsonOutput, statusFilter)
 		},
 	}
 
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
+	cmd.Flags().StringVar(&statusFilter, "status", "all", "Filter by status: all, running, completed, killed")
 
 	return cmd
 }
@@ -268,6 +273,12 @@ func attachCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "attach [session]",
 		Short: "Attach to a session's PTY (by ID or name)",
+		Long: `Attach to a running session's PTY for interactive use.
+
+Detach without killing: press Ctrl+B d
+The session continues running after you detach.
+
+Warning: Ctrl+C sends SIGINT to the session process — use Ctrl+B d to detach safely.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target, err := resolveTarget()
 			if err != nil {
@@ -303,14 +314,11 @@ func attachCmd() *cobra.Command {
 // ---------------------------------------------------------------------------
 
 func killCmd() *cobra.Command {
-	var (
-		all  bool
-		tags []string
-	)
+	var all bool
 
 	cmd := &cobra.Command{
 		Use:   "kill [session]",
-		Short: "Kill a session (by ID or name), all sessions, or sessions by tag",
+		Short: "Kill a session (by ID, name, or tag), or all sessions",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target, err := resolveTarget()
 			if err != nil {
@@ -327,25 +335,22 @@ func killCmd() *cobra.Command {
 				return client.KillAll(target)
 			}
 
-			if len(tags) > 0 {
-				return client.KillByTags(target, tags)
-			}
-
 			if len(args) == 0 {
-				return fmt.Errorf("session id or name required (or use --all / --tag)")
+				return fmt.Errorf("session id, name, or tag required (or use --all)")
 			}
 
-			resolved, err := client.ResolveSessionArg(target, args[0])
+			id, tagList, err := client.ResolveSessionOrTag(target, args[0])
 			if err != nil {
 				return err
 			}
-
-			return client.Kill(target, resolved)
+			if len(tagList) > 0 {
+				return client.KillByTags(target, tagList)
+			}
+			return client.Kill(target, *id)
 		},
 	}
 
 	cmd.Flags().BoolVar(&all, "all", false, "Kill all sessions")
-	cmd.Flags().StringSliceVar(&tags, "tag", nil, "Kill sessions matching tag (can be repeated)")
 
 	return cmd
 }
@@ -460,13 +465,12 @@ func watchCmd() *cobra.Command {
 		tail      int
 		noHistory bool
 		timeout   uint64
-		tags      []string
 	)
 
 	cmd := &cobra.Command{
-		Use:   "watch [session]",
-		Short: "Watch session output in real-time (by ID, name, or --tag for multi-session)",
-		Args:  cobra.MaximumNArgs(1),
+		Use:   "watch <session>",
+		Short: "Watch session output in real-time (by ID, name, or tag for multi-session)",
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target, err := resolveTarget()
 			if err != nil {
@@ -479,42 +483,34 @@ func watchCmd() *cobra.Command {
 				}
 			}
 
-			// Multi-session watch by tag.
-			if len(tags) > 0 {
+			id, tagList, err := client.ResolveSessionOrTag(target, args[0])
+			if err != nil {
+				return err
+			}
+
+			if len(tagList) > 0 {
 				var timeoutPtr *uint64
 				if cmd.Flags().Changed("timeout") {
 					timeoutPtr = &timeout
 				}
-				return client.WatchMultiByTag(target, tags[0], os.Stdout, timeoutPtr)
-			}
-
-			if len(args) == 0 {
-				return fmt.Errorf("session id or name required (or use --tag)")
-			}
-
-			resolved, err := client.ResolveSessionArg(target, args[0])
-			if err != nil {
-				return err
+				return client.WatchMultiByTag(target, tagList[0], os.Stdout, timeoutPtr)
 			}
 
 			var tailPtr *int
 			if cmd.Flags().Changed("tail") {
 				tailPtr = &tail
 			}
-
 			var timeoutPtr *uint64
 			if cmd.Flags().Changed("timeout") {
 				timeoutPtr = &timeout
 			}
-
-			return client.WatchSession(target, resolved, tailPtr, noHistory, timeoutPtr)
+			return client.WatchSession(target, *id, tailPtr, noHistory, timeoutPtr)
 		},
 	}
 
 	cmd.Flags().IntVarP(&tail, "tail", "t", 0, "Number of lines to show from end")
 	cmd.Flags().BoolVar(&noHistory, "no-history", false, "Do not replay session history")
 	cmd.Flags().Uint64Var(&timeout, "timeout", 0, "Timeout in seconds")
-	cmd.Flags().StringSliceVar(&tags, "tag", nil, "Watch all sessions matching tag (multiplexed)")
 
 	return cmd
 }
@@ -564,6 +560,15 @@ func mcpServerCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "mcp-server",
 		Short: "Run the MCP (Model Context Protocol) server",
+		Long: `Run the Codewire MCP server (communicates over stdio).
+
+To register with Claude Code:
+  claude mcp add --scope user codewire -- cw mcp-server
+
+The node must be running before MCP tools work:
+  cw node -d
+
+The MCP server does NOT auto-start a node.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := ensureNode(); err != nil {
 				return err
@@ -599,12 +604,12 @@ func subscribeCmd() *cobra.Command {
 	var (
 		tags       []string
 		eventTypes []string
-		sessionID  uint64
 	)
 
 	cmd := &cobra.Command{
-		Use:   "subscribe",
+		Use:   "subscribe [target]",
 		Short: "Subscribe to session events",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target, err := resolveTarget()
 			if err != nil {
@@ -618,18 +623,23 @@ func subscribeCmd() *cobra.Command {
 			}
 
 			var sid *uint32
-			if cmd.Flags().Changed("session") {
-				v := uint32(sessionID)
-				sid = &v
+			var resolvedTags []string
+			if len(args) > 0 {
+				id, tagList, err := client.ResolveSessionOrTag(target, args[0])
+				if err != nil {
+					return err
+				}
+				sid = id
+				resolvedTags = tagList
 			}
+			allTags := append(resolvedTags, tags...)
 
-			return client.SubscribeEvents(target, sid, tags, eventTypes)
+			return client.SubscribeEvents(target, sid, allTags, eventTypes)
 		},
 	}
 
 	cmd.Flags().StringSliceVar(&tags, "tag", nil, "Filter by tag (can be repeated)")
 	cmd.Flags().StringSliceVar(&eventTypes, "event", nil, "Filter by event type (can be repeated)")
-	cmd.Flags().Uint64Var(&sessionID, "session", 0, "Filter by session ID")
 
 	return cmd
 }
