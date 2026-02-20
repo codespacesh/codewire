@@ -17,7 +17,8 @@ Homepage: https://codewire.sh
 5. MCP tool reference (18 tools)
 6. Multi-agent patterns
 7. Relay mode
-8. Common errors
+8. Claude Code integration (/cw skill)
+9. Common errors
 
 ---
 
@@ -744,7 +745,56 @@ node signalling workers on another.
 
 ---
 
-## 8. Common Errors
+## 8. Claude Code Integration
+
+### /cw slash command
+
+Install a `/cw` slash command that launches a background Codewire session running Claude
+Code on any task:
+
+```bash
+mkdir -p ~/.claude/commands && \
+  curl -fsSL https://codewire.sh/skills/cw.md -o ~/.claude/commands/cw.md
+```
+
+Once installed, type `/cw <task>` inside any Claude Code session to spin off a background
+agent:
+
+```
+/cw implement the pagination feature in internal/api/list.go
+/cw write tests for the auth module
+/cw refactor the broker pool to use a channel instead of a mutex
+```
+
+Claude Code will:
+1. Derive a short session name from the task
+2. Run `cw run --name <slug> -- claude --dangerously-skip-permissions --print "<task>"`
+3. Show you the session name so you can track it with `cw watch`, `cw logs`, or `cw wait`
+
+This is the fastest way to fan out work: keep your main Claude session focused on one
+thing while background agents handle parallel tasks.
+
+### Supervisor pattern with /cw
+
+Chain `/cw` calls to build a simple supervisor:
+
+```
+/cw run the full test suite and fix any failures
+/cw update the changelog for v0.3.0
+/cw review docs/llms-full.txt for accuracy against the current codebase
+```
+
+Each call is independent. Use `cw wait --tag <common-tag>` if you tagged the sessions to
+wait for a batch to finish.
+
+### Skill source
+
+The skill file is served at `https://codewire.sh/skills/cw.md`. Pin to a specific
+version by downloading from the GitHub release tag instead of the live URL.
+
+---
+
+## 9. Common Errors
 
 ### "connect: no such file or directory" / "connection refused"
 
