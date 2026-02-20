@@ -16,8 +16,8 @@ import (
 	"github.com/codespacesh/codewire/internal/auth"
 	"github.com/codespacesh/codewire/internal/config"
 	"github.com/codespacesh/codewire/internal/connection"
+	"github.com/codespacesh/codewire/internal/relay"
 	"github.com/codespacesh/codewire/internal/session"
-	"github.com/codespacesh/codewire/internal/tunnel"
 )
 
 // Node manages PTY sessions, accepting connections over a Unix domain socket
@@ -88,22 +88,13 @@ func (n *Node) Run(ctx context.Context) error {
 		}()
 	}
 
-	// Start WireGuard tunnel if relay URL is configured.
-	if n.config.RelayURL != nil {
-		go func() {
-			tun, err := tunnel.Connect(ctx, *n.config.RelayURL, n.dataDir)
-			if err != nil {
-				slog.Error("tunnel connection failed", "err", err)
-				return
-			}
-			defer tun.Close()
-			slog.Info("tunnel connected", "url", tun.URL())
-
-			// Serve HTTP/WS on the tunnel listener.
-			if listener := tun.Listener(); listener != nil {
-				n.runWSServerOnListener(ctx, listener)
-			}
-		}()
+	// Start relay agent if relay URL and token are configured.
+	if n.config.RelayURL != nil && n.config.RelayToken != nil {
+		go relay.RunAgent(ctx, relay.AgentConfig{
+			RelayURL:  *n.config.RelayURL,
+			NodeName:  n.config.Node.Name,
+			NodeToken: *n.config.RelayToken,
+		})
 	}
 
 	// Start periodic status refresh (every 5 seconds).
@@ -206,40 +197,6 @@ func (n *Node) runWSServer(ctx context.Context, addr string) error {
 		return fmt.Errorf("websocket server: %w", err)
 	}
 	return nil
-}
-
-// runWSServerOnListener serves HTTP/WS on an arbitrary net.Listener (used for
-// tunnel connections where auth is handled at the relay level).
-func (n *Node) runWSServerOnListener(ctx context.Context, ln net.Listener) {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		wsConn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-			InsecureSkipVerify: true, // Relay handles TLS
-		})
-		if err != nil {
-			slog.Error("tunnel websocket accept error", "err", err)
-			return
-		}
-
-		wsCtx := r.Context()
-		reader := connection.NewWSReader(wsCtx, wsConn)
-		writer := connection.NewWSWriter(wsCtx, wsConn)
-		handleClient(reader, writer, n.Manager)
-	})
-
-	srv := &http.Server{Handler: mux}
-
-	go func() {
-		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		srv.Shutdown(shutdownCtx)
-	}()
-
-	slog.Info("tunnel HTTP/WS server started")
-	if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
-		slog.Error("tunnel HTTP/WS server error", "err", err)
-	}
 }
 
 // persistenceManager debounces persist signals from the session manager.
