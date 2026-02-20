@@ -14,7 +14,7 @@
 
 - [Full docs](https://codewire.sh/llms-full.txt): Everything in one file — install,
   all CLI commands with flags and examples, all 18 MCP tools, multi-agent patterns
-  (supervisor, fan-out, request/reply), relay mode, common errors.
+  (supervisor, fan-out, request/reply), relay mode (SSH gateway, no WireGuard), common errors.
 
 - [MCP tool reference](https://codewire.sh/mcp.md): All 18 MCP tools with parameters,
   types, defaults, and workflow examples.

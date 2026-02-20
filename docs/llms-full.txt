@@ -626,39 +626,47 @@ For completed sessions, use `cw logs` (the output is persisted server-side).
 
 Relay mode enables remote access and fleet management. Two tiers:
 - **Standalone** (default): local Unix socket only, zero config
-- **Relay** (opt-in): WireGuard tunneling, node discovery, shared KV store
+- **Relay** (opt-in): SSH gateway, node discovery, shared KV store
 
 ### How it works
 
-Nodes establish userspace WireGuard tunnels to a relay server. No root required,
-works behind NAT. Each node generates a WireGuard key pair on first run and
-registers via device auth.
+Nodes connect outward to the relay via persistent authenticated WebSocket (no
+root, no WireGuard, works behind NAT). Users SSH into the relay with
+username=node-name, password=node-token. The relay bridges the SSH session to
+the target node via a back-connection WebSocket.
 
 ```
-[Your machine]               [Relay server]              [Remote machine]
-  cw node  ←── WG tunnel ──→  cw relay  ←── WG tunnel ──→  cw node
-  (behind NAT)                (public IP)                  (behind NAT)
+[SSH client]           [Relay server]             [Node agent]
+  ssh n1@relay:2222 ──→ SSH server ──→ hub ──→ /node/connect WebSocket
+                         back-conn ←── /node/back/{id} ←── agent dials back
 ```
 
 ### Connect a node to a relay
 
 ```bash
-cw setup https://relay.codespace.sh
-# Opens browser for GitHub OAuth (or use --invite token for headless)
-```
-
-After setup, the node auto-connects to the relay on start. Other nodes on the
-same relay become accessible via `--server`.
-
-```bash
-# Headless / CI
-cw setup https://relay.codespace.sh --invite <token>
-
 # With admin token
 cw setup https://relay.codespace.sh --token <admin-token>
+
+# With invite code (for onboarding without sharing admin token)
+cw setup https://relay.codespace.sh --invite <token>
 ```
 
-### Access remote nodes
+After setup, start the node agent (connects to relay automatically):
+```bash
+cw node -d
+```
+
+### SSH access
+
+```bash
+# Standard SSH client
+ssh <node-name>@relay.codespace.sh -p 2222
+# Password: <node-token printed by cw setup>
+
+# Termius, VS Code Remote SSH, etc. — same credentials
+```
+
+### Access remote nodes via cw CLI
 
 ```bash
 cw --server mynode list
@@ -666,7 +674,7 @@ cw --server mynode run -- make build
 cw --server mynode logs 5
 ```
 
-Save named connections to avoid repeating --server:
+Save named connections:
 ```bash
 cw server add mynode https://relay.codespace.sh
 cw server list
@@ -679,8 +687,6 @@ cw --server mynode list
 cw nodes    # list all nodes registered with your relay
 ```
 
-Output: NAME, TUNNEL URL, STATUS (online/offline)
-
 ### Running your own relay
 
 ```bash
@@ -692,15 +698,17 @@ cw relay \
   --github-client-secret <secret>
 ```
 
+Default ports: HTTP `:8080`, SSH `:2222`. Put nginx/Caddy in front for TLS.
+
 Key flags:
 | Flag | Default | Description |
 |---|---|---|
 | `--base-url` | (required) | Public URL of the relay |
 | `--auth-mode` | `none` | `github`, `token`, or `none` |
 | `--auth-token` | — | Admin token (for `--auth-mode=token` or CI fallback) |
-| `--wg-port` | `41820` | WireGuard UDP port |
 | `--listen` | `:8080` | HTTP listen address |
-| `--data-dir` | `~/.codewire/relay` | SQLite + WireGuard keys |
+| `--ssh-listen` | `:2222` | SSH listen address |
+| `--data-dir` | `~/.codewire/relay` | SQLite database directory |
 | `--allowed-users` | — | GitHub usernames allowed (github mode) |
 
 Auth modes:
