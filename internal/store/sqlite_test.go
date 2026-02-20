@@ -334,3 +334,109 @@ func TestDeviceCodeExpiry(t *testing.T) {
 		t.Fatal("expected nil for expired code")
 	}
 }
+
+func TestOIDCUserUpsertAndGet(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	user := OIDCUser{
+		Sub:         "CgVub2VsEgZnaXRlYQ",
+		Username:    "noel",
+		AvatarURL:   "https://example.com/avatar.png",
+		CreatedAt:   time.Now().UTC().Truncate(time.Second),
+		LastLoginAt: time.Now().UTC().Truncate(time.Second),
+	}
+
+	if err := s.OIDCUserUpsert(ctx, user); err != nil {
+		t.Fatalf("OIDCUserUpsert: %v", err)
+	}
+
+	got, err := s.OIDCUserGetBySub(ctx, user.Sub)
+	if err != nil {
+		t.Fatalf("OIDCUserGetBySub: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected user, got nil")
+	}
+	if got.Username != "noel" {
+		t.Errorf("username = %q, want %q", got.Username, "noel")
+	}
+}
+
+func TestOIDCSessionCreateGet(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	// Must upsert user first (FK constraint).
+	s.OIDCUserUpsert(ctx, OIDCUser{
+		Sub: "sub123", Username: "alice",
+		CreatedAt: time.Now().UTC(), LastLoginAt: time.Now().UTC(),
+	})
+
+	sess := OIDCSession{
+		Token:     "sess_abc123",
+		Sub:       "sub123",
+		CreatedAt: time.Now().UTC().Truncate(time.Second),
+		ExpiresAt: time.Now().UTC().Add(time.Hour).Truncate(time.Second),
+	}
+	if err := s.OIDCSessionCreate(ctx, sess); err != nil {
+		t.Fatalf("OIDCSessionCreate: %v", err)
+	}
+
+	got, err := s.OIDCSessionGet(ctx, "sess_abc123")
+	if err != nil {
+		t.Fatalf("OIDCSessionGet: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected session, got nil")
+	}
+	if got.Sub != "sub123" {
+		t.Errorf("sub = %q, want %q", got.Sub, "sub123")
+	}
+
+	if err := s.OIDCSessionDelete(ctx, "sess_abc123"); err != nil {
+		t.Fatalf("OIDCSessionDelete: %v", err)
+	}
+	got2, _ := s.OIDCSessionGet(ctx, "sess_abc123")
+	if got2 != nil {
+		t.Error("expected nil after delete")
+	}
+}
+
+func TestOIDCDeviceFlow(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	flow := OIDCDeviceFlow{
+		PollToken:  "poll_xyz",
+		DeviceCode: "dex_device_code_abc",
+		NodeName:   "my-node",
+		ExpiresAt:  time.Now().UTC().Add(5 * time.Minute),
+	}
+	if err := s.OIDCDeviceFlowCreate(ctx, flow); err != nil {
+		t.Fatalf("OIDCDeviceFlowCreate: %v", err)
+	}
+
+	got, err := s.OIDCDeviceFlowGet(ctx, "poll_xyz")
+	if err != nil {
+		t.Fatalf("OIDCDeviceFlowGet: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected flow, got nil")
+	}
+	if got.NodeToken != "" {
+		t.Errorf("node_token should be empty before completion, got %q", got.NodeToken)
+	}
+
+	if err := s.OIDCDeviceFlowComplete(ctx, "poll_xyz", "node_tok_123"); err != nil {
+		t.Fatalf("OIDCDeviceFlowComplete: %v", err)
+	}
+
+	got2, _ := s.OIDCDeviceFlowGet(ctx, "poll_xyz")
+	if got2 == nil {
+		t.Fatal("expected flow after complete, got nil")
+	}
+	if got2.NodeToken != "node_tok_123" {
+		t.Errorf("node_token = %q, want %q", got2.NodeToken, "node_tok_123")
+	}
+}

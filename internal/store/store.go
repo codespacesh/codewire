@@ -68,6 +68,34 @@ type Invite struct {
 	CreatedAt     time.Time `json:"created_at"`
 }
 
+// OIDCUser represents a user authenticated via OIDC (any provider).
+type OIDCUser struct {
+	Sub         string    `json:"sub"`
+	Username    string    `json:"username"`
+	AvatarURL   string    `json:"avatar_url"`
+	CreatedAt   time.Time `json:"created_at"`
+	LastLoginAt time.Time `json:"last_login_at"`
+}
+
+// OIDCSession is an admin UI session backed by an OIDC login.
+type OIDCSession struct {
+	Token     string    `json:"token"`
+	Sub       string    `json:"sub"`
+	CreatedAt time.Time `json:"created_at"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+// OIDCDeviceFlow tracks an in-flight RFC 8628 device authorization request.
+// PollToken is an opaque value given to the CLI to poll for completion.
+// DeviceCode is the code used to poll the OIDC provider's token endpoint.
+type OIDCDeviceFlow struct {
+	PollToken  string    `json:"poll_token"`
+	DeviceCode string    `json:"device_code"`
+	NodeName   string    `json:"node_name"`
+	NodeToken  string    `json:"node_token"` // populated by OIDCDeviceFlowComplete
+	ExpiresAt  time.Time `json:"expires_at"`
+}
+
 // RevokedKey is a WireGuard public key that has been revoked.
 type RevokedKey struct {
 	PublicKey string    `json:"public_key"`
@@ -132,6 +160,20 @@ type Store interface {
 	InviteConsume(ctx context.Context, token string) error
 	InviteList(ctx context.Context) ([]Invite, error)
 	InviteDelete(ctx context.Context, token string) error
+
+	// OIDC Users.
+	OIDCUserUpsert(ctx context.Context, user OIDCUser) error
+	OIDCUserGetBySub(ctx context.Context, sub string) (*OIDCUser, error)
+
+	// OIDC Sessions.
+	OIDCSessionCreate(ctx context.Context, sess OIDCSession) error
+	OIDCSessionGet(ctx context.Context, token string) (*OIDCSession, error)
+	OIDCSessionDelete(ctx context.Context, token string) error
+
+	// OIDC Device Flows.
+	OIDCDeviceFlowCreate(ctx context.Context, flow OIDCDeviceFlow) error
+	OIDCDeviceFlowGet(ctx context.Context, pollToken string) (*OIDCDeviceFlow, error)
+	OIDCDeviceFlowComplete(ctx context.Context, pollToken, nodeToken string) error
 
 	// Revoked Keys.
 	RevokedKeyAdd(ctx context.Context, key RevokedKey) error
