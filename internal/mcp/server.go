@@ -1235,7 +1235,7 @@ func nodeRequest(dataDir string, req *protocol.Request) (*protocol.Response, err
 	sockPath := filepath.Join(dataDir, "codewire.sock")
 	conn, err := net.Dial("unix", sockPath)
 	if err != nil {
-		return nil, fmt.Errorf("connecting to node: %w", err)
+		return nil, fmt.Errorf("no node running — start one with: cw node -d\n(socket: %s)", sockPath)
 	}
 	defer conn.Close()
 
@@ -1270,7 +1270,7 @@ func watchSessionTimed(dataDir string, sessionID uint32, includeHistory bool, hi
 	sockPath := filepath.Join(dataDir, "codewire.sock")
 	conn, err := net.Dial("unix", sockPath)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("no node running — start one with: cw node -d\n(socket: %s)", sockPath)
 	}
 	defer conn.Close()
 
@@ -1367,7 +1367,7 @@ func subscribeTimed(dataDir string, sessionID *uint32, tags, eventTypes []string
 	sockPath := filepath.Join(dataDir, "codewire.sock")
 	conn, err := net.Dial("unix", sockPath)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("no node running — start one with: cw node -d\n(socket: %s)", sockPath)
 	}
 	defer conn.Close()
 
