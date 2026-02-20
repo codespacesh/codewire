@@ -22,9 +22,11 @@ type contextKey struct{}
 
 // AuthIdentity represents who made the request.
 type AuthIdentity struct {
-	// UserID is the GitHub user ID (0 if admin token auth).
+	// UserID is the GitHub user ID (0 if OIDC or admin token auth).
 	UserID int64
-	// Username is the GitHub username ("" if admin token auth).
+	// Sub is the OIDC subject claim ("" if GitHub or admin token auth).
+	Sub string
+	// Username is the authenticated username.
 	Username string
 	// IsAdmin is true if authenticated via admin token.
 	IsAdmin bool
@@ -99,6 +101,16 @@ func authenticate(r *http.Request, st store.Store, adminToken string) *AuthIdent
 func resolveToken(ctx context.Context, st store.Store, adminToken, token string) *AuthIdentity {
 	// Session tokens start with sess_.
 	if strings.HasPrefix(token, sessionTokenPrefix) {
+		// Try OIDC session first.
+		if oidcSess, err := st.OIDCSessionGet(ctx, token); err == nil && oidcSess != nil {
+			username := ""
+			if user, err := st.OIDCUserGetBySub(ctx, oidcSess.Sub); err == nil && user != nil {
+				username = user.Username
+			}
+			return &AuthIdentity{Sub: oidcSess.Sub, Username: username}
+		}
+
+		// Fall back to GitHub session.
 		sess, err := st.SessionGet(ctx, token)
 		if err != nil || sess == nil {
 			return nil
@@ -113,15 +125,12 @@ func resolveToken(ctx context.Context, st store.Store, adminToken, token string)
 		return &AuthIdentity{
 			UserID:   user.GitHubID,
 			Username: user.Username,
-			IsAdmin:  false,
 		}
 	}
 
 	// Check admin token.
 	if adminToken != "" && token == adminToken {
-		return &AuthIdentity{
-			IsAdmin: true,
-		}
+		return &AuthIdentity{IsAdmin: true}
 	}
 
 	return nil
