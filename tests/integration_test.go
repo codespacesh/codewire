@@ -1241,3 +1241,35 @@ func TestResolveSessionOrTag(t *testing.T) {
 		t.Fatalf("expected no tags, got %v", tags2)
 	}
 }
+
+func TestWaitByTagPositional(t *testing.T) {
+	dir := tempDir(t, "wait-tag-positional")
+	sock := startTestNode(t, dir)
+	target := &client.Target{Local: dir}
+
+	// Launch two short-lived sessions tagged "wt-42"
+	for i := 0; i < 2; i++ {
+		r := requestResponse(t, sock, &protocol.Request{
+			Type: "Launch", Command: []string{"bash", "-c", "sleep 0.2"},
+			WorkingDir: "/tmp", Tags: []string{"wt-42"},
+		})
+		if r.Type != "Launched" {
+			t.Fatalf("launch %d: %s", i, r.Message)
+		}
+	}
+
+	// WaitForSession with tag "wt-42" should wait for both
+	done := make(chan error, 1)
+	go func() {
+		done <- client.WaitForSession(target, nil, []string{"wt-42"}, "all", nil)
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("WaitForSession: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for tagged sessions")
+	}
+}

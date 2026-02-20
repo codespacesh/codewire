@@ -661,20 +661,23 @@ func waitSessionCmd() *cobra.Command {
 			}
 
 			var sid *uint32
+			var resolvedTags []string
 			if len(args) > 0 {
-				resolved, err := client.ResolveSessionArg(target, args[0])
+				id, tagList, err := client.ResolveSessionOrTag(target, args[0])
 				if err != nil {
 					return err
 				}
-				sid = &resolved
+				sid = id
+				resolvedTags = tagList
 			}
+			allTags := append(resolvedTags, tags...)
 
 			var timeoutPtr *uint64
 			if cmd.Flags().Changed("timeout") {
 				timeoutPtr = &timeout
 			}
 
-			return client.WaitForSession(target, sid, tags, condition, timeoutPtr)
+			return client.WaitForSession(target, sid, allTags, condition, timeoutPtr)
 		},
 	}
 
