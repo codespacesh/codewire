@@ -72,7 +72,17 @@
       "Bash(git -C /Users/noel/src/sonica/codewire stash)",
       "Bash(git -C /Users/noel/src/sonica/codewire rebase origin/main)",
       "Bash(git -C /Users/noel/src/sonica/codewire stash pop)",
-      "WebFetch(domain:llmstxt.org)"
+      "WebFetch(domain:llmstxt.org)",
+      "Bash(git -C /Users/noel/src/sonica/codewire-demo tag --list 'v*' --sort=-v:refname)",
+      "Bash(git -C /Users/noel/src/sonica/codewire-demo add .gitea/workflows/ci.yaml docs/Dockerfile)",
+      "Bash(git -C /Users/noel/src/sonica/codewire-demo commit -m \"docs: serve LLM-facing docs \\(llms.txt, quickstart, full reference, mcp, nginx conf\\)\")",
+      "Bash(git -C /Users/noel/src/sonica/codewire-demo tag v0.1.25)",
+      "Bash(git -C /Users/noel/src/sonica/codewire-demo push)",
+      "Bash(git -C /Users/noel/src/sonica/codewire-demo push origin v0.1.25)",
+      "Bash(go -C /Users/noel/src/sonica/codewire test ./internal/... ./tests/... -timeout 120s -count=1)",
+      "Bash(/Users/noel/src/sonica/codewire/cw hook:*)",
+      "Bash(go -C /Users/noel/src/sonica/codewire test ./tests/... -run \"TestHookNoGateway|TestHookReadOnlyBypass|TestHookDenied\" -v -timeout 30s)",
+      "Bash(go get:*)"
     ]
   },
   "enableAllProjectMcpServers": true
