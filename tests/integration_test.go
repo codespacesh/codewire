@@ -1630,3 +1630,164 @@ func TestAnonymousSendRequest(t *testing.T) {
 		t.Fatalf("expected reply body 'ack', got %q", resultResp.ReplyBody)
 	}
 }
+
+// TestHookNoGateway verifies that cw hook exits 0 (allow) when no gateway
+// session is running.
+func TestHookNoGateway(t *testing.T) {
+	t.Parallel()
+	dir := tempDir(t, "hook-no-gateway")
+	sock := startTestNode(t, dir)
+
+	target := &client.Target{Local: dir}
+	_ = sock // node is running but no gateway session
+
+	var out strings.Builder
+	blocked, err := client.Hook(target, strings.NewReader(`{"tool_name":"Bash","tool_input":{"command":"rm -rf /"}}`), &out)
+	if err != nil {
+		t.Fatalf("Hook() error: %v", err)
+	}
+	if blocked {
+		t.Fatalf("expected allow (no gateway), got block: %s", out.String())
+	}
+	if out.Len() != 0 {
+		t.Fatalf("expected no output, got: %s", out.String())
+	}
+}
+
+// TestHookReadOnlyBypass verifies that read-only tools are allowed without
+// contacting the gateway.
+func TestHookReadOnlyBypass(t *testing.T) {
+	t.Parallel()
+	dir := tempDir(t, "hook-readonly")
+	_ = startTestNode(t, dir)
+	target := &client.Target{Local: dir}
+
+	for _, tool := range []string{"Read", "Glob", "Grep", "WebFetch", "WebSearch", "TodoRead", "TaskList", "TaskGet"} {
+		tool := tool
+		t.Run(tool, func(t *testing.T) {
+			t.Parallel()
+			input := fmt.Sprintf(`{"tool_name":%q,"tool_input":{}}`, tool)
+			var out strings.Builder
+			blocked, err := client.Hook(target, strings.NewReader(input), &out)
+			if err != nil {
+				t.Fatalf("Hook() error: %v", err)
+			}
+			if blocked {
+				t.Fatalf("read-only tool %q should not be blocked", tool)
+			}
+		})
+	}
+}
+
+// TestHookDenied verifies that cw hook exits 2 and writes a JSON block decision
+// when the gateway returns DENIED.
+func TestHookDenied(t *testing.T) {
+	t.Parallel()
+	dir := tempDir(t, "hook-denied")
+	sock := startTestNode(t, dir)
+
+	// Launch a gateway session.
+	gatewayResp := requestResponse(t, sock, &protocol.Request{
+		Type:       "Launch",
+		Command:    []string{"sleep", "30"},
+		WorkingDir: "/tmp",
+		Name:       "gateway",
+		Tags:       []string{"_gateway"},
+	})
+	if gatewayResp.Type != "Launched" || gatewayResp.ID == nil {
+		t.Fatalf("launch gateway: unexpected response %q", gatewayResp.Type)
+	}
+	gatewayID := *gatewayResp.ID
+
+	// Subscribe to message.request on the gateway session.
+	subConn, subReader, subWriter := connectRaw(t, sock)
+	defer subConn.Close()
+	if err := subWriter.SendRequest(&protocol.Request{
+		Type:       "Subscribe",
+		ID:         &gatewayID,
+		EventTypes: []string{"message.request"},
+	}); err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	// Drain SubscribeAck.
+	ackFrame, err := subReader.ReadFrame()
+	if err != nil || ackFrame == nil {
+		t.Fatalf("read SubscribeAck: %v", err)
+	}
+
+	// Run Hook() in a goroutine — it will block waiting for the gateway reply.
+	target := &client.Target{Local: dir}
+	var out strings.Builder
+	hookDone := make(chan struct{ blocked bool; err error }, 1)
+	go func() {
+		blocked, err := client.Hook(target, strings.NewReader(`{"tool_name":"Bash","tool_input":{"command":"rm -rf /"}}`), &out)
+		hookDone <- struct{ blocked bool; err error }{blocked, err}
+	}()
+
+	// Simulate gateway receiving the request and replying DENIED.
+	select {
+	case frame := <-func() <-chan *protocol.Frame {
+		ch := make(chan *protocol.Frame, 1)
+		go func() {
+			f, _ := subReader.ReadFrame()
+			ch <- f
+		}()
+		return ch
+	}():
+		if frame == nil {
+			t.Fatal("no frame from gateway subscription")
+		}
+		var resp protocol.Response
+		if err := json.Unmarshal(frame.Payload, &resp); err != nil {
+			t.Fatalf("unmarshal event: %v", err)
+		}
+		if resp.Type != "Event" || resp.Event == nil {
+			t.Fatalf("expected Event, got %q", resp.Type)
+		}
+		var reqData struct {
+			RequestID string `json:"request_id"`
+		}
+		if err := json.Unmarshal(resp.Event.Data, &reqData); err != nil {
+			t.Fatalf("unmarshal RequestData: %v", err)
+		}
+		// Reply with DENIED.
+		replyConn, _, replyWriter := connectRaw(t, sock)
+		defer replyConn.Close()
+		if err := replyWriter.SendRequest(&protocol.Request{
+			Type:      "MsgReply",
+			RequestID: reqData.RequestID,
+			Body:      "DENIED: too dangerous",
+		}); err != nil {
+			t.Fatalf("send MsgReply: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for gateway request event")
+	}
+
+	// Wait for Hook() to return.
+	select {
+	case result := <-hookDone:
+		if result.err != nil {
+			t.Fatalf("Hook() error: %v", result.err)
+		}
+		if !result.blocked {
+			t.Fatal("expected block, got allow")
+		}
+		// Verify the output is valid JSON with decision=block.
+		var decision struct {
+			Decision string `json:"decision"`
+			Reason   string `json:"reason"`
+		}
+		if err := json.Unmarshal([]byte(strings.TrimSpace(out.String())), &decision); err != nil {
+			t.Fatalf("parse hook output %q: %v", out.String(), err)
+		}
+		if decision.Decision != "block" {
+			t.Fatalf("expected decision=block, got %q", decision.Decision)
+		}
+		if !strings.Contains(decision.Reason, "too dangerous") {
+			t.Fatalf("expected reason to contain 'too dangerous', got %q", decision.Reason)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for Hook() to return")
+	}
+}

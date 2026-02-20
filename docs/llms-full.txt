@@ -813,20 +813,12 @@ cw request gateway "approve: rm -rf ./dist"
 
 **Automatic interception with a PreToolUse hook:**
 ```bash
-mkdir -p ~/.claude/hooks
-curl -fsSL https://codewire.sh/hooks/pre-tool-use.sh -o ~/.claude/hooks/pre-tool-use.sh
-chmod +x ~/.claude/hooks/pre-tool-use.sh
+cw hook --install
 ```
-Add to `~/.claude/settings.json`:
-```json
-{
-  "hooks": {
-    "PreToolUse": [{"hooks": [{"type": "command", "command": "~/.claude/hooks/pre-tool-use.sh"}]}]
-  }
-}
-```
-With the hook installed, every Bash/Edit/Write call by the worker session is automatically
-routed through the gateway. Read-only tools (Read, Glob, Grep, WebFetch) bypass it.
+This adds the PreToolUse entry to `~/.claude/settings.json` automatically. Restart Claude
+Code for the hook to take effect. `cw hook` reads the tool call JSON from stdin, checks if
+a gateway session is running, and blocks the call with a JSON decision if the gateway returns
+DENIED. Read-only tools (Read, Glob, Grep, WebFetch) bypass the gateway entirely.
 
 **Install the `/cw-gateway` skill** to have Claude Code start a gateway for you:
 ```bash

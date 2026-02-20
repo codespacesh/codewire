@@ -21,20 +21,10 @@ from worker sessions based on a policy.
 
 4. To add automatic Claude Code interception (all Bash/Edit/Write go through gateway):
    ```bash
-   mkdir -p ~/.claude/hooks
-   curl -fsSL https://codewire.sh/hooks/pre-tool-use.sh -o ~/.claude/hooks/pre-tool-use.sh
-   chmod +x ~/.claude/hooks/pre-tool-use.sh
+   cw hook --install
    ```
-   Then add to `~/.claude/settings.json`:
-   ```json
-   {
-     "hooks": {
-       "PreToolUse": [{
-         "hooks": [{"type": "command", "command": "~/.claude/hooks/pre-tool-use.sh"}]
-       }]
-     }
-   }
-   ```
+   This writes the PreToolUse hook entry to `~/.claude/settings.json` automatically.
+   Restart Claude Code for the hook to take effect.
 
 ## Notes
 
@@ -43,3 +33,4 @@ from worker sessions based on a policy.
 - Workers inside cw sessions automatically have CW_SESSION_ID set, so
   `cw request gateway "..."` identifies them correctly
 - Without `--exec`, the gateway auto-approves everything (useful for audit logging)
+- `cw hook` requires `cw` to be in PATH (it's the same binary you're already using)

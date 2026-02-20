@@ -62,6 +62,7 @@ func main() {
 		replyCmd(),
 		listenCmd(),
 		gatewayCmd(),
+		hookCmd(),
 	)
 
 	if err := rootCmd.Execute(); err != nil {
@@ -1392,6 +1393,57 @@ Combined (LLM first, macOS notification on ESCALATE):
 	cmd.Flags().StringVar(&name, "name", "gateway", "Session name to register as")
 	cmd.Flags().StringVar(&execCmd, "exec", "", "Shell command to evaluate requests (body on stdin); default auto-approves all")
 	cmd.Flags().StringVar(&notify, "notify", "", "Notification method: macos or ntfy:<url>")
+	return cmd
+}
+
+// ---------------------------------------------------------------------------
+// hookCmd — Claude Code PreToolUse hook handler
+// ---------------------------------------------------------------------------
+
+func hookCmd() *cobra.Command {
+	var install bool
+
+	cmd := &cobra.Command{
+		Use:   "hook",
+		Short: "Claude Code PreToolUse hook — routes tool calls through the gateway",
+		Long: `Run as a Claude Code PreToolUse hook. Reads the tool call JSON from stdin,
+checks if a gateway session is running, and blocks the call if the gateway
+returns a DENIED reply.
+
+Install the hook automatically:
+  cw hook --install
+
+Or add manually to ~/.claude/settings.json:
+  {
+    "hooks": {
+      "PreToolUse": [{"hooks": [{"type": "command", "command": "cw hook"}]}]
+    }
+  }
+
+Exit codes:
+  0  — allow the tool call
+  2  — block the tool call (decision JSON written to stdout)`,
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if install {
+				return client.HookInstall()
+			}
+			target, err := resolveTarget()
+			if err != nil {
+				// Node not running — allow by default (don't block agent work).
+				return nil
+			}
+			blocked, err := client.Hook(target, os.Stdin, os.Stdout)
+			if err != nil {
+				return err
+			}
+			if blocked {
+				os.Exit(2)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&install, "install", false, "Add PreToolUse hook entry to ~/.claude/settings.json")
 	return cmd
 }
 

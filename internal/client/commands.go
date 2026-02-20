@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -1824,6 +1825,169 @@ func gatewayNotify(method, body, fromName string) {
 		url := strings.TrimPrefix(method, "ntfy:")
 		_ = exec.Command("curl", "-s", "-d", body, url).Run()
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Hook — Claude Code PreToolUse hook handler
+// ---------------------------------------------------------------------------
+
+// hookReadOnlyTools are tool names that bypass the gateway check.
+var hookReadOnlyTools = map[string]bool{
+	"Read": true, "Glob": true, "Grep": true,
+	"WebFetch": true, "WebSearch": true,
+	"TodoRead": true, "TaskList": true, "TaskGet": true,
+}
+
+// hookInput is the JSON payload Claude Code sends to PreToolUse hooks.
+type hookInput struct {
+	ToolName  string          `json:"tool_name"`
+	ToolInput json.RawMessage `json:"tool_input"`
+}
+
+// hookOutput is the JSON payload returned to block a tool call.
+type hookOutput struct {
+	Decision string `json:"decision"`
+	Reason   string `json:"reason"`
+}
+
+// Hook reads a Claude Code PreToolUse JSON payload from r, checks if a gateway
+// session is running, sends an approval request, and writes a block decision to w
+// if the gateway denies the call. Returns (block bool, err).
+func Hook(target *Target, r io.Reader, w io.Writer) (bool, error) {
+	var input hookInput
+	if err := json.NewDecoder(r).Decode(&input); err != nil {
+		// Malformed input — allow (don't block on hook errors).
+		return false, nil
+	}
+
+	// Skip read-only tools.
+	if hookReadOnlyTools[input.ToolName] {
+		return false, nil
+	}
+
+	// Find the gateway session.
+	resp, err := requestResponse(target, &protocol.Request{Type: "ListSessions"})
+	if err != nil || resp.Type != "SessionList" || resp.Sessions == nil {
+		// Node not running or error — allow by default.
+		return false, nil
+	}
+	var gatewayID uint32
+	found := false
+	for _, s := range *resp.Sessions {
+		if s.Name == "gateway" && s.Status == "running" {
+			gatewayID = s.ID
+			found = true
+			break
+		}
+	}
+	if !found {
+		return false, nil
+	}
+
+	// Send the approval request to the gateway.
+	body := input.ToolName + ": " + string(input.ToolInput)
+	timeout := uint64(30)
+	reqResp, err := requestResponse(target, &protocol.Request{
+		Type:           "MsgRequest",
+		ToID:           &gatewayID,
+		Body:           body,
+		TimeoutSeconds: &timeout,
+	})
+	if err != nil || reqResp.Type != "MsgRequestResult" {
+		// Gateway unreachable or timeout — allow by default.
+		return false, nil
+	}
+
+	reply := strings.TrimSpace(reqResp.ReplyBody)
+	upper := strings.ToUpper(reply)
+	if strings.HasPrefix(upper, "DENIED") {
+		reason := strings.TrimSpace(reply[6:])           // strip "DENIED"
+		reason = strings.TrimLeft(reason, ":, \t")       // strip leading punctuation
+		out := hookOutput{Decision: "block", Reason: "Gateway denied: " + reason}
+		if err := json.NewEncoder(w).Encode(out); err != nil {
+			return true, err
+		}
+		return true, nil
+	}
+
+	return false, nil
+}
+
+// HookInstall adds the PreToolUse hook entry to ~/.claude/settings.json.
+func HookInstall() error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("finding home dir: %w", err)
+	}
+	settingsPath := filepath.Join(home, ".claude", "settings.json")
+
+	// Read existing settings (or start fresh).
+	var settings map[string]json.RawMessage
+	if data, err := os.ReadFile(settingsPath); err == nil {
+		if err := json.Unmarshal(data, &settings); err != nil {
+			return fmt.Errorf("parsing %s: %w", settingsPath, err)
+		}
+	}
+	if settings == nil {
+		settings = make(map[string]json.RawMessage)
+	}
+
+	// Build the hook entry.
+	hookEntry := json.RawMessage(`{"hooks":[{"type":"command","command":"cw hook"}]}`)
+	preToolUse := []json.RawMessage{hookEntry}
+
+	// Merge into hooks.PreToolUse — preserve any existing entries.
+	var hooks map[string]json.RawMessage
+	if raw, ok := settings["hooks"]; ok {
+		if err := json.Unmarshal(raw, &hooks); err != nil {
+			hooks = nil
+		}
+	}
+	if hooks == nil {
+		hooks = make(map[string]json.RawMessage)
+	}
+
+	// Check if already installed.
+	if existing, ok := hooks["PreToolUse"]; ok {
+		var entries []json.RawMessage
+		if err := json.Unmarshal(existing, &entries); err == nil {
+			for _, e := range entries {
+				var m map[string]json.RawMessage
+				if err := json.Unmarshal(e, &m); err == nil {
+					if hooksArr, ok := m["hooks"]; ok {
+						var hArr []map[string]string
+						if err := json.Unmarshal(hooksArr, &hArr); err == nil {
+							for _, h := range hArr {
+								if h["command"] == "cw hook" {
+									fmt.Fprintf(os.Stderr, "cw hook already installed in %s\n", settingsPath)
+									return nil
+								}
+							}
+						}
+					}
+				}
+			}
+			preToolUse = append(entries, hookEntry)
+		}
+	}
+
+	preToolUseRaw, _ := json.Marshal(preToolUse)
+	hooks["PreToolUse"] = preToolUseRaw
+	hooksRaw, _ := json.Marshal(hooks)
+	settings["hooks"] = hooksRaw
+
+	out, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return fmt.Errorf("serializing settings: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o700); err != nil {
+		return fmt.Errorf("creating .claude dir: %w", err)
+	}
+	if err := os.WriteFile(settingsPath, append(out, '\n'), 0o600); err != nil {
+		return fmt.Errorf("writing %s: %w", settingsPath, err)
+	}
+	fmt.Fprintf(os.Stderr, "Installed cw hook in %s\n", settingsPath)
+	return nil
 }
 
 // formatRelativeTime converts an RFC3339 timestamp to a human-readable

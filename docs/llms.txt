@@ -25,8 +25,8 @@
   Claude Code agents from inside any Claude session
 - [Approval gateway skill](https://codewire.sh/skills/cw-gateway.md): Start a supervisor
   LLM that auto-approves worker tool calls based on policy
-- [PreToolUse hook](https://codewire.sh/hooks/pre-tool-use.sh): Shell hook that routes
-  every Bash/Edit/Write call through the gateway automatically
+- PreToolUse hook: `cw hook --install` — routes every Bash/Edit/Write call through the
+  gateway automatically (native binary, no shell script or jq required)
 - [GitHub](https://github.com/codespacesh/codewire): Source, issues, releases,
   Homebrew formula
 - [Homepage](https://codewire.sh): Human-facing docs and live demo
