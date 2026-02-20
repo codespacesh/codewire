@@ -1034,7 +1034,7 @@ func toolRequest(dataDir string, args map[string]interface{}) (string, error) {
 	sockPath := filepath.Join(dataDir, "codewire.sock")
 	conn, err := net.Dial("unix", sockPath)
 	if err != nil {
-		return "", fmt.Errorf("connecting to node: %w", err)
+		return "", fmt.Errorf("no node running — start one with: cw node -d\n(socket: %s)", sockPath)
 	}
 	defer conn.Close()
 
