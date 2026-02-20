@@ -21,6 +21,12 @@
 
 ## Optional
 
+- [/cw skill](https://codewire.sh/skills/cw.md): Slash command to fan out background
+  Claude Code agents from inside any Claude session
+- [Approval gateway skill](https://codewire.sh/skills/cw-gateway.md): Start a supervisor
+  LLM that auto-approves worker tool calls based on policy
+- [PreToolUse hook](https://codewire.sh/hooks/pre-tool-use.sh): Shell hook that routes
+  every Bash/Edit/Write call through the gateway automatically
 - [GitHub](https://github.com/codespacesh/codewire): Source, issues, releases,
   Homebrew formula
 - [Homepage](https://codewire.sh): Human-facing docs and live demo

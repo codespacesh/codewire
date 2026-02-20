@@ -17,7 +17,7 @@ Homepage: https://codewire.sh
 5. MCP tool reference (18 tools)
 6. Multi-agent patterns
 7. Relay mode
-8. Claude Code integration (/cw skill)
+8. Claude Code integration (/cw skill, approval gateway)
 9. Common errors
 
 ---
@@ -791,6 +791,51 @@ wait for a batch to finish.
 
 The skill file is served at `https://codewire.sh/skills/cw.md`. Pin to a specific
 version by downloading from the GitHub release tag instead of the live URL.
+
+### Approval gateway
+
+Workers can send approval requests to a supervisor — an LLM or a human — that blocks
+until a reply arrives.
+
+**Start a gateway (LLM supervisor):**
+```bash
+cw gateway --exec 'claude --dangerously-skip-permissions --print \
+  "Policy: approve git, file edits, builds. Deny: rm -rf non-build paths, DROP TABLE.
+   Request: $(cat). Reply: APPROVED or DENIED: <reason>"'
+```
+
+**Worker sends an approval request (blocks until reply):**
+```bash
+# From inside a cw session — CW_SESSION_ID is auto-set, so --from is inferred
+cw request gateway "approve: rm -rf ./dist"
+# Output: APPROVED  (or DENIED: <reason>)
+```
+
+**Automatic interception with a PreToolUse hook:**
+```bash
+mkdir -p ~/.claude/hooks
+curl -fsSL https://codewire.sh/hooks/pre-tool-use.sh -o ~/.claude/hooks/pre-tool-use.sh
+chmod +x ~/.claude/hooks/pre-tool-use.sh
+```
+Add to `~/.claude/settings.json`:
+```json
+{
+  "hooks": {
+    "PreToolUse": [{"hooks": [{"type": "command", "command": "~/.claude/hooks/pre-tool-use.sh"}]}]
+  }
+}
+```
+With the hook installed, every Bash/Edit/Write call by the worker session is automatically
+routed through the gateway. Read-only tools (Read, Glob, Grep, WebFetch) bypass it.
+
+**Install the `/cw-gateway` skill** to have Claude Code start a gateway for you:
+```bash
+curl -fsSL https://codewire.sh/skills/cw-gateway.md -o ~/.claude/commands/cw-gateway.md
+```
+
+**Worker self-identification:** Sessions automatically have `CW_SESSION_ID` in their
+environment, so `cw request` from inside a session correctly identifies the sender without
+needing `--from`.
 
 ---
 
