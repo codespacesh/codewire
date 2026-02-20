@@ -93,36 +93,37 @@ func (p *OIDCProvider) CheckGroups(userGroups []string) error {
 	return fmt.Errorf("not a member of any allowed group (%v)", p.AllowedGroups)
 }
 
-// UserinfoClaims calls the userinfo endpoint and returns sub, username, groups, and avatarURL.
-func (p *OIDCProvider) UserinfoClaims(ctx context.Context, accessToken string) (sub, username string, groups []string, err error) {
+// UserinfoClaims calls the userinfo endpoint and returns sub, username, groups, avatarURL, and err.
+func (p *OIDCProvider) UserinfoClaims(ctx context.Context, accessToken string) (sub, username string, groups []string, avatarURL string, err error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.userinfoEndpoint, nil)
 	if err != nil {
-		return "", "", nil, fmt.Errorf("creating userinfo request: %w", err)
+		return "", "", nil, "", fmt.Errorf("creating userinfo request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "", "", nil, fmt.Errorf("userinfo request: %w", err)
+		return "", "", nil, "", fmt.Errorf("userinfo request: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return "", "", nil, fmt.Errorf("userinfo returned %d: %s", resp.StatusCode, b)
+		return "", "", nil, "", fmt.Errorf("userinfo returned %d: %s", resp.StatusCode, b)
 	}
 	var claims struct {
 		Sub               string   `json:"sub"`
 		PreferredUsername string   `json:"preferred_username"`
 		Name              string   `json:"name"`
 		Groups            []string `json:"groups"`
+		Picture           string   `json:"picture"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&claims); err != nil {
-		return "", "", nil, fmt.Errorf("parsing userinfo response: %w", err)
+		return "", "", nil, "", fmt.Errorf("parsing userinfo response: %w", err)
 	}
 	name := claims.PreferredUsername
 	if name == "" {
 		name = claims.Name
 	}
-	return claims.Sub, name, claims.Groups, nil
+	return claims.Sub, name, claims.Groups, claims.Picture, nil
 }
 
 // ExchangeCode exchanges an authorization code for an access_token.
@@ -210,7 +211,7 @@ func (p *OIDCProvider) CallbackHandler(st store.Store, baseURL string) http.Hand
 			http.Error(w, "token exchange failed: "+err.Error(), http.StatusBadGateway)
 			return
 		}
-		sub, username, groups, err := p.UserinfoClaims(r.Context(), accessToken)
+		sub, username, groups, avatarURL, err := p.UserinfoClaims(r.Context(), accessToken)
 		if err != nil {
 			http.Error(w, "userinfo failed: "+err.Error(), http.StatusBadGateway)
 			return
@@ -221,7 +222,7 @@ func (p *OIDCProvider) CallbackHandler(st store.Store, baseURL string) http.Hand
 		}
 		now := time.Now().UTC()
 		if err := st.OIDCUserUpsert(r.Context(), store.OIDCUser{
-			Sub: sub, Username: username, CreatedAt: now, LastLoginAt: now,
+			Sub: sub, Username: username, AvatarURL: avatarURL, CreatedAt: now, LastLoginAt: now,
 		}); err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
