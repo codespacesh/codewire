@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Codewire — Persistent process server for AI coding agents</title>
-<meta name="description" content="Like tmux, but purpose-built for long-running LLM processes. Persistent sessions, WireGuard relay, event-driven orchestration, MCP integration.">
+<meta name="description" content="Like tmux, but purpose-built for long-running LLM processes. Persistent sessions, SSH relay gateway, event-driven orchestration, MCP integration.">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 
@@ -481,7 +481,7 @@ td code{font-size:12px}
     </div>
     <div class="cmd-entry">
       <div class="cmd-sig">cw relay <span class="optional">[--base-url &lt;url&gt;] [--data-dir &lt;dir&gt;] [--auth-mode &lt;mode&gt;]</span></div>
-      <div class="cmd-desc">Run a relay server (WireGuard tunneling, node discovery, shared KV).</div>
+      <div class="cmd-desc">Run a relay server (SSH gateway, node discovery, shared KV).</div>
     </div>
   </div>
 
@@ -643,7 +643,7 @@ td code{font-size:12px}
 </div>
 
   <h3>Relay Topology</h3>
-  <p>WireGuard tunneling for remote access. Nodes establish userspace WireGuard tunnels to a relay server &mdash; no root required, works behind NAT.</p>
+  <p>SSH gateway for remote access. Nodes establish persistent outbound WebSocket connections to a relay server &mdash; no root required, works behind NAT.</p>
 
 <div class="diagram" role="img" aria-label="Relay topology diagram">
                           <span class="hl">INTERNET</span>
@@ -651,13 +651,13 @@ td code{font-size:12px}
                     +--------+--------+
                     |   <span class="label">cw relay</span>      |
                     | HTTPS :443      |  <span class="dim">&lt;- Clients connect here</span>
-                    | WG UDP :41820   |  <span class="dim">&lt;- Nodes tunnel here</span>
-                    | /api/v1/nodes   |  <span class="dim">&lt;- Node discovery</span>
+                    | SSH  :2222      |  <span class="dim">&lt;- SSH into any node</span>
+                    | /node/connect   |  <span class="dim">&lt;- Nodes connect here (WS)</span>
                     | /api/v1/kv/*    |  <span class="dim">&lt;- Shared KV store</span>
                     +--------+--------+
                         |         |
-           WG tunnel    |         |   WG tunnel
-           (UDP)        |         |   (UDP)
+           WS agent     |         |   WS agent
+           (outbound)   |         |   (outbound)
                         |         |
                 +-------+--+  +---+-------+
                 | <span class="label">cw node</span>  |  | <span class="label">cw node</span>   |
@@ -665,12 +665,11 @@ td code{font-size:12px}
                 +----------+  +-----------+
 
   <span class="hl">Connection Flow:</span>
-  1. Node starts, generates WireGuard key pair
-  2. Node registers with relay (device auth flow)
-  3. Node creates userspace WG tunnel (no root)
-  4. Client calls <span class="dim">GET /api/v1/nodes</span> to discover
-  5. Client connects through relay to node
-  6. Same wire protocol as local Unix socket
+  1. Node registers with relay (invite or token)
+  2. Node opens persistent outbound WebSocket to relay
+  3. Client SSHs into relay: ssh dev-1@relay:2222
+  4. Relay signals node via WebSocket, node dials back
+  5. Relay bridges SSH channel to node's bash PTY
 </div>
 
   <h3>Wire Protocol</h3>
@@ -695,13 +694,14 @@ td code{font-size:12px}
 <!-- ════════════════════════ Relay ════════════════════════ -->
 <section id="relay">
   <h2>Remote Access</h2>
-  <p>Two tiers: <strong>Standalone</strong> (default, zero config, local only) and <strong>Relay mode</strong> (opt-in remote access via WireGuard).</p>
+  <p>Two tiers: <strong>Standalone</strong> (default, zero config, local only) and <strong>Relay mode</strong> (opt-in remote access via SSH gateway).</p>
 
   <h3>Setup</h3>
-  <div class="code-block"><pre><code><span class="cmt"># Authorize your node with a relay</span>
-<span class="cmd">cw setup</span> https://relay.codespace.sh
+  <div class="code-block"><pre><code><span class="cmt"># Register your node with a relay</span>
+<span class="cmd">cw setup</span> <span class="flag">--relay-url</span> https://relay.codespace.sh <span class="flag">--invite</span> &lt;token&gt;
 
-<span class="cmt"># That's it. Your node is now accessible remotely.</span></code></pre><button class="copy-btn" onclick="copyText('cw setup https://relay.codespace.sh',this)">copy</button></div>
+<span class="cmt"># That's it. Your node is now accessible via SSH.</span>
+ssh dev-1@relay.codespace.sh -p 2222</code></pre><button class="copy-btn" onclick="copySnippet(this)">copy</button></div>
 
   <h3>Remote Commands</h3>
   <p>All commands accept an optional node prefix:</p>
@@ -748,7 +748,6 @@ td code{font-size:12px}
 |-- codewire.sock         <span class="dim"># Unix domain socket</span>
 |-- codewire.pid          <span class="dim"># Node PID file</span>
 |-- token                 <span class="dim"># Auth token (direct WS fallback)</span>
-|-- wg_private_key        <span class="dim"># WireGuard private key (0600)</span>
 |-- config.toml           <span class="dim"># Configuration</span>
 |-- servers.toml          <span class="dim"># Saved remote servers</span>
 |-- sessions.json         <span class="dim"># Session metadata</span>

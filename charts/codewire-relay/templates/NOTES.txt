@@ -8,14 +8,14 @@ Codewire Relay has been deployed!
   Relay URL: http://localhost:8080
 {{- end }}
 
-2. Get the WireGuard endpoint:
-{{- if eq .Values.wireguard.service.type "LoadBalancer" }}
-  export WG_IP=$(kubectl get svc {{ include "codewire-relay.fullname" . }}-wg -n {{ .Release.Namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-  echo "WireGuard endpoint: ${WG_IP}:{{ .Values.relay.wgPort }}"
+2. Get the SSH endpoint:
+{{- if eq .Values.ssh.service.type "LoadBalancer" }}
+  export SSH_IP=$(kubectl get svc {{ include "codewire-relay.fullname" . }}-ssh -n {{ .Release.Namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+  echo "SSH endpoint: ${SSH_IP}:2222"
   NOTE: It may take a few minutes for the LoadBalancer IP to be assigned.
 {{- else }}
-  WireGuard service type: {{ .Values.wireguard.service.type }}
-  kubectl get svc {{ include "codewire-relay.fullname" . }}-wg -n {{ .Release.Namespace }}
+  SSH service type: {{ .Values.ssh.service.type }}
+  kubectl get svc {{ include "codewire-relay.fullname" . }}-ssh -n {{ .Release.Namespace }}
 {{- end }}
 
 3. Get the auth token:
@@ -26,11 +26,10 @@ Codewire Relay has been deployed!
 {{- end }}
 
 4. Connect a node:
-  cw setup {{ .Values.relay.baseURL }}
+  cw setup --relay-url={{ .Values.relay.baseURL }}
 
-  Or set environment variables:
-  export CW_RELAY_URL={{ .Values.relay.baseURL }}
-{{- if eq .Values.relay.authMode "token" }}
-  export CW_AUTH_TOKEN=$(kubectl get secret {{ include "codewire-relay.fullname" . }} -n {{ .Release.Namespace }} -o jsonpath='{.data.auth-token}' | base64 -d)
-{{- end }}
-  cw start
+  Or with a token:
+  cw setup --relay-url={{ .Values.relay.baseURL }} --token=<auth-token>
+
+5. SSH into a connected node:
+  ssh <node-name>@<SSH_IP> -p 2222

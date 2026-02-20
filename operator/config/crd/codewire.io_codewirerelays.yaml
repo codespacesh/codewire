@@ -66,11 +66,10 @@ spec:
                 authToken:
                   description: AuthToken is the shared auth token. Auto-generated if empty.
                   type: string
-                wgPort:
-                  description: WGPort is the WireGuard UDP port.
-                  type: integer
-                  format: int32
-                  default: 41820
+                sshListen:
+                  description: SSHListen is the SSH gateway listen address (default :2222).
+                  type: string
+                  default: ":2222"
                 persistence:
                   description: Persistence configures the PVC for relay data.
                   type: object
@@ -94,12 +93,12 @@ spec:
                       type: object
                       additionalProperties:
                         type: string
-                wireguard:
-                  description: WireGuard configures the WireGuard service.
+                ssh:
+                  description: SSH configures the SSH gateway service.
                   type: object
                   properties:
                     service:
-                      description: Service configures the WireGuard Kubernetes Service.
+                      description: Service configures the SSH gateway Kubernetes Service.
                       type: object
                       properties:
                         type:
@@ -201,8 +200,8 @@ spec:
                     - Provisioning
                     - Running
                     - Failed
-                wireguardEndpoint:
-                  description: WireGuardEndpoint is the external WireGuard endpoint (ip:port).
+                sshEndpoint:
+                  description: SSHEndpoint is the external SSH endpoint (ip:port).
                   type: string
                 relayURL:
                   description: RelayURL is the public relay URL.

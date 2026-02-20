@@ -1,6 +1,6 @@
 apiVersion: v2
 name: codewire-relay
-description: A Helm chart for deploying Codewire Relay — WireGuard tunnel connectivity, device auth, node discovery, and shared KV storage
+description: A Helm chart for deploying Codewire Relay — SSH gateway, device auth, node discovery, and shared KV storage
 type: application
 version: 0.1.0
 appVersion: "0.1.0"

@@ -12,7 +12,7 @@ spec:
     className: nginx
     annotations:
       cert-manager.io/cluster-issuer: letsencrypt-prod
-  wireguard:
+  ssh:
     service:
       type: LoadBalancer
   resources:

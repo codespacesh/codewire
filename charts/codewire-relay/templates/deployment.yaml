@@ -39,24 +39,18 @@ spec:
               exec cw relay \
                 --base-url={{ .Values.relay.baseURL | quote }} \
                 --listen={{ .Values.relay.listenAddr | quote }} \
-                --wg-port={{ int .Values.relay.wgPort }} \
+                --ssh-listen={{ .Values.relay.sshListen | quote }} \
                 --data-dir=/data \
                 --auth-mode={{ .Values.relay.authMode | quote }} \
-                --auth-token="$CW_AUTH_TOKEN" \
-                {{- if .Values.relay.wgEndpoint }}
-                --wg-endpoint={{ .Values.relay.wgEndpoint | quote }}
-                {{- end }}
+                --auth-token="$CW_AUTH_TOKEN"
           {{- else }}
           args:
             - relay
             - --base-url={{ .Values.relay.baseURL }}
             - --listen={{ .Values.relay.listenAddr }}
-            - --wg-port={{ int .Values.relay.wgPort }}
+            - --ssh-listen={{ .Values.relay.sshListen }}
             - --data-dir=/data
             - --auth-mode={{ .Values.relay.authMode }}
-            {{- if .Values.relay.wgEndpoint }}
-            - --wg-endpoint={{ .Values.relay.wgEndpoint }}
-            {{- end }}
           {{- end }}
           {{- if eq .Values.relay.authMode "token" }}
           env:
@@ -70,9 +64,9 @@ spec:
             - name: http
               containerPort: 8080
               protocol: TCP
-            - name: wireguard
-              containerPort: {{ int .Values.relay.wgPort }}
-              protocol: UDP
+            - name: ssh
+              containerPort: 2222
+              protocol: TCP
           livenessProbe:
             httpGet:
               path: /healthz

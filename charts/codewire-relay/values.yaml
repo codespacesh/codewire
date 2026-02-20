@@ -2,8 +2,7 @@ relay:
   baseURL: ""  # Required: e.g. https://relay.example.com
   authMode: "token"
   authToken: ""  # Auto-generated if empty
-  wgPort: 41820
-  wgEndpoint: ""  # Defaults to baseURL hostname:wgPort
+  sshListen: ":2222"
   listenAddr: "0.0.0.0:8080"
 
 image:
@@ -33,7 +32,7 @@ ingress:
           pathType: Prefix
   tls: []
 
-wireguard:
+ssh:
   service:
     type: LoadBalancer
     annotations: {}

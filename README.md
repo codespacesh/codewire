@@ -254,7 +254,7 @@ cw setup https://relay.codespace.sh
 
 ### `cw relay`
 
-Run a relay server. The relay provides WireGuard tunneling, node discovery, and shared KV storage.
+Run a relay server. The relay provides SSH gateway access, node discovery, and shared KV storage.
 
 ```bash
 cw relay --base-url https://relay.example.com --data-dir /data/relay
@@ -352,7 +352,6 @@ Communication between client and node uses a frame-based binary protocol over th
 ├── codewire.sock         # Unix domain socket
 ├── codewire.pid          # Node PID file
 ├── token                 # Auth token (for direct WS fallback)
-├── wg_private_key        # WireGuard private key (0600)
 ├── config.toml           # Configuration (optional)
 ├── servers.toml          # Saved remote servers (optional)
 ├── sessions.json         # Session metadata
@@ -379,20 +378,23 @@ relay_url = "https://relay.codespace.sh"  # CODEWIRE_RELAY_URL — opt-in remote
 
 When no config file exists, codewire runs in standalone mode (Unix socket only, no relay).
 
-## Remote Access (WireGuard Relay)
+## Remote Access (SSH Relay)
 
-Codewire uses WireGuard tunneling for remote access. Nodes establish userspace WireGuard tunnels to a relay server — no root required, works behind NAT.
+Codewire uses an SSH gateway for remote access. Nodes establish persistent WebSocket connections to a relay server — no root required, works behind NAT.
 
 ### Quick Setup
 
 ```bash
-# Authorize your node with a relay
-cw setup https://relay.codespace.sh
+# Register your node with a relay
+cw setup --relay-url https://relay.codespace.sh
 
-# That's it. Your node is now accessible remotely.
+# Or with an invite token
+cw setup --relay-url https://relay.codespace.sh --invite <token>
+
+# That's it. Your node is now accessible remotely via SSH.
 ```
 
-The setup flow generates a WireGuard key pair, authorizes via a device code (browser-based), and starts the tunnel.
+The setup flow registers the node, receives a node token, and persists the relay config. The node then maintains a persistent WebSocket connection to the relay.
 
 ### Remote Commands
 
@@ -429,12 +431,12 @@ cw --server my-server attach 1
                     +--------+--------+
                     |   cw relay      |
                     | HTTPS :443      |  <- Clients connect here
-                    | WG UDP :41820   |  <- Nodes tunnel here
-                    | /api/v1/nodes   |  <- Node discovery
+                    | SSH  :2222      |  <- SSH into any node
+                    | /node/connect   |  <- Nodes connect here (WS)
                     +--------+--------+
                         |         |
-           WG tunnel    |         |   WG tunnel
-           (UDP)        |         |   (UDP)
+           WS agent     |         |   WS agent
+           (outbound)   |         |   (outbound)
                         |         |
                 +-------+--+  +---+-------+
                 | cw node  |  | cw node   |
@@ -442,15 +444,15 @@ cw --server my-server attach 1
                 +----------+  +-----------+
 ```
 
-- **Relay** = WireGuard hub + HTTP API (node discovery, shared KV, device auth)
-- **Nodes** = userspace WireGuard clients, serve HTTP/WS on tunnel listener
-- **Clients** = connect via relay, same wire protocol as local Unix socket
+- **Relay** = SSH gateway + HTTP API (node discovery, shared KV, device auth)
+- **Nodes** = connect outward via persistent WebSocket agents (no inbound ports needed)
+- **Clients** = SSH into `<node>@relay:2222`; same PTY experience
 
 ### Local Development (Docker Compose)
 
 The repo includes a Docker Compose stack:
 
-- **Relay** — WireGuard + HTTP API on `localhost:8080`
+- **Relay** — SSH gateway + HTTP API on `localhost:8080`
 - **Caddy** — TLS reverse proxy on `localhost:9443` with wildcard subdomain support
 - **Codewire** — containerized node (`docker-test`) on `localhost:9100`
 
