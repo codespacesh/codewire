@@ -16,9 +16,9 @@ type CodewireRelaySpec struct {
 	// AuthToken is the shared auth token. Auto-generated if empty.
 	AuthToken string `json:"authToken,omitempty"`
 
-	// WGPort is the WireGuard UDP port.
-	// +kubebuilder:default=41820
-	WGPort int32 `json:"wgPort,omitempty"`
+	// SSHListen is the SSH gateway listen address (default :2222).
+	// +kubebuilder:default=":2222"
+	SSHListen string `json:"sshListen,omitempty"`
 
 	// Persistence configures the PVC for relay data.
 	Persistence PersistenceSpec `json:"persistence,omitempty"`
@@ -26,8 +26,8 @@ type CodewireRelaySpec struct {
 	// Ingress configures the Ingress resource for HTTPS API access.
 	Ingress *IngressSpec `json:"ingress,omitempty"`
 
-	// WireGuard configures the WireGuard service.
-	WireGuard WireGuardSpec `json:"wireguard,omitempty"`
+	// SSH configures the SSH gateway service.
+	SSH SSHSpec `json:"ssh,omitempty"`
 
 	// Resources defines compute resources for the relay pod.
 	Resources *ResourceSpec `json:"resources,omitempty"`
@@ -59,12 +59,12 @@ type IngressSpec struct {
 	Annotations map[string]string `json:"annotations,omitempty"`
 }
 
-type WireGuardSpec struct {
-	// Service configures the WireGuard Kubernetes Service.
-	Service WireGuardServiceSpec `json:"service,omitempty"`
+type SSHSpec struct {
+	// Service configures the SSH gateway Kubernetes Service.
+	Service SSHServiceSpec `json:"service,omitempty"`
 }
 
-type WireGuardServiceSpec struct {
+type SSHServiceSpec struct {
 	// Type of the Service (LoadBalancer, NodePort, ClusterIP).
 	// +kubebuilder:default=LoadBalancer
 	Type string `json:"type,omitempty"`
@@ -125,8 +125,8 @@ type CodewireRelayStatus struct {
 	// +kubebuilder:validation:Enum=Pending;Provisioning;Running;Failed
 	Phase string `json:"phase,omitempty"`
 
-	// WireGuardEndpoint is the external WireGuard endpoint (ip:port).
-	WireGuardEndpoint string `json:"wireguardEndpoint,omitempty"`
+	// SSHEndpoint is the external SSH endpoint (ip:port).
+	SSHEndpoint string `json:"sshEndpoint,omitempty"`
 
 	// RelayURL is the public relay URL.
 	RelayURL string `json:"relayURL,omitempty"`

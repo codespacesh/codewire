@@ -132,17 +132,17 @@ func TestReconcile_CreatesResources(t *testing.T) {
 		t.Errorf("HTTP service port = %v, want [8080]", httpSvc.Spec.Ports)
 	}
 
-	// WireGuard Service
-	wgSvc := &corev1.Service{}
-	getObj(t, c, types.NamespacedName{Name: "test-wireguard", Namespace: "default"}, wgSvc)
-	if wgSvc.Spec.Type != corev1.ServiceTypeLoadBalancer {
-		t.Errorf("WG service type = %s, want LoadBalancer", wgSvc.Spec.Type)
+	// SSH Service
+	sshSvc := &corev1.Service{}
+	getObj(t, c, types.NamespacedName{Name: "test-ssh", Namespace: "default"}, sshSvc)
+	if sshSvc.Spec.Type != corev1.ServiceTypeLoadBalancer {
+		t.Errorf("SSH service type = %s, want LoadBalancer", sshSvc.Spec.Type)
 	}
-	if len(wgSvc.Spec.Ports) != 1 || wgSvc.Spec.Ports[0].Port != 41820 {
-		t.Errorf("WG service port = %v, want [41820]", wgSvc.Spec.Ports)
+	if len(sshSvc.Spec.Ports) != 1 || sshSvc.Spec.Ports[0].Port != 2222 {
+		t.Errorf("SSH service port = %v, want [2222]", sshSvc.Spec.Ports)
 	}
-	if wgSvc.Spec.Ports[0].Protocol != corev1.ProtocolUDP {
-		t.Errorf("WG service protocol = %s, want UDP", wgSvc.Spec.Ports[0].Protocol)
+	if sshSvc.Spec.Ports[0].Protocol != corev1.ProtocolTCP {
+		t.Errorf("SSH service protocol = %s, want TCP", sshSvc.Spec.Ports[0].Protocol)
 	}
 }
 
@@ -194,7 +194,7 @@ func TestReconcile_GeneratesAuthToken(t *testing.T) {
 
 func TestReconcile_DeploymentArgs(t *testing.T) {
 	relay := newRelay("test", "default")
-	relay.Spec.WGPort = 51820
+	relay.Spec.SSHListen = ":2222"
 	relay.Spec.AuthMode = "none"
 	r, c := setup(t, relay)
 	doReconcile(t, r, "test", "default")
@@ -206,7 +206,7 @@ func TestReconcile_DeploymentArgs(t *testing.T) {
 	expected := []string{
 		"--base-url=https://test.relay.example.com",
 		"--listen=0.0.0.0:8080",
-		"--wg-port=51820",
+		"--ssh-listen=:2222",
 		"--data-dir=/data",
 		"--auth-mode=none",
 	}
@@ -235,8 +235,8 @@ func TestReconcile_DeploymentArgs(t *testing.T) {
 	if ports[0].ContainerPort != 8080 || ports[0].Protocol != corev1.ProtocolTCP {
 		t.Errorf("HTTP port = %d/%s, want 8080/TCP", ports[0].ContainerPort, ports[0].Protocol)
 	}
-	if ports[1].ContainerPort != 51820 || ports[1].Protocol != corev1.ProtocolUDP {
-		t.Errorf("WG port = %d/%s, want 51820/UDP", ports[1].ContainerPort, ports[1].Protocol)
+	if ports[1].ContainerPort != 2222 || ports[1].Protocol != corev1.ProtocolTCP {
+		t.Errorf("SSH port = %d/%s, want 2222/TCP", ports[1].ContainerPort, ports[1].Protocol)
 	}
 }
 
@@ -361,11 +361,11 @@ func TestReconcile_UpdatesExistingResources(t *testing.T) {
 	r, c := setup(t, relay)
 	doReconcile(t, r, "test", "default")
 
-	// Verify initial WG port
+	// Verify initial SSH listen address
 	deploy := &appsv1.Deployment{}
 	getObj(t, c, types.NamespacedName{Name: "test", Namespace: "default"}, deploy)
 	for _, arg := range deploy.Spec.Template.Spec.Containers[0].Args {
-		if arg == "--wg-port=41820" {
+		if arg == "--ssh-listen=:2222" {
 			break
 		}
 	}
@@ -373,7 +373,7 @@ func TestReconcile_UpdatesExistingResources(t *testing.T) {
 	// Update spec
 	updated := &codewire.CodewireRelay{}
 	getObj(t, c, types.NamespacedName{Name: "test", Namespace: "default"}, updated)
-	updated.Spec.WGPort = 51820
+	updated.Spec.SSHListen = ":2223"
 	if err := c.Update(context.Background(), updated); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
@@ -387,19 +387,19 @@ func TestReconcile_UpdatesExistingResources(t *testing.T) {
 
 	found := false
 	for _, arg := range deploy2.Spec.Template.Spec.Containers[0].Args {
-		if arg == "--wg-port=51820" {
+		if arg == "--ssh-listen=:2223" {
 			found = true
 		}
 	}
 	if !found {
-		t.Errorf("expected --wg-port=51820 in args, got %v", deploy2.Spec.Template.Spec.Containers[0].Args)
+		t.Errorf("expected --ssh-listen=:2223 in args, got %v", deploy2.Spec.Template.Spec.Containers[0].Args)
 	}
 
-	// WG service port should also be updated
-	wgSvc := &corev1.Service{}
-	getObj(t, c, types.NamespacedName{Name: "test-wireguard", Namespace: "default"}, wgSvc)
-	if wgSvc.Spec.Ports[0].Port != 51820 {
-		t.Errorf("WG service port = %d, want 51820", wgSvc.Spec.Ports[0].Port)
+	// SSH service port should be 2222
+	sshSvc := &corev1.Service{}
+	getObj(t, c, types.NamespacedName{Name: "test-ssh", Namespace: "default"}, sshSvc)
+	if sshSvc.Spec.Ports[0].Port != 2222 {
+		t.Errorf("SSH service port = %d, want 2222", sshSvc.Spec.Ports[0].Port)
 	}
 }
 
@@ -421,7 +421,7 @@ func TestReconcile_Labels(t *testing.T) {
 		{"test-data", &corev1.PersistentVolumeClaim{}},
 		{"test", &appsv1.Deployment{}},
 		{"test-http", &corev1.Service{}},
-		{"test-wireguard", &corev1.Service{}},
+		{"test-ssh", &corev1.Service{}},
 	}
 
 	for _, res := range resources {

@@ -37,7 +37,7 @@ const (
 // Condition types for CodewireRelay status.
 const (
 	ConditionReady               = "Ready"
-	ConditionWireGuardReady      = "WireGuardReady"
+	ConditionSSHReady            = "SSHReady"
 	ConditionDNSConfigured       = "DNSConfigured"
 	ConditionCredentialsInjected = "CredentialsInjected"
 )
@@ -173,10 +173,10 @@ func (r *CodewireRelayReconciler) runSubReconcilers(ctx context.Context, relay *
 		return fmt.Errorf("reconcile HTTP Service: %w", err)
 	}
 
-	// WireGuard Service
-	if err := r.reconcileWireGuardService(ctx, relay); err != nil {
-		logger.Error(err, "failed to reconcile WireGuard Service")
-		return fmt.Errorf("reconcile WireGuard Service: %w", err)
+	// SSH Service
+	if err := r.reconcileSSHService(ctx, relay); err != nil {
+		logger.Error(err, "failed to reconcile SSH Service")
+		return fmt.Errorf("reconcile SSH Service: %w", err)
 	}
 
 	// Ingress (optional)
@@ -187,10 +187,10 @@ func (r *CodewireRelayReconciler) runSubReconcilers(ctx context.Context, relay *
 		}
 	}
 
-	// WireGuard Endpoint (watch LoadBalancer)
-	if err := r.reconcileWireGuardEndpoint(ctx, relay); err != nil {
-		logger.Error(err, "failed to reconcile WireGuard endpoint")
-		return fmt.Errorf("reconcile WireGuard endpoint: %w", err)
+	// SSH Endpoint (watch LoadBalancer)
+	if err := r.reconcileSSHEndpoint(ctx, relay); err != nil {
+		logger.Error(err, "failed to reconcile SSH endpoint")
+		return fmt.Errorf("reconcile SSH endpoint: %w", err)
 	}
 
 	// DNS (optional)
@@ -293,15 +293,15 @@ func (r *CodewireRelayReconciler) reconcileDeployment(ctx context.Context, relay
 		}
 
 		// Build container args.
-		wgPort := relay.Spec.WGPort
-		if wgPort == 0 {
-			wgPort = 41820
+		sshListen := relay.Spec.SSHListen
+		if sshListen == "" {
+			sshListen = ":2222"
 		}
 
 		args := []string{
 			fmt.Sprintf("--base-url=%s", relay.Spec.BaseURL),
 			"--listen=0.0.0.0:8080",
-			fmt.Sprintf("--wg-port=%d", wgPort),
+			fmt.Sprintf("--ssh-listen=%s", sshListen),
 			"--data-dir=/data",
 			fmt.Sprintf("--auth-mode=%s", relay.Spec.AuthMode),
 		}
@@ -350,9 +350,9 @@ func (r *CodewireRelayReconciler) reconcileDeployment(ctx context.Context, relay
 								Protocol:      corev1.ProtocolTCP,
 							},
 							{
-								Name:          "wireguard",
-								ContainerPort: wgPort,
-								Protocol:      corev1.ProtocolUDP,
+								Name:          "ssh",
+								ContainerPort: 2222,
+								Protocol:      corev1.ProtocolTCP,
 							},
 						},
 						VolumeMounts: []corev1.VolumeMount{
@@ -437,22 +437,17 @@ func (r *CodewireRelayReconciler) reconcileHTTPService(ctx context.Context, rela
 	return err
 }
 
-// reconcileWireGuardService ensures the WireGuard service exists with the
+// reconcileSSHService ensures the SSH gateway service exists with the
 // configured service type (default LoadBalancer).
-func (r *CodewireRelayReconciler) reconcileWireGuardService(ctx context.Context, relay *codewire.CodewireRelay) error {
-	wgPort := relay.Spec.WGPort
-	if wgPort == 0 {
-		wgPort = 41820
-	}
-
-	svcType := corev1.ServiceType(relay.Spec.WireGuard.Service.Type)
+func (r *CodewireRelayReconciler) reconcileSSHService(ctx context.Context, relay *codewire.CodewireRelay) error {
+	svcType := corev1.ServiceType(relay.Spec.SSH.Service.Type)
 	if svcType == "" {
 		svcType = corev1.ServiceTypeLoadBalancer
 	}
 
 	svc := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      relay.Name + "-wireguard",
+			Name:      relay.Name + "-ssh",
 			Namespace: relay.Namespace,
 		},
 	}
@@ -465,18 +460,18 @@ func (r *CodewireRelayReconciler) reconcileWireGuardService(ctx context.Context,
 		svc.Labels = labelsForRelay(relay)
 
 		// Apply provider-specific annotations (e.g., for cloud LB configuration).
-		if relay.Spec.WireGuard.Service.Annotations != nil {
-			svc.Annotations = relay.Spec.WireGuard.Service.Annotations
+		if relay.Spec.SSH.Service.Annotations != nil {
+			svc.Annotations = relay.Spec.SSH.Service.Annotations
 		}
 
 		svc.Spec.Type = svcType
 		svc.Spec.Selector = labelsForRelay(relay)
 		svc.Spec.Ports = []corev1.ServicePort{
 			{
-				Name:       "wireguard",
-				Port:       wgPort,
-				TargetPort: intstr.FromString("wireguard"),
-				Protocol:   corev1.ProtocolUDP,
+				Name:       "ssh",
+				Port:       2222,
+				TargetPort: intstr.FromString("ssh"),
+				Protocol:   corev1.ProtocolTCP,
 			},
 		}
 
@@ -486,22 +481,17 @@ func (r *CodewireRelayReconciler) reconcileWireGuardService(ctx context.Context,
 	return err
 }
 
-// reconcileWireGuardEndpoint watches the WireGuard LoadBalancer service for an
+// reconcileSSHEndpoint watches the SSH gateway LoadBalancer service for an
 // external IP or hostname and updates the relay status accordingly.
-func (r *CodewireRelayReconciler) reconcileWireGuardEndpoint(ctx context.Context, relay *codewire.CodewireRelay) error {
-	wgPort := relay.Spec.WGPort
-	if wgPort == 0 {
-		wgPort = 41820
-	}
-
+func (r *CodewireRelayReconciler) reconcileSSHEndpoint(ctx context.Context, relay *codewire.CodewireRelay) error {
 	svc := &corev1.Service{}
 	svcName := types.NamespacedName{
-		Name:      relay.Name + "-wireguard",
+		Name:      relay.Name + "-ssh",
 		Namespace: relay.Namespace,
 	}
 	if err := r.Get(ctx, svcName, svc); err != nil {
-		r.setCondition(relay, ConditionWireGuardReady, metav1.ConditionFalse,
-			"ServiceNotFound", fmt.Sprintf("WireGuard service not found: %v", err))
+		r.setCondition(relay, ConditionSSHReady, metav1.ConditionFalse,
+			"ServiceNotFound", fmt.Sprintf("SSH service not found: %v", err))
 		return err
 	}
 
@@ -510,22 +500,22 @@ func (r *CodewireRelayReconciler) reconcileWireGuardEndpoint(ctx context.Context
 	if len(svc.Status.LoadBalancer.Ingress) > 0 {
 		ingress := svc.Status.LoadBalancer.Ingress[0]
 		if ingress.IP != "" {
-			endpoint = fmt.Sprintf("%s:%d", ingress.IP, wgPort)
+			endpoint = fmt.Sprintf("%s:2222", ingress.IP)
 		} else if ingress.Hostname != "" {
-			endpoint = fmt.Sprintf("%s:%d", ingress.Hostname, wgPort)
+			endpoint = fmt.Sprintf("%s:2222", ingress.Hostname)
 		}
 	}
 
 	if endpoint == "" {
-		r.setCondition(relay, ConditionWireGuardReady, metav1.ConditionFalse,
+		r.setCondition(relay, ConditionSSHReady, metav1.ConditionFalse,
 			"WaitingForLoadBalancer", "Waiting for LoadBalancer to assign an external IP")
 		// Not an error: we'll pick it up on the next reconciliation.
 		return nil
 	}
 
-	relay.Status.WireGuardEndpoint = endpoint
-	r.setCondition(relay, ConditionWireGuardReady, metav1.ConditionTrue,
-		"EndpointReady", fmt.Sprintf("WireGuard endpoint available at %s", endpoint))
+	relay.Status.SSHEndpoint = endpoint
+	r.setCondition(relay, ConditionSSHReady, metav1.ConditionTrue,
+		"EndpointReady", fmt.Sprintf("SSH endpoint available at %s", endpoint))
 
 	return nil
 }
@@ -666,12 +656,12 @@ func (r *CodewireRelayReconciler) reconcileDNS(ctx context.Context, relay *codew
 	hostname := parsedURL.Hostname()
 
 	// Determine the target value for the DNS record.
-	// Prefer the WireGuard endpoint's IP if available, otherwise fall back
+	// Prefer the SSH endpoint's IP if available, otherwise fall back
 	// to using the Ingress external address.
 	target := ""
-	if relay.Status.WireGuardEndpoint != "" {
+	if relay.Status.SSHEndpoint != "" {
 		// Parse out just the IP/hostname (strip port).
-		epURL, parseErr := url.Parse("//" + relay.Status.WireGuardEndpoint)
+		epURL, parseErr := url.Parse("//" + relay.Status.SSHEndpoint)
 		if parseErr == nil {
 			target = epURL.Hostname()
 		}
@@ -722,9 +712,9 @@ func (r *CodewireRelayReconciler) reconcileCredentialInjection(ctx context.Conte
 
 		secret.Type = corev1.SecretTypeOpaque
 		secret.StringData = map[string]string{
-			"relay-url":          relay.Spec.BaseURL,
-			"auth-token":         relay.Spec.AuthToken,
-			"wireguard-endpoint": relay.Status.WireGuardEndpoint,
+			"relay-url":    relay.Spec.BaseURL,
+			"auth-token":   relay.Spec.AuthToken,
+			"ssh-endpoint": relay.Status.SSHEndpoint,
 		}
 
 		return nil
