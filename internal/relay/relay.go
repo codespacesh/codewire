@@ -27,7 +27,7 @@ type RelayConfig struct {
 	SSHListenAddr string
 	// DataDir is where relay.db lives.
 	DataDir string
-	// AuthMode controls registration: "github", "token", "none".
+	// AuthMode controls authentication: "oidc", "github", "token", "none".
 	AuthMode string
 	// AuthToken is the shared secret when AuthMode is "token" or as fallback.
 	AuthToken string
@@ -37,6 +37,16 @@ type RelayConfig struct {
 	GitHubClientID string
 	// GitHubClientSecret is a manual override for GitHub OAuth App client secret.
 	GitHubClientSecret string
+	// OIDCIssuer is the OIDC provider issuer URL (e.g. https://auth.codespace.sh).
+	// Required when AuthMode is "oidc".
+	OIDCIssuer string
+	// OIDCClientID is the registered OIDC client ID.
+	OIDCClientID string
+	// OIDCClientSecret is the registered OIDC client secret.
+	OIDCClientSecret string
+	// OIDCAllowedGroups restricts access to members of these groups.
+	// Empty means any authenticated user is allowed.
+	OIDCAllowedGroups []string
 }
 
 // RunRelay starts the relay server. It blocks until ctx is cancelled.
@@ -133,6 +143,31 @@ func buildMux(hub *NodeHub, sessions *PendingSessions, st store.Store, cfg Relay
 			}
 		}
 	}
+
+	// OIDC auth (when AuthMode == "oidc").
+	if cfg.AuthMode == "oidc" {
+		oidcProvider := &oauth.OIDCProvider{
+			Issuer:        cfg.OIDCIssuer,
+			ClientID:      cfg.OIDCClientID,
+			ClientSecret:  cfg.OIDCClientSecret,
+			AllowedGroups: cfg.OIDCAllowedGroups,
+		}
+		if err := oidcProvider.Discover(context.Background()); err != nil {
+			// Log but don't crash — relay will return errors on auth endpoints if discovery failed.
+			fmt.Fprintf(os.Stderr, "[relay] OIDC discovery failed: %v\n", err)
+		}
+		mux.HandleFunc("GET /auth/oidc", oidcProvider.LoginHandler(st, cfg.BaseURL))
+		mux.HandleFunc("GET /auth/oidc/callback", oidcProvider.CallbackHandler(st, cfg.BaseURL))
+		mux.HandleFunc("GET /auth/session", oidcProvider.OIDCSessionInfoHandler(st))
+		mux.HandleFunc("GET /{$}", oidcProvider.OIDCIndexHandler(cfg.BaseURL))
+
+		// Device flow (public, rate-limited same as join).
+		mux.HandleFunc("POST /api/v1/device/authorize", rateLimitMiddleware(joinRL, deviceAuthorizeHandler(st, oidcProvider)))
+		mux.HandleFunc("POST /api/v1/device/poll", devicePollHandler(st, oidcProvider))
+	}
+
+	// Auth config discovery (unauthenticated, used by cw setup).
+	mux.HandleFunc("GET /api/v1/auth/config", authConfigHandler(cfg.AuthMode))
 
 	// Node registration (issues a random node token).
 	mux.Handle("POST /api/v1/nodes", authMiddleware(http.HandlerFunc(nodeRegisterHandler(st))))
@@ -542,6 +577,17 @@ func rateLimitMiddleware(rl *rateLimiter, next http.HandlerFunc) http.HandlerFun
 			return
 		}
 		next(w, r)
+	}
+}
+
+// --- Auth Config ---
+
+func authConfigHandler(authMode string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"auth_mode": authMode,
+		})
 	}
 }
 

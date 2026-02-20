@@ -1016,6 +1016,10 @@ func relayCmd() *cobra.Command {
 		allowedUsers       []string
 		githubClientID     string
 		githubClientSecret string
+		oidcIssuer         string
+		oidcClientID       string
+		oidcClientSecret   string
+		oidcAllowedGroups  []string
 	)
 
 	cmd := &cobra.Command{
@@ -1055,6 +1059,10 @@ func relayCmd() *cobra.Command {
 				AllowedUsers:       allowedUsers,
 				GitHubClientID:     githubClientID,
 				GitHubClientSecret: githubClientSecret,
+				OIDCIssuer:         oidcIssuer,
+				OIDCClientID:       oidcClientID,
+				OIDCClientSecret:   oidcClientSecret,
+				OIDCAllowedGroups:  oidcAllowedGroups,
 			})
 		},
 	}
@@ -1063,11 +1071,15 @@ func relayCmd() *cobra.Command {
 	cmd.Flags().StringVar(&listen, "listen", ":8080", "HTTP listen address")
 	cmd.Flags().StringVar(&sshListen, "ssh-listen", ":2222", "SSH listen address")
 	cmd.Flags().StringVar(&relayDir, "data-dir", "", "Data directory for relay (default: ~/.codewire/relay)")
-	cmd.Flags().StringVar(&authMode, "auth-mode", "none", "Auth mode: github, token, none")
+	cmd.Flags().StringVar(&authMode, "auth-mode", "none", "Auth mode: oidc, github, token, none")
 	cmd.Flags().StringVar(&authToken, "auth-token", "", "Admin auth token (for --auth-mode=token or as fallback for headless/CI)")
 	cmd.Flags().StringSliceVar(&allowedUsers, "allowed-users", nil, "GitHub usernames allowed to authenticate (GitHub mode)")
 	cmd.Flags().StringVar(&githubClientID, "github-client-id", "", "Manual GitHub OAuth App client ID (for private networks)")
 	cmd.Flags().StringVar(&githubClientSecret, "github-client-secret", "", "Manual GitHub OAuth App client secret")
+	cmd.Flags().StringVar(&oidcIssuer, "oidc-issuer", "", "OIDC provider issuer URL (for --auth-mode=oidc)")
+	cmd.Flags().StringVar(&oidcClientID, "oidc-client-id", "", "OIDC client ID")
+	cmd.Flags().StringVar(&oidcClientSecret, "oidc-client-secret", "", "OIDC client secret")
+	cmd.Flags().StringSliceVar(&oidcAllowedGroups, "oidc-allowed-groups", nil, "OIDC groups required for access (empty = any authenticated user)")
 
 	return cmd
 }
