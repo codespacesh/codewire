@@ -21,7 +21,7 @@ The node auto-starts on first use. No daemon to configure.
 
 ```bash
 # Launch a session (-- is required before the command)
-cw launch -- bash -c 'echo hello; sleep 2; echo done'
+cw run -- bash -c 'echo hello; sleep 2; echo done'
 
 # Output: Session 1 launched: bash -c echo hello; ...
 
@@ -37,9 +37,9 @@ cw logs 1
 ## Core Commands
 
 ```bash
-cw launch -- <command>          # Start a session
-cw launch --name myapp -- cmd   # Start with a name (reference by name later)
-cw launch --tag worker -- cmd   # Tag for group operations
+cw run -- <command>          # Start a session
+cw run --name myapp -- cmd   # Start with a name (reference by name later)
+cw run --tag worker -- cmd   # Tag for group operations
 
 cw list                         # Show all sessions
 cw status <id>                  # Detailed status for one session
@@ -74,9 +74,9 @@ cw logs myapp
 cw kill myapp
 
 # Tags enable group operations
-cw launch --tag batch-1 -- ./worker.sh shard-a
-cw launch --tag batch-1 -- ./worker.sh shard-b
-cw launch --tag batch-1 -- ./worker.sh shard-c
+cw run --tag batch-1 -- ./worker.sh shard-a
+cw run --tag batch-1 -- ./worker.sh shard-b
+cw run --tag batch-1 -- ./worker.sh shard-c
 cw wait --tag batch-1            # blocks until all three finish
 cw kill --tag batch-1            # cleanup
 ```
@@ -126,14 +126,14 @@ full reference.
 
 **Wait for completion, then read output:**
 ```bash
-cw launch --name build -- make test
+cw run --name build -- make test
 cw wait build
 cw logs build
 ```
 
 **Launch and check later (non-blocking):**
 ```bash
-cw launch --name deploy -- ./deploy.sh
+cw run --name deploy -- ./deploy.sh
 # ... do other things ...
 cw status deploy
 cw logs deploy --tail 20
@@ -142,7 +142,7 @@ cw logs deploy --tail 20
 **Fan-out with tags:**
 ```bash
 for shard in a b c; do
-  cw launch --tag run-42 -- ./process.sh $shard
+  cw run --tag run-42 -- ./process.sh $shard
 done
 cw wait --tag run-42
 cw logs --tag run-42    # (use cw list + per-ID logs)

@@ -57,14 +57,14 @@ your sessions. The node itself must be explicitly stopped.
 
 ## 3. CLI Commands
 
-### cw launch (alias: cw run)
+### cw run
 
 Start a new session. The `--` separator is **required** before the command.
 
 ```bash
-cw launch -- <command> [args...]
-cw launch --name <name> -- <command>
-cw launch --name <name> --tag <tag> -- <command>
+cw run -- <command> [args...]
+cw run --name <name> -- <command>
+cw run --name <name> --tag <tag> -- <command>
 ```
 
 Flags:
@@ -76,10 +76,10 @@ Flags:
 
 Examples:
 ```bash
-cw launch -- sleep 60
-cw launch --name build -- make test
-cw launch --name worker-1 --tag batch-42 -- ./worker.sh shard-1
-cw launch --name worker-2 --tag batch-42 -- ./worker.sh shard-2
+cw run -- sleep 60
+cw run --name build -- make test
+cw run --name worker-1 --tag batch-42 -- ./worker.sh shard-1
+cw run --name worker-2 --tag batch-42 -- ./worker.sh shard-2
 ```
 
 **Note:** Omitting `--` causes flags in your command to be parsed by `cw`. If your
@@ -521,7 +521,7 @@ The basic loop. Launch a process, wait for it, read the output.
 
 ```
 CLI:
-  cw launch --name build -- make test
+  cw run --name build -- make test
   cw wait build
   cw logs build
 
@@ -541,9 +541,9 @@ Launch N parallel workers, wait for all, then cleanup.
 
 ```
 CLI:
-  cw launch --tag batch-42 -- ./worker.sh shard-1
-  cw launch --tag batch-42 -- ./worker.sh shard-2
-  cw launch --tag batch-42 -- ./worker.sh shard-3
+  cw run --tag batch-42 -- ./worker.sh shard-1
+  cw run --tag batch-42 -- ./worker.sh shard-2
+  cw run --tag batch-42 -- ./worker.sh shard-3
   cw wait --tag batch-42
   cw kill --tag batch-42     # cleanup stragglers
 
@@ -623,43 +623,124 @@ For completed sessions, use `cw logs` (the output is persisted server-side).
 
 ## 7. Relay Mode
 
-Relay mode enables remote access and fleet management across multiple nodes. Requires
-a relay server.
+Relay mode enables remote access and fleet management. Two tiers:
+- **Standalone** (default): local Unix socket only, zero config
+- **Relay** (opt-in): WireGuard tunneling, node discovery, shared KV store
+
+### How it works
+
+Nodes establish userspace WireGuard tunnels to a relay server. No root required,
+works behind NAT. Each node generates a WireGuard key pair on first run and
+registers via device auth.
+
+```
+[Your machine]               [Relay server]              [Remote machine]
+  cw node  ←── WG tunnel ──→  cw relay  ←── WG tunnel ──→  cw node
+  (behind NAT)                (public IP)                  (behind NAT)
+```
 
 ### Connect a node to a relay
 
 ```bash
-cw setup <relay-url>
-# Follow the device authorization flow in your browser
+cw setup https://relay.codespace.sh
+# Opens browser for GitHub OAuth (or use --invite token for headless)
 ```
 
-After setup, the node registers with the relay and joins the fleet.
-
-### Use a remote node
+After setup, the node auto-connects to the relay on start. Other nodes on the
+same relay become accessible via `--server`.
 
 ```bash
-cw --server <node-name> list
-cw --server <node-name> launch -- make build
+# Headless / CI
+cw setup https://relay.codespace.sh --invite <token>
+
+# With admin token
+cw setup https://relay.codespace.sh --token <admin-token>
 ```
 
-Or save a named connection:
+### Access remote nodes
+
 ```bash
-cw server add mynode ws://mynode.example.com:8080
 cw --server mynode list
+cw --server mynode run -- make build
+cw --server mynode logs 5
+```
+
+Save named connections to avoid repeating --server:
+```bash
+cw server add mynode https://relay.codespace.sh
+cw server list
+cw --server mynode list
+```
+
+### Node discovery
+
+```bash
+cw nodes    # list all nodes registered with your relay
+```
+
+Output: NAME, TUNNEL URL, STATUS (online/offline)
+
+### Running your own relay
+
+```bash
+cw relay \
+  --base-url https://relay.example.com \
+  --auth-mode github \
+  --allowed-users alice,bob \
+  --github-client-id <id> \
+  --github-client-secret <secret>
+```
+
+Key flags:
+| Flag | Default | Description |
+|---|---|---|
+| `--base-url` | (required) | Public URL of the relay |
+| `--auth-mode` | `none` | `github`, `token`, or `none` |
+| `--auth-token` | — | Admin token (for `--auth-mode=token` or CI fallback) |
+| `--wg-port` | `41820` | WireGuard UDP port |
+| `--listen` | `:8080` | HTTP listen address |
+| `--data-dir` | `~/.codewire/relay` | SQLite + WireGuard keys |
+| `--allowed-users` | — | GitHub usernames allowed (github mode) |
+
+Auth modes:
+- `none` — open relay, any client can register
+- `token` — clients must present the admin token
+- `github` — clients authenticate via GitHub OAuth; optionally restrict to `--allowed-users`
+
+### Invites (device onboarding)
+
+Create an invite code to onboard a new node without sharing your admin token:
+```bash
+cw invite               # single-use, expires in 1h
+cw invite --uses 5 --ttl 24h
+cw invite --qr          # print QR code for mobile
+```
+
+Share the resulting URL or run:
+```bash
+cw setup https://relay.example.com --invite <token>
+```
+
+### Revoke a node
+
+```bash
+cw revoke <node-name>
 ```
 
 ### Shared KV store
 
-The relay provides a KV store shared across all nodes:
-
 ```bash
 cw kv set mykey myvalue
+cw kv set mykey myvalue --ttl 5m
 cw kv get mykey
 cw kv list --prefix my
 cw kv delete mykey
 ```
 
-Via MCP: use `codewire_kv_set/get/list/delete` (requires relay configured).
+Via MCP: `codewire_kv_set/get/list/delete` (requires relay configured).
+
+The KV store is useful for cross-node coordination — e.g., a supervisor on one
+node signalling workers on another.
 
 ---
 
@@ -684,8 +765,8 @@ reused between node restarts.
 You forgot the `--` separator before your command:
 ```bash
 # Wrong:
-cw launch -- bash -c 'echo hi'   # correct
-cw launch bash -c 'echo hi'      # wrong — -c parsed as cw flag
+cw run -- bash -c 'echo hi'   # correct
+cw run bash -c 'echo hi'      # wrong — -c parsed as cw flag
 ```
 
 ### "name already in use"
@@ -694,7 +775,7 @@ Session names must be unique within a running node. Kill the old session or use 
 different name:
 ```bash
 cw kill myapp
-cw launch --name myapp -- ./app
+cw run --name myapp -- ./app
 ```
 
 ### Session shows "completed (-1)"
