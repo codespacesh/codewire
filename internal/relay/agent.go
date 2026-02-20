@@ -89,7 +89,12 @@ func handleSSHBack(ctx context.Context, cfg AgentConfig, msg HubMessage) {
 	}
 	defer ws.CloseNow()
 
-	nc := websocket.NetConn(ctx, ws, websocket.MessageBinary)
+	// Use a cancellable child context: when bash exits (ptmx→nc copy ends),
+	// cancel the context to unblock nc.Read() in the other direction.
+	childCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	nc := websocket.NetConn(childCtx, ws, websocket.MessageBinary)
 	defer nc.Close()
 
 	// Spawn a bash shell attached to a PTY.
@@ -106,8 +111,15 @@ func handleSSHBack(ctx context.Context, cfg AgentConfig, msg HubMessage) {
 		cmd.Wait()
 	}()
 
-	// Bridge PTY ↔ back-connection.
-	go io.Copy(nc, ptmx)
+	// ptmx→nc: send bash output to relay. When bash exits (ptmx EOF/EIO),
+	// cancel the child context to unblock nc.Read() in the other direction.
+	go func() {
+		io.Copy(nc, ptmx)
+		cancel()
+	}()
+
+	// nc→ptmx: relay stdin to bash. Returns when nc.Read() returns error
+	// (either relay closed the connection or childCtx was cancelled above).
 	io.Copy(ptmx, nc)
 }
 

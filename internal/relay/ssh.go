@@ -171,10 +171,24 @@ func (s *SSHServer) bridgeToNode(ctx context.Context, ch ssh.Channel, nodeName, 
 	slog.Info("SSH: bridging session", "node", nodeName, "session", sessionID)
 
 	// Pipe SSH channel ↔ back-connection.
+	// Wait for BOTH directions: stdin EOF fires first, then node output drains.
 	done := make(chan struct{}, 2)
-	go func() { io.Copy(backConn, ch); done <- struct{}{} }()
+	go func() {
+		io.Copy(backConn, ch)
+		// Signal stdin EOF to the node via PTY Ctrl-D so bash exits gracefully.
+		backConn.Write([]byte{0x04})
+		done <- struct{}{}
+	}()
 	go func() { io.Copy(ch, backConn); done <- struct{}{} }()
-	<-done
+	select {
+	case <-done:
+		// One direction finished; wait for the other (with ctx as safety valve).
+		select {
+		case <-done:
+		case <-ctx.Done():
+		}
+	case <-ctx.Done():
+	}
 }
 
 func generateSessionID() string {
