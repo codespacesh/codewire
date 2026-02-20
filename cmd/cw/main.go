@@ -1142,6 +1142,12 @@ func msgCmd() *cobra.Command {
 				return err
 			}
 
+			if from == "" {
+				if envID := os.Getenv("CW_SESSION_ID"); envID != "" {
+					from = envID
+				}
+			}
+
 			var fromID *uint32
 			if from != "" {
 				resolved, err := client.ResolveSessionArg(target, from)
@@ -1268,6 +1274,12 @@ func requestCmd() *cobra.Command {
 				return err
 			}
 
+			if from == "" {
+				if envID := os.Getenv("CW_SESSION_ID"); envID != "" {
+					from = envID
+				}
+			}
+
 			var fromID *uint32
 			if from != "" {
 				resolved, err := client.ResolveSessionArg(target, from)
@@ -1307,6 +1319,12 @@ func replyCmd() *cobra.Command {
 			if target.IsLocal() {
 				if err := ensureNode(); err != nil {
 					return err
+				}
+			}
+
+			if from == "" {
+				if envID := os.Getenv("CW_SESSION_ID"); envID != "" {
+					from = envID
 				}
 			}
 

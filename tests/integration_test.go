@@ -1302,3 +1302,181 @@ func TestListStatusFilter(t *testing.T) {
 		t.Fatal("expected at least 1 running session")
 	}
 }
+
+func TestCWSessionIDEnv(t *testing.T) {
+	dir := tempDir(t, "cw-session-id")
+	sock := startTestNode(t, dir)
+
+	resp := requestResponse(t, sock, &protocol.Request{
+		Type:       "Launch",
+		Command:    []string{"sh", "-c", "echo CW_SESSION_ID=$CW_SESSION_ID"},
+		WorkingDir: "/tmp",
+	})
+	if resp.Type != "Launched" {
+		t.Fatalf("expected Launched, got %s: %s", resp.Type, resp.Message)
+	}
+	id := *resp.ID
+	time.Sleep(1 * time.Second)
+
+	logsResp := requestResponse(t, sock, &protocol.Request{
+		Type:   "Logs",
+		ID:     uint32Ptr(id),
+		Follow: boolPtr(false),
+	})
+	expected := fmt.Sprintf("CW_SESSION_ID=%d", id)
+	if !strings.Contains(logsResp.Data, expected) {
+		t.Fatalf("expected %q in output, got: %q", expected, logsResp.Data)
+	}
+}
+
+func TestAnonymousSendRequest(t *testing.T) {
+	dir := tempDir(t, "anon-request")
+	sock := startTestNode(t, dir)
+
+	// Launch the target session.
+	resp := requestResponse(t, sock, &protocol.Request{
+		Type:       "Launch",
+		Command:    []string{"sleep", "30"},
+		WorkingDir: "/tmp",
+		Name:       "anon-target",
+	})
+	if resp.Type != "Launched" {
+		t.Fatalf("expected Launched, got %s: %s", resp.Type, resp.Message)
+	}
+	targetID := *resp.ID
+
+	time.Sleep(200 * time.Millisecond)
+
+	// Subscribe to message.request events on the target session.
+	subConn, subReader, subWriter := connectRaw(t, sock)
+	defer subConn.Close()
+
+	if err := subWriter.SendRequest(&protocol.Request{
+		Type:       "Subscribe",
+		ID:         uint32Ptr(targetID),
+		EventTypes: []string{"message.request"},
+	}); err != nil {
+		t.Fatalf("send subscribe: %v", err)
+	}
+
+	// Read SubscribeAck.
+	ackFrame, err := subReader.ReadFrame()
+	if err != nil {
+		t.Fatalf("read subscribe ack: %v", err)
+	}
+	var ackResp protocol.Response
+	if err := json.Unmarshal(ackFrame.Payload, &ackResp); err != nil {
+		t.Fatalf("parse ack: %v", err)
+	}
+	if ackResp.Type != "SubscribeAck" {
+		t.Fatalf("expected SubscribeAck, got %s", ackResp.Type)
+	}
+
+	// Channel for the incoming message.request event.
+	type eventResult struct {
+		requestID string
+		err       error
+	}
+	eventCh := make(chan eventResult, 1)
+
+	go func() {
+		deadline := time.After(5 * time.Second)
+		for {
+			frameCh := make(chan frameResult, 1)
+			go func() {
+				f, err := subReader.ReadFrame()
+				frameCh <- frameResult{f, err}
+			}()
+			select {
+			case fr := <-frameCh:
+				if fr.err != nil {
+					eventCh <- eventResult{err: fr.err}
+					return
+				}
+				if fr.frame == nil {
+					eventCh <- eventResult{err: fmt.Errorf("unexpected EOF")}
+					return
+				}
+				if fr.frame.Type != protocol.FrameControl {
+					continue
+				}
+				var r protocol.Response
+				if err := json.Unmarshal(fr.frame.Payload, &r); err != nil {
+					continue
+				}
+				if r.Type != "Event" || r.Event == nil {
+					continue
+				}
+				if r.Event.EventType != "message.request" {
+					continue
+				}
+				// Extract request_id from event data.
+				var data struct {
+					RequestID string `json:"request_id"`
+				}
+				if err := json.Unmarshal(r.Event.Data, &data); err != nil {
+					eventCh <- eventResult{err: fmt.Errorf("unmarshal event data: %v", err)}
+					return
+				}
+				eventCh <- eventResult{requestID: data.RequestID}
+				return
+			case <-deadline:
+				eventCh <- eventResult{err: fmt.Errorf("timeout waiting for message.request event")}
+				return
+			}
+		}
+	}()
+
+	// Send MsgRequest anonymously (no ID field = fromID 0).
+	reqConn, reqReader, reqWriter := connectRaw(t, sock)
+	defer reqConn.Close()
+
+	if err := reqWriter.SendRequest(&protocol.Request{
+		Type:  "MsgRequest",
+		ToID:  uint32Ptr(targetID),
+		Body:  "approve?",
+	}); err != nil {
+		t.Fatalf("send MsgRequest: %v", err)
+	}
+
+	// Wait for the event to arrive at the subscriber.
+	evRes := <-eventCh
+	if evRes.err != nil {
+		t.Fatalf("waiting for message.request event: %v", evRes.err)
+	}
+	requestID := evRes.requestID
+	if requestID == "" {
+		t.Fatal("expected non-empty request_id in event")
+	}
+
+	// Reply to the request.
+	replyConn, _, replyWriter := connectRaw(t, sock)
+	defer replyConn.Close()
+
+	if err := replyWriter.SendRequest(&protocol.Request{
+		Type:      "MsgReply",
+		RequestID: requestID,
+		Body:      "ack",
+	}); err != nil {
+		t.Fatalf("send MsgReply: %v", err)
+	}
+
+	// Read the MsgRequestResult on the original requester connection.
+	resultFrame, err := reqReader.ReadFrame()
+	if err != nil {
+		t.Fatalf("read MsgRequestResult frame: %v", err)
+	}
+	if resultFrame == nil {
+		t.Fatal("unexpected EOF reading MsgRequestResult")
+	}
+	var resultResp protocol.Response
+	if err := json.Unmarshal(resultFrame.Payload, &resultResp); err != nil {
+		t.Fatalf("parse MsgRequestResult: %v", err)
+	}
+	if resultResp.Type != "MsgRequestResult" {
+		t.Fatalf("expected MsgRequestResult, got %s: %s", resultResp.Type, resultResp.Message)
+	}
+	if resultResp.ReplyBody != "ack" {
+		t.Fatalf("expected reply body 'ack', got %q", resultResp.ReplyBody)
+	}
+}

@@ -428,7 +428,8 @@ func (m *SessionManager) SendRequest(fromID, toID uint32, body string) (string, 
 	toSess, toOK := m.sessions[toID]
 	m.mu.RUnlock()
 
-	if !fromOK {
+	// fromID=0 is allowed (anonymous caller, e.g. CLI or gateway hook).
+	if !fromOK && fromID != 0 {
 		return "", nil, fmt.Errorf("sender session %d not found", fromID)
 	}
 	if !toOK {
@@ -437,9 +438,12 @@ func (m *SessionManager) SendRequest(fromID, toID uint32, body string) (string, 
 
 	requestID := fmt.Sprintf("req_%d_%d_%d", fromID, toID, time.Now().UnixNano())
 
-	fromSess.mu.Lock()
-	fromName := fromSess.Meta.Name
-	fromSess.mu.Unlock()
+	var fromName string
+	if fromOK {
+		fromSess.mu.Lock()
+		fromName = fromSess.Meta.Name
+		fromSess.mu.Unlock()
+	}
 
 	toSess.mu.Lock()
 	toName := toSess.Meta.Name
@@ -460,8 +464,8 @@ func (m *SessionManager) SendRequest(fromID, toID uint32, body string) (string, 
 		toSess.messageLog.Append(event)
 	}
 	m.Subscriptions.Publish(toID, toSess.Meta.Tags, event)
-	// Also publish on sender.
-	if fromID != toID {
+	// Also publish on sender (only if sender is a real session).
+	if fromOK && fromID != toID {
 		if fromSess.messageLog != nil {
 			fromSess.messageLog.Append(event)
 		}
@@ -581,7 +585,7 @@ func (m *SessionManager) Launch(command []string, workingDir string, env []strin
 	// Build exec.Cmd.
 	cmd := exec.Command(command[0], command[1:]...)
 	cmd.Dir = workingDir
-	cmd.Env = buildEnv(env)
+	cmd.Env = buildEnv(append(env, fmt.Sprintf("CW_SESSION_ID=%d", id)))
 
 	// Start with a PTY.
 	ptmx, err := pty.Start(cmd)
