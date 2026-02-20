@@ -19,7 +19,7 @@ import (
 	"github.com/codespacesh/codewire/internal/config"
 	"github.com/codespacesh/codewire/internal/mcp"
 	"github.com/codespacesh/codewire/internal/node"
-	"github.com/codespacesh/codewire/internal/tunnel"
+	"github.com/codespacesh/codewire/internal/relay"
 )
 
 var (
@@ -986,7 +986,7 @@ func setupCmd() *cobra.Command {
 				cancel()
 			}()
 
-			return tunnel.RunSetup(ctx, tunnel.SetupOptions{
+			return relay.RunSetup(ctx, relay.SetupOptions{
 				RelayURL:    relayURL,
 				DataDir:     dir,
 				InviteToken: inviteToken,
@@ -1008,9 +1008,8 @@ func setupCmd() *cobra.Command {
 func relayCmd() *cobra.Command {
 	var (
 		baseURL            string
-		wgPort             uint16
-		wgEndpoint         string
 		listen             string
+		sshListen          string
 		relayDir           string
 		authMode           string
 		authToken          string
@@ -1046,11 +1045,10 @@ func relayCmd() *cobra.Command {
 				cancel()
 			}()
 
-			return tunnel.RunRelay(ctx, tunnel.RelayConfig{
+			return relay.RunRelay(ctx, relay.RelayConfig{
 				BaseURL:            baseURL,
-				WireguardEndpoint:  wgEndpoint,
-				WireguardPort:      wgPort,
 				ListenAddr:         listen,
+				SSHListenAddr:      sshListen,
 				DataDir:            relayDir,
 				AuthMode:           authMode,
 				AuthToken:          authToken,
@@ -1062,9 +1060,8 @@ func relayCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&baseURL, "base-url", "", "Public base URL of the relay (e.g. https://relay.codespace.sh)")
-	cmd.Flags().Uint16Var(&wgPort, "wg-port", 41820, "WireGuard UDP port")
-	cmd.Flags().StringVar(&wgEndpoint, "wg-endpoint", "", "WireGuard endpoint to advertise (defaults to base-url hostname:wg-port)")
 	cmd.Flags().StringVar(&listen, "listen", ":8080", "HTTP listen address")
+	cmd.Flags().StringVar(&sshListen, "ssh-listen", ":2222", "SSH listen address")
 	cmd.Flags().StringVar(&relayDir, "data-dir", "", "Data directory for relay (default: ~/.codewire/relay)")
 	cmd.Flags().StringVar(&authMode, "auth-mode", "none", "Auth mode: github, token, none")
 	cmd.Flags().StringVar(&authToken, "auth-token", "", "Admin auth token (for --auth-mode=token or as fallback for headless/CI)")
