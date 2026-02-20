@@ -61,6 +61,7 @@ func main() {
 		requestCmd(),
 		replyCmd(),
 		listenCmd(),
+		gatewayCmd(),
 	)
 
 	if err := rootCmd.Execute(); err != nil {
@@ -1249,8 +1250,9 @@ func listenCmd() *cobra.Command {
 
 func requestCmd() *cobra.Command {
 	var (
-		from    string
-		timeout uint64
+		from      string
+		timeout   uint64
+		rawOutput bool
 	)
 
 	cmd := &cobra.Command{
@@ -1289,12 +1291,13 @@ func requestCmd() *cobra.Command {
 				fromID = &resolved
 			}
 
-			return client.Request(target, fromID, toID, args[1], timeout)
+			return client.Request(target, fromID, toID, args[1], timeout, rawOutput)
 		},
 	}
 
 	cmd.Flags().StringVarP(&from, "from", "f", "", "Sender session (ID or name)")
 	cmd.Flags().Uint64Var(&timeout, "timeout", 60, "Timeout in seconds")
+	cmd.Flags().BoolVar(&rawOutput, "raw", false, "Print only the reply body without prefix")
 
 	return cmd
 }
@@ -1343,6 +1346,52 @@ func replyCmd() *cobra.Command {
 
 	cmd.Flags().StringVarP(&from, "from", "f", "", "Sender session (ID or name)")
 
+	return cmd
+}
+
+// ---------------------------------------------------------------------------
+// gatewayCmd — run an approval gateway for worker sessions
+// ---------------------------------------------------------------------------
+
+func gatewayCmd() *cobra.Command {
+	var name, execCmd, notify string
+
+	cmd := &cobra.Command{
+		Use:   "gateway",
+		Short: "Run an approval gateway for worker sessions",
+		Long: `Start an approval gateway. Workers call 'cw request gateway "<action>"'
+and block until the gateway replies.
+
+The gateway creates a stub session (default name: gateway) and subscribes to
+approval requests directed at it. Each request body is piped to --exec; its
+stdout becomes the reply.
+
+LLM supervisor:
+  cw gateway --exec 'claude --dangerously-skip-permissions --print \
+    "Policy: approve git/edit/read; deny rm -rf, DROP TABLE. \
+     Request: $(cat). Reply: APPROVED or DENIED: <reason>"'
+
+Human notification (macOS):
+  cw gateway --notify macos
+
+Combined (LLM first, macOS notification on ESCALATE):
+  cw gateway --exec '...' --notify macos`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target, err := resolveTarget()
+			if err != nil {
+				return err
+			}
+			if target.IsLocal() {
+				if err := ensureNode(); err != nil {
+					return err
+				}
+			}
+			return client.Gateway(target, name, execCmd, notify)
+		},
+	}
+	cmd.Flags().StringVar(&name, "name", "gateway", "Session name to register as")
+	cmd.Flags().StringVar(&execCmd, "exec", "", "Shell command to evaluate requests (body on stdin)")
+	cmd.Flags().StringVar(&notify, "notify", "", "Notification method: macos or ntfy:<url>")
 	return cmd
 }
 

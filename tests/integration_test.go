@@ -1329,6 +1329,156 @@ func TestCWSessionIDEnv(t *testing.T) {
 	}
 }
 
+func TestGatewayAutoReply(t *testing.T) {
+	dir := tempDir(t, "gateway")
+	sock := startTestNode(t, dir)
+
+	// Launch "gateway" stub session
+	gwResp := requestResponse(t, sock, &protocol.Request{
+		Type:       "Launch",
+		Command:    []string{"sleep", "30"},
+		WorkingDir: "/tmp",
+		Name:       "gateway",
+	})
+	if gwResp.Type != "Launched" {
+		t.Fatalf("expected Launched, got %s: %s", gwResp.Type, gwResp.Message)
+	}
+	gatewayID := *gwResp.ID
+
+	// Subscribe to message.request events on gateway session
+	subConn, subReader, subWriter := connectRaw(t, sock)
+	defer subConn.Close()
+	if err := subWriter.SendRequest(&protocol.Request{
+		Type:       "Subscribe",
+		ID:         uint32Ptr(gatewayID),
+		EventTypes: []string{"message.request"},
+	}); err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	// Read SubscribeAck
+	ackFrame, _ := subReader.ReadFrame()
+	var ackResp protocol.Response
+	json.Unmarshal(ackFrame.Payload, &ackResp)
+	if ackResp.Type != "SubscribeAck" {
+		t.Fatalf("expected SubscribeAck, got %s", ackResp.Type)
+	}
+
+	// Launch worker session
+	wkResp := requestResponse(t, sock, &protocol.Request{
+		Type:       "Launch",
+		Command:    []string{"sleep", "5"},
+		WorkingDir: "/tmp",
+	})
+	if wkResp.Type != "Launched" {
+		t.Fatalf("expected Launched, got %s", wkResp.Type)
+	}
+	workerID := *wkResp.ID
+
+	// Send MsgRequest from worker to gateway (non-blocking: just send the frame, read result later)
+	reqConn, reqReader, reqWriter := connectRaw(t, sock)
+	defer reqConn.Close()
+	to := uint64(10)
+	if err := reqWriter.SendRequest(&protocol.Request{
+		Type:           "MsgRequest",
+		ID:             uint32Ptr(workerID),
+		ToName:         "gateway",
+		Body:           "approve: git push",
+		TimeoutSeconds: &to,
+	}); err != nil {
+		t.Fatalf("send MsgRequest: %v", err)
+	}
+
+	// Wait for message.request event from subscriber
+	frameCh := make(chan frameResult, 8)
+	go func() {
+		for {
+			f, err := subReader.ReadFrame()
+			frameCh <- frameResult{f, err}
+			if err != nil || f == nil {
+				return
+			}
+		}
+	}()
+
+	var requestID string
+	deadline := time.After(5 * time.Second)
+loop:
+	for {
+		select {
+		case fr := <-frameCh:
+			if fr.err != nil {
+				t.Errorf("reading event: %v", fr.err)
+				break loop
+			}
+			if fr.frame == nil {
+				break loop
+			}
+			if fr.frame.Type != protocol.FrameControl {
+				continue
+			}
+			var evtResp protocol.Response
+			json.Unmarshal(fr.frame.Payload, &evtResp)
+			if evtResp.Type != "Event" || evtResp.Event == nil {
+				continue
+			}
+			if evtResp.Event.EventType != "message.request" {
+				continue
+			}
+			var rd struct {
+				RequestID string `json:"request_id"`
+				Body      string `json:"body"`
+			}
+			json.Unmarshal(evtResp.Event.Data, &rd)
+			if rd.Body != "approve: git push" {
+				t.Errorf("unexpected body: %s", rd.Body)
+			}
+			requestID = rd.RequestID
+			break loop
+		case <-deadline:
+			t.Fatal("timeout waiting for message.request event")
+		}
+	}
+
+	if requestID == "" {
+		t.Fatal("did not receive request_id")
+	}
+
+	// Reply as gateway
+	replyResp := requestResponse(t, sock, &protocol.Request{
+		Type:      "MsgReply",
+		ID:        uint32Ptr(gatewayID),
+		RequestID: requestID,
+		Body:      "APPROVED",
+	})
+	if replyResp.Type == "Error" {
+		t.Fatalf("MsgReply error: %s", replyResp.Message)
+	}
+
+	// Verify worker got the reply
+	resultCh := make(chan frameResult, 1)
+	go func() {
+		f, err := reqReader.ReadFrame()
+		resultCh <- frameResult{f, err}
+	}()
+
+	select {
+	case fr := <-resultCh:
+		if fr.err != nil {
+			t.Fatalf("reading MsgRequestResult: %v", fr.err)
+		}
+		var resultResp protocol.Response
+		json.Unmarshal(fr.frame.Payload, &resultResp)
+		if resultResp.Type != "MsgRequestResult" {
+			t.Fatalf("expected MsgRequestResult, got %s: %s", resultResp.Type, resultResp.Message)
+		}
+		if resultResp.ReplyBody != "APPROVED" {
+			t.Fatalf("expected APPROVED, got %q", resultResp.ReplyBody)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for MsgRequestResult")
+	}
+}
+
 func TestAnonymousSendRequest(t *testing.T) {
 	dir := tempDir(t, "anon-request")
 	sock := startTestNode(t, dir)

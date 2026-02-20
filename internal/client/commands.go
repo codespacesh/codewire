@@ -1,16 +1,20 @@
 package client
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"math"
 	"net/http"
 	"os"
+	"os/exec"
+	"os/signal"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -1296,7 +1300,8 @@ func Inbox(target *Target, sessionID uint32, tail int) error {
 // ---------------------------------------------------------------------------
 
 // Request sends a request to a session and blocks until a reply arrives.
-func Request(target *Target, fromID *uint32, toID uint32, body string, timeout uint64) error {
+// When rawOutput is true, only the reply body is printed (no "[reply from X]" prefix).
+func Request(target *Target, fromID *uint32, toID uint32, body string, timeout uint64, rawOutput bool) error {
 	reader, writer, err := target.Connect()
 	if err != nil {
 		return err
@@ -1334,13 +1339,17 @@ func Request(target *Target, fromID *uint32, toID uint32, body string, timeout u
 
 	switch resp.Type {
 	case "MsgRequestResult":
-		fromLabel := "unknown"
-		if resp.FromName != "" {
-			fromLabel = resp.FromName
-		} else if resp.FromID != nil {
-			fromLabel = fmt.Sprintf("%d", *resp.FromID)
+		if rawOutput {
+			fmt.Println(resp.ReplyBody)
+		} else {
+			fromLabel := "unknown"
+			if resp.FromName != "" {
+				fromLabel = resp.FromName
+			} else if resp.FromID != nil {
+				fromLabel = fmt.Sprintf("%d", *resp.FromID)
+			}
+			fmt.Printf("[reply from %s] %s\n", fromLabel, resp.ReplyBody)
 		}
-		fmt.Printf("[reply from %s] %s\n", fromLabel, resp.ReplyBody)
 	case "Error":
 		return fmt.Errorf("%s", resp.Message)
 	default:
@@ -1633,6 +1642,172 @@ func loadConfigFromDir(dataDir string) (*relayAuthConfig, error) {
 	}
 
 	return result, nil
+}
+
+// ---------------------------------------------------------------------------
+// Gateway — run an approval gateway for worker sessions
+// ---------------------------------------------------------------------------
+
+// Gateway launches a stub session and subscribes to message.request events,
+// evaluating each request via execCmd and replying automatically.
+func Gateway(target *Target, name, execCmd, notifyMethod string) error {
+	// 1. Launch stub session
+	resp, err := requestResponse(target, &protocol.Request{
+		Type:    "Launch",
+		Command: []string{"sleep", "infinity"},
+		Tags:    []string{"_gateway"},
+		Name:    name,
+	})
+	if err != nil {
+		return fmt.Errorf("launching gateway session: %w", err)
+	}
+	if resp.Type == "Error" {
+		return fmt.Errorf("%s", resp.Message)
+	}
+	stubID := *resp.ID
+	fmt.Fprintf(os.Stderr, "[cw gateway] listening as %q (session %d)\n", name, stubID)
+
+	// 2. Setup cleanup
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		select {
+		case <-sigCh:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+
+	defer func() {
+		signal.Stop(sigCh)
+		_ = Kill(target, stubID)
+		fmt.Fprintf(os.Stderr, "[cw gateway] stopped\n")
+	}()
+
+	// 3. Subscribe to message.request on stub session
+	reader, writer, err := target.Connect()
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
+	defer writer.Close()
+
+	if err := writer.SendRequest(&protocol.Request{
+		Type:       "Subscribe",
+		ID:         &stubID,
+		EventTypes: []string{"message.request"},
+	}); err != nil {
+		return fmt.Errorf("subscribing: %w", err)
+	}
+
+	// 4. Event loop
+	frameCh := make(chan *protocol.Frame, 16)
+	readErr := make(chan error, 1)
+	go func() {
+		for {
+			frame, err := reader.ReadFrame()
+			if err != nil {
+				readErr <- err
+				return
+			}
+			if frame == nil {
+				readErr <- nil
+				return
+			}
+			frameCh <- frame
+		}
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case err := <-readErr:
+			if ctx.Err() != nil {
+				return nil
+			}
+			return err
+		case frame := <-frameCh:
+			if frame.Type != protocol.FrameControl {
+				continue
+			}
+			var resp protocol.Response
+			if err := json.Unmarshal(frame.Payload, &resp); err != nil {
+				continue
+			}
+			if resp.Type != "Event" || resp.Event == nil {
+				continue
+			}
+			if resp.Event.EventType != "message.request" {
+				continue
+			}
+			var reqData struct {
+				RequestID string `json:"request_id"`
+				From      uint32 `json:"from"`
+				FromName  string `json:"from_name"`
+				Body      string `json:"body"`
+			}
+			if err := json.Unmarshal(resp.Event.Data, &reqData); err != nil {
+				continue
+			}
+			go gatewayHandleRequest(target, execCmd, notifyMethod, reqData.RequestID, reqData.Body, reqData.FromName)
+		}
+	}
+}
+
+func gatewayHandleRequest(target *Target, execCmd, notifyMethod, requestID, body, fromName string) {
+	reply := gatewayEvaluate(execCmd, body, fromName)
+	upperReply := strings.ToUpper(reply)
+
+	if strings.HasPrefix(upperReply, "ESCALATE") && notifyMethod != "" {
+		gatewayNotify(notifyMethod, body, fromName)
+	}
+
+	if _, err := requestResponse(target, &protocol.Request{
+		Type:      "MsgReply",
+		RequestID: requestID,
+		Body:      reply,
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "[cw gateway] reply error: %v\n", err)
+	} else {
+		fmt.Fprintf(os.Stderr, "[cw gateway] %s -> %s\n", fromName, reply)
+	}
+}
+
+func gatewayEvaluate(execCmd, body, fromName string) string {
+	if execCmd == "" {
+		return "APPROVED"
+	}
+	cmd := exec.Command("sh", "-c", execCmd)
+	cmd.Stdin = strings.NewReader(body)
+	cmd.Env = append(os.Environ(),
+		"CW_REQUEST_BODY="+body,
+		"CW_REQUEST_FROM="+fromName,
+	)
+	out, err := cmd.Output()
+	if err != nil {
+		return fmt.Sprintf("DENIED: exec error: %v", err)
+	}
+	reply := strings.TrimSpace(string(out))
+	if reply == "" {
+		return "APPROVED"
+	}
+	return reply
+}
+
+func gatewayNotify(method, body, fromName string) {
+	switch {
+	case method == "macos":
+		msg := fmt.Sprintf("Approval needed from %s: %s", fromName, body)
+		_ = exec.Command("osascript", "-e",
+			fmt.Sprintf(`display notification %q with title "cw gateway"`, msg)).Run()
+	case strings.HasPrefix(method, "ntfy:"):
+		url := strings.TrimPrefix(method, "ntfy:")
+		_ = exec.Command("curl", "-s", "-d", body, url).Run()
+	}
 }
 
 // formatRelativeTime converts an RFC3339 timestamp to a human-readable
