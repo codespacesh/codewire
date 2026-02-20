@@ -2,8 +2,8 @@ package relay
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -53,13 +53,15 @@ func deviceAuthorizeHandler(st store.Store, p *oauth.OIDCProvider) http.HandlerF
 
 		dresp, err := http.DefaultClient.Do(dreq)
 		if err != nil {
-			http.Error(w, "OIDC provider unreachable: "+err.Error(), http.StatusBadGateway)
+			slog.Error("device authorize: OIDC provider unreachable", "err", err)
+			http.Error(w, "upstream OIDC error", http.StatusBadGateway)
 			return
 		}
 		defer dresp.Body.Close()
 		body, _ := io.ReadAll(io.LimitReader(dresp.Body, 1<<20))
 		if dresp.StatusCode != http.StatusOK {
-			http.Error(w, fmt.Sprintf("OIDC provider returned %d: %s", dresp.StatusCode, body), http.StatusBadGateway)
+			slog.Error("device authorize: OIDC provider error", "status", dresp.StatusCode, "body", string(body))
+			http.Error(w, "upstream OIDC error", http.StatusBadGateway)
 			return
 		}
 
@@ -149,13 +151,18 @@ func devicePollHandler(st store.Store, p *oauth.OIDCProvider) http.HandlerFunc {
 			"client_id":     {p.ClientID},
 			"client_secret": {p.ClientSecret},
 		}
-		treq, _ := http.NewRequestWithContext(r.Context(), http.MethodPost, p.TokenEndpoint(), strings.NewReader(data.Encode()))
+		treq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, p.TokenEndpoint(), strings.NewReader(data.Encode()))
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
 		treq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		treq.Header.Set("Accept", "application/json")
 
 		tresp, err := http.DefaultClient.Do(treq)
 		if err != nil {
-			http.Error(w, "polling OIDC provider: "+err.Error(), http.StatusBadGateway)
+			slog.Error("device poll: OIDC provider unreachable", "err", err)
+			http.Error(w, "upstream OIDC error", http.StatusBadGateway)
 			return
 		}
 		defer tresp.Body.Close()
@@ -181,7 +188,8 @@ func devicePollHandler(st store.Store, p *oauth.OIDCProvider) http.HandlerFunc {
 		case "":
 			// No error — proceed below.
 		default:
-			http.Error(w, "device auth failed: "+tokenResp.Error, http.StatusForbidden)
+			slog.Error("device poll: OIDC authorization failed", "error", tokenResp.Error)
+			http.Error(w, "OIDC authorization failed", http.StatusForbidden)
 			return
 		}
 
@@ -203,9 +211,12 @@ func devicePollHandler(st store.Store, p *oauth.OIDCProvider) http.HandlerFunc {
 
 		// Upsert user record.
 		now := time.Now().UTC()
-		st.OIDCUserUpsert(r.Context(), store.OIDCUser{
+		if err := st.OIDCUserUpsert(r.Context(), store.OIDCUser{
 			Sub: sub, Username: username, AvatarURL: avatarURL, CreatedAt: now, LastLoginAt: now,
-		})
+		}); err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
 
 		// Register node with a new random token.
 		nodeToken := generateToken()
