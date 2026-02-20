@@ -2,26 +2,26 @@
 class Codewire < Formula
   desc "Persistent process server for AI coding agents"
   homepage "https://github.com/codespacesh/codewire"
-  version "0.2.17"
+  version "0.2.18"
   license "MIT"
 
   on_macos do
     if Hardware::CPU.arm?
       url "https://github.com/codespacesh/codewire/releases/download/v#{version}/cw-v#{version}-aarch64-apple-darwin"
-      sha256 "a1c9f635a848d8b4a36612ba983288695f3cd1fd8631ca33d49cb3b4d8a74bc8"
+      sha256 "f11e1ed2d16c860a5d768695202bd49a1a197ace76e85f879389d22cf3694a86"
     else
       url "https://github.com/codespacesh/codewire/releases/download/v#{version}/cw-v#{version}-x86_64-apple-darwin"
-      sha256 "b8538d4eb038360add4a02c917c34e1d7d1344bab99a6239bc6d8f6fc4e47deb"
+      sha256 "279750d7113ae5837491639ee467a41194acfce5389211f719a6de43c4007a71"
     end
   end
 
   on_linux do
     if Hardware::CPU.arm?
       url "https://github.com/codespacesh/codewire/releases/download/v#{version}/cw-v#{version}-aarch64-unknown-linux-gnu"
-      sha256 "22c9002eb46f67f285f68c9da320f7d0d36e0e73992554ffd566615ffc88d55a"
+      sha256 "be137c7cd0a1c6c9613457da024545db439606f8debca9536b3efe19a31dfa39"
     else
       url "https://github.com/codespacesh/codewire/releases/download/v#{version}/cw-v#{version}-x86_64-unknown-linux-musl"
-      sha256 "b711d6c798b63e2e124f1f1400a0082c6d9a8bf2d9e9107d67244d2259ea5d31"
+      sha256 "b7fc6ece7dce3823ac71d44cb9e978ae963bb69a6790cff1ef07d13581f5b412"
     end
   end
 
