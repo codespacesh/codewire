@@ -42,6 +42,7 @@ class Codewire < Formula
     end
 
     bin.install binary_name => "cw"
+    generate_completions_from_executable(bin/"cw", "completion")
   end
 
   test do
