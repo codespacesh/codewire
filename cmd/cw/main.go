@@ -955,20 +955,18 @@ func serverListCmd() *cobra.Command {
 // ---------------------------------------------------------------------------
 
 func setupCmd() *cobra.Command {
-	var (
-		inviteToken string
-		authToken   string
-	)
+	var authToken string
 
 	cmd := &cobra.Command{
-		Use:   "setup [relay-url]",
+		Use:   "setup <relay-url> [token]",
 		Short: "Connect this node to a relay",
-		Long:  "Connect this node to a relay via GitHub OAuth, invite code, or admin token.",
-		Args:  cobra.MaximumNArgs(1),
+		Long:  "Connect this node to a relay. With no token, uses OIDC device flow if the relay supports it.",
+		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			relayURL := "https://relay.codespace.sh"
-			if len(args) > 0 {
-				relayURL = args[0]
+			relayURL := args[0]
+			var token string
+			if len(args) > 1 {
+				token = args[1]
 			}
 
 			dir := dataDir()
@@ -987,16 +985,15 @@ func setupCmd() *cobra.Command {
 			}()
 
 			return relay.RunSetup(ctx, relay.SetupOptions{
-				RelayURL:    relayURL,
-				DataDir:     dir,
-				InviteToken: inviteToken,
-				AuthToken:   authToken,
+				RelayURL:  relayURL,
+				DataDir:   dir,
+				Token:     token,
+				AuthToken: authToken,
 			})
 		},
 	}
 
-	cmd.Flags().StringVar(&inviteToken, "invite", "", "Invite token for device onboarding")
-	cmd.Flags().StringVar(&authToken, "token", "", "Admin auth token (headless/CI)")
+	cmd.Flags().StringVar(&authToken, "token", "", "Admin auth token (for headless/CI use)")
 
 	return cmd
 }
