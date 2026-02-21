@@ -309,6 +309,30 @@ func (r *CodewireRelayReconciler) reconcileDeployment(ctx context.Context, relay
 			args = append(args, fmt.Sprintf("--auth-token=%s", relay.Spec.AuthToken))
 		}
 
+		// Build env vars for OIDC secret injection.
+		var envVars []corev1.EnvVar
+		if relay.Spec.OIDC != nil {
+			args = append(args,
+				fmt.Sprintf("--oidc-issuer=%s", relay.Spec.OIDC.Issuer),
+				fmt.Sprintf("--oidc-client-id=%s", relay.Spec.OIDC.ClientID),
+				"--oidc-client-secret=$(OIDC_CLIENT_SECRET)",
+			)
+			for _, g := range relay.Spec.OIDC.AllowedGroups {
+				args = append(args, fmt.Sprintf("--oidc-allowed-groups=%s", g))
+			}
+			envVars = append(envVars, corev1.EnvVar{
+				Name: "OIDC_CLIENT_SECRET",
+				ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{
+							Name: relay.Spec.OIDC.ClientSecretRef.Name,
+						},
+						Key: relay.Spec.OIDC.ClientSecretRef.Key,
+					},
+				},
+			})
+		}
+
 		// Build resource requirements.
 		resources := corev1.ResourceRequirements{}
 		if relay.Spec.Resources != nil {
@@ -343,6 +367,7 @@ func (r *CodewireRelayReconciler) reconcileDeployment(ctx context.Context, relay
 						Image:   r.relayImage(relay),
 						Command: []string{"cw", "relay"},
 						Args:    args,
+						Env:     envVars,
 						Ports: []corev1.ContainerPort{
 							{
 								Name:          "http",

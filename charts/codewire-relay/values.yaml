@@ -5,6 +5,17 @@ relay:
   sshListen: ":2222"
   listenAddr: "0.0.0.0:8080"
 
+oidc:
+  # Set issuer to enable OIDC auth mode (e.g. https://auth.codespace.sh)
+  issuer: ""
+  clientID: ""
+  # Reference to a Secret containing the client secret under key "oidc-client-secret"
+  clientSecretRef:
+    name: ""
+    key: "oidc-client-secret"
+  # Groups required for access. Empty = any authenticated user.
+  allowedGroups: []
+
 image:
   repository: ghcr.io/codespacesh/codewire
   tag: ""  # Defaults to appVersion

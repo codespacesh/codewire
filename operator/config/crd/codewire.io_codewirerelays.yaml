@@ -188,6 +188,38 @@ spec:
                     tag:
                       description: Tag is the container image tag.
                       type: string
+                oidc:
+                  description: OIDC configures OIDC authentication (authMode "oidc").
+                  type: object
+                  required:
+                    - issuer
+                    - clientID
+                    - clientSecretRef
+                  properties:
+                    issuer:
+                      description: Issuer is the OIDC provider issuer URL.
+                      type: string
+                    clientID:
+                      description: ClientID is the registered OIDC client ID.
+                      type: string
+                    clientSecretRef:
+                      description: ClientSecretRef references a Secret containing the OIDC client secret.
+                      type: object
+                      required:
+                        - name
+                        - key
+                      properties:
+                        name:
+                          description: Name of the Secret.
+                          type: string
+                        key:
+                          description: Key within the Secret.
+                          type: string
+                    allowedGroups:
+                      description: AllowedGroups restricts access to members of these groups.
+                      type: array
+                      items:
+                        type: string
             status:
               description: CodewireRelayStatus defines the observed state of a Codewire Relay instance.
               type: object

@@ -403,6 +403,79 @@ func TestReconcile_UpdatesExistingResources(t *testing.T) {
 	}
 }
 
+func TestReconcile_OIDCEnabled(t *testing.T) {
+	relay := newRelay("test-oidc", "default")
+	relay.Spec.AuthMode = "oidc"
+	relay.Spec.OIDC = &codewire.OIDCSpec{
+		Issuer:   "https://auth.example.com",
+		ClientID: "codewire-relay",
+		ClientSecretRef: codewire.SecretKeyRef{
+			Name: "oidc-secret",
+			Key:  "client-secret",
+		},
+		AllowedGroups: []string{"sonica", "admins"},
+	}
+
+	// Create the referenced secret so the reconciler can resolve it.
+	oidcSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "oidc-secret",
+			Namespace: "default",
+		},
+		Data: map[string][]byte{
+			"client-secret": []byte("super-secret"),
+		},
+	}
+
+	r, c := setup(t, relay, oidcSecret)
+	doReconcile(t, r, "test-oidc", "default")
+
+	deploy := &appsv1.Deployment{}
+	getObj(t, c, types.NamespacedName{Name: "test-oidc", Namespace: "default"}, deploy)
+
+	container := deploy.Spec.Template.Spec.Containers[0]
+	args := container.Args
+
+	// Verify OIDC args are present.
+	wantArgs := []string{
+		"--oidc-issuer=https://auth.example.com",
+		"--oidc-client-id=codewire-relay",
+		"--oidc-client-secret=$(OIDC_CLIENT_SECRET)",
+		"--oidc-allowed-groups=sonica",
+		"--oidc-allowed-groups=admins",
+	}
+	argSet := make(map[string]bool)
+	for _, a := range args {
+		argSet[a] = true
+	}
+	for _, want := range wantArgs {
+		if !argSet[want] {
+			t.Errorf("expected arg %q not found in args: %v", want, args)
+		}
+	}
+
+	// Verify OIDC_CLIENT_SECRET env var is set via SecretKeyRef.
+	var oidcEnv *corev1.EnvVar
+	for i := range container.Env {
+		if container.Env[i].Name == "OIDC_CLIENT_SECRET" {
+			oidcEnv = &container.Env[i]
+			break
+		}
+	}
+	if oidcEnv == nil {
+		t.Fatal("expected OIDC_CLIENT_SECRET env var, not found")
+	}
+	if oidcEnv.ValueFrom == nil || oidcEnv.ValueFrom.SecretKeyRef == nil {
+		t.Fatal("expected OIDC_CLIENT_SECRET to be sourced from a SecretKeyRef")
+	}
+	if oidcEnv.ValueFrom.SecretKeyRef.Name != "oidc-secret" {
+		t.Errorf("SecretKeyRef.Name = %q, want %q", oidcEnv.ValueFrom.SecretKeyRef.Name, "oidc-secret")
+	}
+	if oidcEnv.ValueFrom.SecretKeyRef.Key != "client-secret" {
+		t.Errorf("SecretKeyRef.Key = %q, want %q", oidcEnv.ValueFrom.SecretKeyRef.Key, "client-secret")
+	}
+}
+
 func TestReconcile_Labels(t *testing.T) {
 	relay := newRelay("test", "default")
 	r, c := setup(t, relay)

@@ -43,6 +43,22 @@ spec:
                 --data-dir=/data \
                 --auth-mode={{ .Values.relay.authMode | quote }} \
                 --auth-token="$CW_AUTH_TOKEN"
+          {{- else if eq .Values.relay.authMode "oidc" }}
+          command: ["sh", "-c"]
+          args:
+            - |
+              exec cw relay \
+                --base-url={{ .Values.relay.baseURL | quote }} \
+                --listen={{ .Values.relay.listenAddr | quote }} \
+                --ssh-listen={{ .Values.relay.sshListen | quote }} \
+                --data-dir=/data \
+                --auth-mode=oidc \
+                --oidc-issuer={{ .Values.oidc.issuer | quote }} \
+                --oidc-client-id={{ .Values.oidc.clientID | quote }} \
+                --oidc-client-secret="$OIDC_CLIENT_SECRET"{{- if .Values.oidc.allowedGroups }} \
+                --oidc-allowed-groups={{ join "," .Values.oidc.allowedGroups | quote }}
+                {{- else }}
+                {{- end }}
           {{- else }}
           args:
             - relay
@@ -52,14 +68,21 @@ spec:
             - --data-dir=/data
             - --auth-mode={{ .Values.relay.authMode }}
           {{- end }}
-          {{- if eq .Values.relay.authMode "token" }}
           env:
+            {{- if eq .Values.relay.authMode "token" }}
             - name: CW_AUTH_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: {{ include "codewire-relay.fullname" . }}
                   key: auth-token
-          {{- end }}
+            {{- end }}
+            {{- if eq .Values.relay.authMode "oidc" }}
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.oidc.clientSecretRef.name | default (include "codewire-relay.fullname" .) }}
+                  key: {{ .Values.oidc.clientSecretRef.key }}
+            {{- end }}
           ports:
             - name: http
               containerPort: 8080

@@ -40,6 +40,10 @@ type CodewireRelaySpec struct {
 
 	// Image overrides the relay container image.
 	Image *ImageSpec `json:"image,omitempty"`
+
+	// OIDC configures OIDC authentication for the relay.
+	// +optional
+	OIDC *OIDCSpec `json:"oidc,omitempty"`
 }
 
 type PersistenceSpec struct {
@@ -117,6 +121,21 @@ type ImageSpec struct {
 
 	// Tag is the container image tag.
 	Tag string `json:"tag,omitempty"`
+}
+
+type OIDCSpec struct {
+	// Issuer is the OIDC provider issuer URL (e.g. https://auth.codespace.sh).
+	Issuer string `json:"issuer"`
+
+	// ClientID is the registered OIDC client ID.
+	ClientID string `json:"clientID"`
+
+	// ClientSecretRef references a Secret containing the OIDC client secret.
+	ClientSecretRef SecretKeyRef `json:"clientSecretRef"`
+
+	// AllowedGroups restricts access to members of these groups. Empty = any authenticated user.
+	// +optional
+	AllowedGroups []string `json:"allowedGroups,omitempty"`
 }
 
 // CodewireRelayStatus defines the observed state of a Codewire Relay instance.

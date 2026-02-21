@@ -22,3 +22,13 @@ spec:
     limits:
       cpu: 500m
       memory: 256Mi
+  # OIDC authentication (uncomment to use instead of token mode):
+  # authMode: oidc
+  # oidc:
+  #   issuer: https://auth.codespace.sh
+  #   clientID: codewire-relay
+  #   clientSecretRef:
+  #     name: codewire-oidc-secret
+  #     key: client-secret
+  #   allowedGroups:
+  #     - sonica
