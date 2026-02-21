@@ -1990,6 +1990,46 @@ func HookInstall() error {
 	return nil
 }
 
+// ---------------------------------------------------------------------------
+// Completion helpers
+// ---------------------------------------------------------------------------
+
+// ListSessionsForCompletion returns session names and IDs suitable for tab
+// completion. Names are returned first (preferred), followed by numeric IDs.
+func ListSessionsForCompletion(target *Target) []string {
+	resp, err := requestResponse(target, &protocol.Request{Type: "ListSessions"})
+	if err != nil || resp.Sessions == nil {
+		return nil
+	}
+	var result []string
+	for _, s := range *resp.Sessions {
+		if s.Name != "" {
+			result = append(result, s.Name)
+		}
+		result = append(result, fmt.Sprintf("%d", s.ID))
+	}
+	return result
+}
+
+// ListTagsForCompletion returns all tags currently in use across sessions.
+func ListTagsForCompletion(target *Target) []string {
+	resp, err := requestResponse(target, &protocol.Request{Type: "ListSessions"})
+	if err != nil || resp.Sessions == nil {
+		return nil
+	}
+	seen := make(map[string]bool)
+	var result []string
+	for _, s := range *resp.Sessions {
+		for _, t := range s.Tags {
+			if !seen[t] {
+				seen[t] = true
+				result = append(result, t)
+			}
+		}
+	}
+	return result
+}
+
 // formatRelativeTime converts an RFC3339 timestamp to a human-readable
 // relative time string such as "5m ago".
 func formatRelativeTime(iso string) string {

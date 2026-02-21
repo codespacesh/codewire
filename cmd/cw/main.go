@@ -35,6 +35,9 @@ func main() {
 	rootCmd.PersistentFlags().StringVarP(&serverFlag, "server", "s", "", "Connect to a remote server (name from servers.toml or ws://host:port)")
 	rootCmd.PersistentFlags().StringVar(&tokenFlag, "token", "", "Auth token for remote server")
 
+	// Disable cobra's auto-generated completion command; we supply our own with --install support.
+	rootCmd.CompletionOptions.DisableDefaultCmd = true
+
 	rootCmd.AddCommand(
 		nodeCmd(),
 		stopCmd(),
@@ -63,6 +66,7 @@ func main() {
 		listenCmd(),
 		gatewayCmd(),
 		hookCmd(),
+		completionCmd(rootCmd),
 	)
 
 	if err := rootCmd.Execute(); err != nil {
@@ -223,11 +227,12 @@ func runCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&workDir, "dir", "d", "", "Working directory for the session")
-	cmd.Flags().StringSliceVar(&tags, "tag", nil, "Tags for the session (can be repeated)")
+	cmd.Flags().StringSliceVarP(&tags, "tag", "t", nil, "Tags for the session (can be repeated)")
 	cmd.Flags().StringVar(&name, "name", "", "Unique name for the session (alphanumeric + hyphens, 1-32 chars)")
-	cmd.Flags().StringArrayVar(&envVars, "env", nil, "Environment variable overrides (KEY=VALUE, can be repeated)")
+	cmd.Flags().StringArrayVarP(&envVars, "env", "e", nil, "Environment variable overrides (KEY=VALUE, can be repeated)")
 	cmd.Flags().BoolVar(&autoApprove, "auto-approve", false, "Inject --dangerously-skip-permissions after the command binary")
 	cmd.Flags().StringVar(&promptFile, "prompt-file", "", "File whose contents are injected as stdin after launch")
+	_ = cmd.RegisterFlagCompletionFunc("tag", tagCompletionFunc)
 
 	return cmd
 }
@@ -259,8 +264,11 @@ func listCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
+	cmd.Flags().BoolVarP(&jsonOutput, "json", "j", false, "Output as JSON")
 	cmd.Flags().StringVar(&statusFilter, "status", "all", "Filter by status: all, running, completed, killed")
+	_ = cmd.RegisterFlagCompletionFunc("status", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return []string{"all", "running", "completed", "killed"}, cobra.ShellCompDirectiveNoFileComp
+	})
 
 	return cmd
 }
@@ -273,8 +281,9 @@ func attachCmd() *cobra.Command {
 	var noHistory bool
 
 	cmd := &cobra.Command{
-		Use:   "attach [session]",
-		Short: "Attach to a session's PTY (by ID or name)",
+		Use:               "attach [session]",
+		Short:             "Attach to a session's PTY (by ID or name)",
+		ValidArgsFunction: sessionCompletionFunc,
 		Long: `Attach to a running session's PTY for interactive use.
 
 Detach without killing: press Ctrl+B d
@@ -316,11 +325,15 @@ Warning: Ctrl+C sends SIGINT to the session process — use Ctrl+B d to detach s
 // ---------------------------------------------------------------------------
 
 func killCmd() *cobra.Command {
-	var all bool
+	var (
+		all  bool
+		tags []string
+	)
 
 	cmd := &cobra.Command{
-		Use:   "kill [session]",
-		Short: "Kill a session (by ID, name, or tag), or all sessions",
+		Use:               "kill [session]",
+		Short:             "Kill a session (by ID, name, or tag), or all sessions",
+		ValidArgsFunction: sessionCompletionFunc,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target, err := resolveTarget()
 			if err != nil {
@@ -337,8 +350,12 @@ func killCmd() *cobra.Command {
 				return client.KillAll(target)
 			}
 
+			if len(tags) > 0 {
+				return client.KillByTags(target, tags)
+			}
+
 			if len(args) == 0 {
-				return fmt.Errorf("session id, name, or tag required (or use --all)")
+				return fmt.Errorf("session id, name, or tag required (or use --all / --tag)")
 			}
 
 			id, tagList, err := client.ResolveSessionOrTag(target, args[0])
@@ -352,7 +369,9 @@ func killCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVar(&all, "all", false, "Kill all sessions")
+	cmd.Flags().BoolVarP(&all, "all", "a", false, "Kill all sessions")
+	cmd.Flags().StringSliceVarP(&tags, "tag", "t", nil, "Kill sessions matching tag (can be repeated)")
+	_ = cmd.RegisterFlagCompletionFunc("tag", tagCompletionFunc)
 
 	return cmd
 }
@@ -369,9 +388,10 @@ func logsCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "logs <session>",
-		Short: "View session output logs (by ID or name)",
-		Args:  cobra.ExactArgs(1),
+		Use:               "logs <session>",
+		Short:             "View session output logs (by ID or name)",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: sessionCompletionFunc,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target, err := resolveTarget()
 			if err != nil {
@@ -417,9 +437,10 @@ func sendCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "send <session> [input]",
-		Short: "Send input to a session (by ID or name)",
-		Args:  cobra.RangeArgs(1, 2),
+		Use:               "send <session> [input]",
+		Short:             "Send input to a session (by ID or name)",
+		Args:              cobra.RangeArgs(1, 2),
+		ValidArgsFunction: sessionCompletionFunc,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target, err := resolveTarget()
 			if err != nil {
@@ -470,9 +491,10 @@ func watchCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "watch <session>",
-		Short: "Watch session output in real-time (by ID, name, or tag for multi-session)",
-		Args:  cobra.ExactArgs(1),
+		Use:               "watch <session>",
+		Short:             "Watch session output in real-time (by ID, name, or tag for multi-session)",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: sessionCompletionFunc,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target, err := resolveTarget()
 			if err != nil {
@@ -525,9 +547,10 @@ func statusCmd() *cobra.Command {
 	var jsonOutput bool
 
 	cmd := &cobra.Command{
-		Use:   "status <session>",
-		Short: "Get detailed status for a session (by ID or name)",
-		Args:  cobra.ExactArgs(1),
+		Use:               "status <session>",
+		Short:             "Get detailed status for a session (by ID or name)",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: sessionCompletionFunc,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target, err := resolveTarget()
 			if err != nil {
@@ -549,7 +572,7 @@ func statusCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
+	cmd.Flags().BoolVarP(&jsonOutput, "json", "j", false, "Output as JSON")
 
 	return cmd
 }
@@ -640,8 +663,19 @@ func subscribeCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringSliceVar(&tags, "tag", nil, "Filter by tag (can be repeated)")
-	cmd.Flags().StringSliceVar(&eventTypes, "event", nil, "Filter by event type (can be repeated)")
+	cmd.Flags().StringSliceVarP(&tags, "tag", "t", nil, "Filter by tag (can be repeated)")
+	cmd.Flags().StringSliceVarP(&eventTypes, "event", "e", nil, "Filter by event type (can be repeated)")
+	_ = cmd.RegisterFlagCompletionFunc("tag", tagCompletionFunc)
+	_ = cmd.RegisterFlagCompletionFunc("event", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return []string{
+			"session.created",
+			"session.status",
+			"session.output_summary",
+			"message.direct",
+			"message.request",
+			"message.reply",
+		}, cobra.ShellCompDirectiveNoFileComp
+	})
 
 	return cmd
 }
@@ -693,9 +727,13 @@ func waitSessionCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringSliceVar(&tags, "tag", nil, "Wait for sessions matching tag (can be repeated)")
-	cmd.Flags().StringVar(&condition, "condition", "all", "Wait condition: all or any")
+	cmd.Flags().StringSliceVarP(&tags, "tag", "t", nil, "Wait for sessions matching tag (can be repeated)")
+	cmd.Flags().StringVarP(&condition, "condition", "c", "all", "Wait condition: all or any")
 	cmd.Flags().Uint64Var(&timeout, "timeout", 0, "Timeout in seconds")
+	_ = cmd.RegisterFlagCompletionFunc("tag", tagCompletionFunc)
+	_ = cmd.RegisterFlagCompletionFunc("condition", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return []string{"all", "any"}, cobra.ShellCompDirectiveNoFileComp
+	})
 
 	return cmd
 }
@@ -1068,7 +1106,10 @@ func relayCmd() *cobra.Command {
 	cmd.Flags().StringVar(&listen, "listen", ":8080", "HTTP listen address")
 	cmd.Flags().StringVar(&sshListen, "ssh-listen", ":2222", "SSH listen address")
 	cmd.Flags().StringVar(&relayDir, "data-dir", "", "Data directory for relay (default: ~/.codewire/relay)")
-	cmd.Flags().StringVar(&authMode, "auth-mode", "none", "Auth mode: oidc, github, token, none")
+	cmd.Flags().StringVar(&authMode, "auth-mode", "none", "Auth mode: none, token, github, oidc")
+	_ = cmd.RegisterFlagCompletionFunc("auth-mode", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return []string{"none", "token", "github", "oidc"}, cobra.ShellCompDirectiveNoFileComp
+	})
 	cmd.Flags().StringVar(&authToken, "auth-token", "", "Admin auth token (for --auth-mode=token or as fallback for headless/CI)")
 	cmd.Flags().StringSliceVar(&allowedUsers, "allowed-users", nil, "GitHub usernames allowed to authenticate (GitHub mode)")
 	cmd.Flags().StringVar(&githubClientID, "github-client-id", "", "Manual GitHub OAuth App client ID (for private networks)")
@@ -1182,9 +1223,10 @@ func inboxCmd() *cobra.Command {
 	var tail int
 
 	cmd := &cobra.Command{
-		Use:   "inbox <session>",
-		Short: "Read messages for a session (by ID or name)",
-		Args:  cobra.ExactArgs(1),
+		Use:               "inbox <session>",
+		Short:             "Read messages for a session (by ID or name)",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: sessionCompletionFunc,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target, err := resolveTarget()
 			if err != nil {
@@ -1317,7 +1359,7 @@ func replyCmd() *cobra.Command {
 	var from string
 
 	cmd := &cobra.Command{
-		Use:   "reply <request-id> <body>",
+		Use:  "reply <request-id> <body>",
 		Short: "Reply to a pending request",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -1451,6 +1493,228 @@ Exit codes:
 	}
 	cmd.Flags().BoolVar(&install, "install", false, "Add PreToolUse hook entry to ~/.claude/settings.json")
 	return cmd
+}
+
+// ---------------------------------------------------------------------------
+// completionCmd — shell completion with --install support
+// ---------------------------------------------------------------------------
+
+func completionCmd(rootCmd *cobra.Command) *cobra.Command {
+	var install bool
+
+	cmd := &cobra.Command{
+		Use:       "completion [bash|zsh|fish|powershell]",
+		Short:     "Generate or install shell completion scripts",
+		ValidArgs: []string{"bash", "zsh", "fish", "powershell"},
+		Args:      cobra.MaximumNArgs(1),
+		Long: `Generate shell completion scripts for cw.
+
+Load in current session:
+  source <(cw completion zsh)
+  source <(cw completion bash)
+  cw completion fish | source
+
+Install permanently (no shell config required for fish/zsh+brew):
+  cw completion --install`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if install {
+				return completionInstall(rootCmd)
+			}
+			shell := "zsh"
+			if len(args) > 0 {
+				shell = args[0]
+			}
+			switch shell {
+			case "bash":
+				return rootCmd.GenBashCompletion(os.Stdout)
+			case "zsh":
+				return rootCmd.GenZshCompletion(os.Stdout)
+			case "fish":
+				return rootCmd.GenFishCompletion(os.Stdout, true)
+			case "powershell":
+				return rootCmd.GenPowerShellCompletionWithDesc(os.Stdout)
+			default:
+				return fmt.Errorf("unsupported shell %q; use bash, zsh, fish, or powershell", shell)
+			}
+		},
+	}
+
+	cmd.Flags().BoolVar(&install, "install", false, "Install completion for the current shell automatically")
+	return cmd
+}
+
+// completionInstall auto-detects the user's shell and writes the completion
+// script to the best location — preferring places that are already on the
+// completion path so no shell config changes are needed.
+func completionInstall(rootCmd *cobra.Command) error {
+	shellBin := os.Getenv("SHELL")
+	shell := strings.ToLower(filepath.Base(shellBin))
+
+	switch shell {
+	case "zsh":
+		return completionInstallZsh(rootCmd)
+	case "bash":
+		return completionInstallBash(rootCmd)
+	case "fish":
+		return completionInstallFish(rootCmd)
+	default:
+		return fmt.Errorf("unsupported shell %q — run 'cw completion zsh|bash|fish' and follow shell-specific instructions", shell)
+	}
+}
+
+// completionInstallZsh writes _cw to the first auto-loaded zsh completion dir
+// it can find: homebrew's site-functions, oh-my-zsh, or ~/.zfunc (with a hint).
+func completionInstallZsh(rootCmd *cobra.Command) error {
+	candidates := []struct {
+		dir      string
+		autoload bool // true = no shell config change needed
+		hint     string
+	}{
+		// Homebrew's zsh site-functions are already in $fpath for all brew users.
+		{dir: brewPrefix() + "/share/zsh/site-functions", autoload: true},
+		// Oh My Zsh custom completions are auto-loaded.
+		{dir: os.Getenv("HOME") + "/.oh-my-zsh/completions", autoload: true},
+		// ~/.zfunc needs one fpath entry in .zshrc.
+		{
+			dir:      os.Getenv("HOME") + "/.zfunc",
+			autoload: false,
+			hint: "Add these lines to ~/.zshrc (before compinit):\n" +
+				"  fpath=(~/.zfunc $fpath)\n" +
+				"  autoload -Uz compinit && compinit",
+		},
+	}
+
+	for _, c := range candidates {
+		if c.dir == "" || c.dir == "/share/zsh/site-functions" {
+			continue
+		}
+		if err := os.MkdirAll(c.dir, 0o755); err != nil {
+			continue
+		}
+		dest := filepath.Join(c.dir, "_cw")
+		f, err := os.Create(dest)
+		if err != nil {
+			continue
+		}
+		if err := rootCmd.GenZshCompletion(f); err != nil {
+			f.Close()
+			_ = os.Remove(dest)
+			continue
+		}
+		f.Close()
+		fmt.Fprintf(os.Stderr, "zsh completion installed: %s\n", dest)
+		if !c.autoload {
+			fmt.Fprintln(os.Stderr, "\n"+c.hint)
+			fmt.Fprintln(os.Stderr, "\nThen start a new shell or run: source ~/.zshrc")
+		} else {
+			fmt.Fprintln(os.Stderr, "Start a new shell to activate, or run: source ~/.zshrc")
+		}
+		return nil
+	}
+
+	// Nothing writable — print manual instructions.
+	fmt.Fprintln(os.Stderr, "Could not find a writable zsh completion directory.")
+	fmt.Fprintln(os.Stderr, "Add this to ~/.zshrc:\n  source <(cw completion zsh)")
+	return nil
+}
+
+// completionInstallBash writes a bash completion script to the first available
+// location: homebrew's bash_completion.d, or ~/.bash_completion.d.
+func completionInstallBash(rootCmd *cobra.Command) error {
+	candidates := []struct {
+		dir      string
+		autoload bool
+		hint     string
+	}{
+		{dir: brewPrefix() + "/etc/bash_completion.d", autoload: true},
+		{
+			dir:      os.Getenv("HOME") + "/.bash_completion.d",
+			autoload: false,
+			hint:     "Add to ~/.bashrc:\n  source ~/.bash_completion.d/cw",
+		},
+	}
+
+	for _, c := range candidates {
+		if c.dir == "" || c.dir == "/etc/bash_completion.d" {
+			continue
+		}
+		if err := os.MkdirAll(c.dir, 0o755); err != nil {
+			continue
+		}
+		dest := filepath.Join(c.dir, "cw")
+		f, err := os.Create(dest)
+		if err != nil {
+			continue
+		}
+		if err := rootCmd.GenBashCompletion(f); err != nil {
+			f.Close()
+			_ = os.Remove(dest)
+			continue
+		}
+		f.Close()
+		fmt.Fprintf(os.Stderr, "bash completion installed: %s\n", dest)
+		if !c.autoload {
+			fmt.Fprintln(os.Stderr, "\n"+c.hint)
+			fmt.Fprintln(os.Stderr, "\nThen start a new shell or run: source ~/.bashrc")
+		} else {
+			fmt.Fprintln(os.Stderr, "Start a new shell to activate.")
+		}
+		return nil
+	}
+
+	fmt.Fprintln(os.Stderr, "Could not find a writable bash completion directory.")
+	fmt.Fprintln(os.Stderr, "Add to ~/.bashrc:\n  source <(cw completion bash)")
+	return nil
+}
+
+// completionInstallFish writes to ~/.config/fish/completions/cw.fish — fish
+// auto-loads all files from that directory, so no config changes are needed.
+func completionInstallFish(rootCmd *cobra.Command) error {
+	dir := filepath.Join(os.Getenv("HOME"), ".config", "fish", "completions")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("creating %s: %w", dir, err)
+	}
+	dest := filepath.Join(dir, "cw.fish")
+	f, err := os.Create(dest)
+	if err != nil {
+		return fmt.Errorf("creating %s: %w", dest, err)
+	}
+	defer f.Close()
+	if err := rootCmd.GenFishCompletion(f, true); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "fish completion installed: %s\n", dest)
+	fmt.Fprintln(os.Stderr, "Start a new shell to activate (fish auto-loads completions).")
+	return nil
+}
+
+// brewPrefix returns the output of `brew --prefix`, or "" if brew is not found.
+func brewPrefix() string {
+	out, err := exec.Command("brew", "--prefix").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// ---------------------------------------------------------------------------
+// Completion helpers
+// ---------------------------------------------------------------------------
+
+func sessionCompletionFunc(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	target, err := resolveTarget()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	return client.ListSessionsForCompletion(target), cobra.ShellCompDirectiveNoFileComp
+}
+
+func tagCompletionFunc(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	target, err := resolveTarget()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	return client.ListTagsForCompletion(target), cobra.ShellCompDirectiveNoFileComp
 }
 
 // ---------------------------------------------------------------------------
