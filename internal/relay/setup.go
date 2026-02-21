@@ -72,6 +72,11 @@ func getAuthConfig(ctx context.Context, relayURL string) (string, error) {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
+		return "", fmt.Errorf("relay returned HTTP %d from /api/v1/auth/config (is this relay too old?): %s", resp.StatusCode, bytes.TrimSpace(b))
+	}
+
 	var cfg struct {
 		AuthMode string `json:"auth_mode"`
 	}
