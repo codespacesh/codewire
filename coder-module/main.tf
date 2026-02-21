@@ -44,6 +44,19 @@ variable "codewire_version" {
   default     = "latest"
 }
 
+variable "relay_url" {
+  type        = string
+  default     = ""
+  description = "Codewire relay URL (e.g. https://user.relay.codespace.sh). Leave empty for standalone mode."
+}
+
+variable "relay_token" {
+  type        = string
+  default     = ""
+  sensitive   = true
+  description = "Invite/admin token for token-mode relays. Leave empty to use OIDC device flow."
+}
+
 variable "experiment_report_tasks" {
   type        = bool
   description = "Whether to enable Coder MCP task reporting."
@@ -79,6 +92,18 @@ resource "coder_script" "codewire" {
       echo "Configuring Coder MCP task reporting..."
       coder exp mcp configure claude-code ${var.folder}
     fi
+
+    # Relay registration (only if relay_url is set and not already registered)
+    %{~ if var.relay_url != "" ~}
+    if ! grep -q "relay_token" "$HOME/.codewire/config.toml" 2>/dev/null; then
+      echo "Registering with Codewire relay..."
+      %{~ if var.relay_token != "" ~}
+      cw setup "${var.relay_url}" "${var.relay_token}"
+      %{~ else ~}
+      cw setup "${var.relay_url}"
+      %{~ endif ~}
+    fi
+    %{~ endif ~}
 
     # Start the codewire node in the background
     echo "Starting codewire node..."
