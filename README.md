@@ -712,3 +712,6 @@ sha256sum --check --ignore-missing SHA256SUMS
 ## License
 
 MIT
+
+---
+Latest release: v0.2.26 — 2026-02-21
