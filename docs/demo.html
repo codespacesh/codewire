@@ -224,8 +224,8 @@ html,body{height:100%;background:var(--bg);color:var(--fg);font-family:var(--fon
     ws.onmessage = (evt) => {
       if (evt.data instanceof ArrayBuffer) {
         const data = new Uint8Array(evt.data);
-        // ttyd protocol: first byte is type (0=output)
-        if (data[0] === 0) {
+        // ttyd protocol: first byte is ASCII type char ('0'=output, '1'=title, '2'=prefs)
+        if (data[0] === 0x30) {
           term.write(data.slice(1));
         }
       } else {
