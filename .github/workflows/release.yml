@@ -45,7 +45,7 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           VERSION=${GITHUB_REF_NAME}
-          go build -ldflags="-s -w" -o "cw-${VERSION}-${{ matrix.suffix }}" ./cmd/cw
+          go build -ldflags="-s -w -X main.version=${VERSION}" -o "cw-${VERSION}-${{ matrix.suffix }}" ./cmd/cw
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

@@ -3,13 +3,15 @@
 
 BINARY := cw
 BUILD_DIR := ./cmd/cw
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS := -X main.version=$(VERSION)
 DEMO_IMAGE ?= ghcr.io/codespacesh/codewire-demo
 BROKER_IMAGE ?= ghcr.io/codespacesh/codewire-demo-broker
 IMAGE_TAG ?= latest
 
 # Build release binary
 build:
-	go build -o $(BINARY) $(BUILD_DIR)
+	go build -ldflags="$(LDFLAGS)" -o $(BINARY) $(BUILD_DIR)
 
 # Run unit tests
 test:

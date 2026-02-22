@@ -23,14 +23,18 @@ import (
 )
 
 var (
+	// version is set at build time via -ldflags "-X main.version=..."
+	version = "dev"
+
 	serverFlag string
 	tokenFlag  string
 )
 
 func main() {
 	rootCmd := &cobra.Command{
-		Use:   "cw",
-		Short: "Persistent process server for AI coding agents",
+		Use:     "cw",
+		Short:   "Persistent process server for AI coding agents",
+		Version: version,
 	}
 	rootCmd.PersistentFlags().StringVarP(&serverFlag, "server", "s", "", "Connect to a remote server (name from servers.toml or ws://host:port)")
 	rootCmd.PersistentFlags().StringVar(&tokenFlag, "token", "", "Auth token for remote server")
