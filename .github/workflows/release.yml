@@ -5,6 +5,10 @@ on:
     tags:
       - "v*"
 
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
   packages: write
@@ -86,10 +90,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create ${{ github.ref_name }} \
-            --title "${{ github.ref_name }}" \
-            --generate-notes \
-            artifacts/*
+          # Check if release already exists (avoids duplicate-trigger failures).
+          if gh release view ${{ github.ref_name }} &>/dev/null; then
+            echo "Release ${{ github.ref_name }} already exists, uploading assets"
+            gh release upload ${{ github.ref_name }} artifacts/* --clobber
+          else
+            gh release create ${{ github.ref_name }} \
+              --title "${{ github.ref_name }}" \
+              --generate-notes \
+              artifacts/*
+          fi
 
   helm-publish:
     name: Publish Helm Chart
