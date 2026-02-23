@@ -93,24 +93,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Authenticate to Infisical
+      - name: Configure kubectl
         run: |
-          RESPONSE=$(curl -s -X POST "${INFISICAL_API_URL}/v1/auth/oidc-auth/login" \
-            -H "Content-Type: application/json" \
-            -d "{\"identityId\": \"${INFISICAL_IDENTITY_ID}\", \"jwt\": \"$(cat ${INFISICAL_SA_TOKEN_PATH})\"}")
-          ACCESS_TOKEN=$(echo "$RESPONSE" | jq -r '.accessToken')
-          echo "INFISICAL_TOKEN=$ACCESS_TOKEN" >> $GITHUB_ENV
-
-      - name: Setup kubeconfig
-        run: |
-          mkdir -p ~/.kube
-          KUBECONFIG_CONTENT=$(curl -s "${INFISICAL_API_URL}/v3/secrets/raw/KUBECONFIG_CI?workspaceSlug=system&environment=prod&secretPath=/ci" \
-            -H "Authorization: Bearer ${INFISICAL_TOKEN}" | jq -r '.secret.secretValue')
-          if [ -z "$KUBECONFIG_CONTENT" ] || [ "$KUBECONFIG_CONTENT" = "null" ]; then
-            echo "Error: Could not retrieve kubeconfig from Infisical"; exit 1
-          fi
-          echo "$KUBECONFIG_CONTENT" > ~/.kube/config
-          chmod 600 ~/.kube/config
+          TOKEN=$(cat ${K8S_DEPLOY_TOKEN_PATH})
+          kubectl config set-cluster $DEPLOY_CONTEXT --server="${K8S_DEPLOY_SERVER}" --insecure-skip-tls-verify=true
+          kubectl config set-credentials ci-deployer --token="$TOKEN"
+          kubectl config set-context $DEPLOY_CONTEXT --cluster=$DEPLOY_CONTEXT --user=ci-deployer
+          kubectl config use-context $DEPLOY_CONTEXT
 
       - name: Update manifests with image tag
         run: |
