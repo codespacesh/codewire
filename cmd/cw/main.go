@@ -166,7 +166,7 @@ func runCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:     "run [name] -- command...",
+		Use:     "run [name] [tag] -- command...",
 		Aliases: []string{"launch"},
 		Short:   "Launch a new session",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -184,13 +184,20 @@ func runCmd() *cobra.Command {
 			dash := cmd.ArgsLenAtDash()
 			if dash == -1 {
 				if len(args) > 0 {
-					return fmt.Errorf("missing '--' before command\n\nDid you mean: cw run -- %s\n\nUsage: cw run [name] -- <command> [args...]", strings.Join(args, " "))
+					return fmt.Errorf("missing '--' before command\n\nDid you mean: cw run -- %s\n\nUsage: cw run [name] [tag] -- <command> [args...]", strings.Join(args, " "))
 				}
-				return fmt.Errorf("command required\n\nUsage: cw run [name] -- <command> [args...]")
+				return fmt.Errorf("command required\n\nUsage: cw run [name] [tag] -- <command> [args...]")
 			}
 
 			var command []string
-			if dash == 1 {
+			if dash == 2 {
+				// cw run planner my-cohort -- claude -p "..."
+				if name == "" {
+					name = args[0]
+				}
+				tags = append(tags, args[1])
+				command = args[2:]
+			} else if dash == 1 {
 				// cw launch planner -- claude -p "..."
 				if name == "" {
 					name = args[0]
@@ -200,7 +207,7 @@ func runCmd() *cobra.Command {
 				// cw launch -- claude -p "..."
 				command = args
 			} else {
-				return fmt.Errorf("expected at most one name before --")
+				return fmt.Errorf("expected at most two positional args (name, tag) before --")
 			}
 
 			if len(command) == 0 {
@@ -749,7 +756,7 @@ func waitSessionCmd() *cobra.Command {
 func kvCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "kv",
-		Short: "Shared key-value store (requires relay)",
+		Short: "Key-value store for coordination",
 	}
 
 	cmd.AddCommand(

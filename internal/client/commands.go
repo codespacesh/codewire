@@ -1130,7 +1130,15 @@ func WaitForSession(target *Target, sessionID *uint32, tags []string, condition 
 					if s.ExitCode != nil {
 						exitStr = fmt.Sprintf("%d", *s.ExitCode)
 					}
-					fmt.Printf("Session %d: %s (exit_code=%s)\n", s.ID, s.Status, exitStr)
+					name := s.Name
+					if name == "" {
+						name = fmt.Sprintf("%d", s.ID)
+					}
+					fmt.Printf("=== %s (exit_code=%s) ===\n", name, exitStr)
+					if s.LastOutputSnippet != nil {
+						fmt.Println(*s.LastOutputSnippet)
+					}
+					fmt.Println()
 				}
 			}
 			return nil

@@ -16,7 +16,7 @@ import (
 // handleClient reads the first control frame from a client, dispatches the
 // request by type, and returns. Each Unix/WebSocket connection is handled
 // by exactly one goroutine calling this function.
-func handleClient(reader connection.FrameReader, writer connection.FrameWriter, manager *session.SessionManager) {
+func handleClient(reader connection.FrameReader, writer connection.FrameWriter, manager *session.SessionManager, kvStore *session.KVStore) {
 	defer reader.Close()
 	defer writer.Close()
 
@@ -48,7 +48,7 @@ func handleClient(reader connection.FrameReader, writer connection.FrameWriter, 
 		})
 
 	case "Launch":
-		id, launchErr := manager.Launch(req.Command, req.WorkingDir, req.Env, req.StdinData, req.Tags...)
+		id, launchErr := manager.Launch(req.Command, req.WorkingDir, req.Env, req.StdinData, req.Name, req.Tags...)
 		if launchErr != nil {
 			msg := launchErr.Error()
 			_ = writer.SendResponse(&protocol.Response{
@@ -317,11 +317,17 @@ func handleClient(reader connection.FrameReader, writer connection.FrameWriter, 
 	case "MsgListen":
 		handleMsgListen(reader, writer, manager, req)
 
-	case "KVSet", "KVGet", "KVDelete", "KVList":
-		_ = writer.SendResponse(&protocol.Response{
-			Type:    "Error",
-			Message: "not connected to a relay — KV operations require relay mode",
-		})
+	case "KVSet":
+		handleKVSet(writer, kvStore, req)
+
+	case "KVGet":
+		handleKVGet(writer, kvStore, req)
+
+	case "KVDelete":
+		handleKVDelete(writer, kvStore, req)
+
+	case "KVList":
+		handleKVList(writer, kvStore, req)
 
 	default:
 		_ = writer.SendResponse(&protocol.Response{
@@ -1041,5 +1047,85 @@ func handleMsgReply(writer connection.FrameWriter, manager *session.SessionManag
 	_ = writer.SendResponse(&protocol.Response{
 		Type:      "MsgReplySent",
 		RequestID: req.RequestID,
+	})
+}
+
+// ---------------------------------------------------------------------------
+// KV handlers
+// ---------------------------------------------------------------------------
+
+func handleKVSet(writer connection.FrameWriter, kvStore *session.KVStore, req protocol.Request) {
+	ns := req.Namespace
+	if ns == "" {
+		ns = "default"
+	}
+
+	var ttl time.Duration
+	if req.TTL != "" {
+		var err error
+		ttl, err = time.ParseDuration(req.TTL)
+		if err != nil {
+			_ = writer.SendResponse(&protocol.Response{
+				Type:    "Error",
+				Message: fmt.Sprintf("invalid TTL %q: %v", req.TTL, err),
+			})
+			return
+		}
+	}
+
+	kvStore.Set(ns, req.Key, req.Value, ttl)
+	_ = writer.SendResponse(&protocol.Response{
+		Type: "KVSetOK",
+	})
+}
+
+func handleKVGet(writer connection.FrameWriter, kvStore *session.KVStore, req protocol.Request) {
+	ns := req.Namespace
+	if ns == "" {
+		ns = "default"
+	}
+
+	value := kvStore.Get(ns, req.Key)
+	_ = writer.SendResponse(&protocol.Response{
+		Type:  "KVGetResult",
+		Value: value,
+	})
+}
+
+func handleKVDelete(writer connection.FrameWriter, kvStore *session.KVStore, req protocol.Request) {
+	ns := req.Namespace
+	if ns == "" {
+		ns = "default"
+	}
+
+	kvStore.Delete(ns, req.Key)
+	_ = writer.SendResponse(&protocol.Response{
+		Type: "KVDeleteOK",
+	})
+}
+
+func handleKVList(writer connection.FrameWriter, kvStore *session.KVStore, req protocol.Request) {
+	ns := req.Namespace
+	if ns == "" {
+		ns = "default"
+	}
+
+	entries := kvStore.List(ns, req.Key)
+	pairs := make([]protocol.KVPair, 0, len(entries))
+	for _, e := range entries {
+		pair := protocol.KVPair{
+			Key:   e.Key,
+			Value: e.Value,
+		}
+		if e.ExpiresAt != nil {
+			ts := e.ExpiresAt.Format(time.RFC3339)
+			pair.ExpiresAt = &ts
+		}
+		pairs = append(pairs, pair)
+	}
+
+	_ = writer.SendResponse(&protocol.Response{
+		Type:    "KVListResult",
+		Entries: &pairs,
 	})
 }

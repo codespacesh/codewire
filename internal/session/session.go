@@ -172,6 +172,7 @@ type SessionMeta struct {
 	Tags        []string   `json:"tags,omitempty"`
 	ExitCode    *int       `json:"exit_code,omitempty"`
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
+	Result      *string    `json:"result,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -545,8 +546,9 @@ func (m *SessionManager) triggerPersist() {
 }
 
 // Launch starts a new PTY session executing command in workingDir.
+// name is the session name (used for env injection; naming is done by the caller).
 // tags are optional labels for filtering/grouping.
-func (m *SessionManager) Launch(command []string, workingDir string, env []string, stdinData []byte, tags ...string) (uint32, error) {
+func (m *SessionManager) Launch(command []string, workingDir string, env []string, stdinData []byte, name string, tags ...string) (uint32, error) {
 	if len(command) == 0 {
 		return 0, fmt.Errorf("command must not be empty")
 	}
@@ -585,7 +587,14 @@ func (m *SessionManager) Launch(command []string, workingDir string, env []strin
 	// Build exec.Cmd.
 	cmd := exec.Command(command[0], command[1:]...)
 	cmd.Dir = workingDir
-	cmd.Env = buildEnv(append(env, fmt.Sprintf("CW_SESSION_ID=%d", id)))
+	extraEnv := []string{fmt.Sprintf("CW_SESSION_ID=%d", id)}
+	if name != "" {
+		extraEnv = append(extraEnv, "CW_SESSION_NAME="+name)
+	}
+	if len(tags) > 0 {
+		extraEnv = append(extraEnv, "CW_COHORT_TAG="+tags[0])
+	}
+	cmd.Env = buildEnv(append(env, extraEnv...))
 
 	// Start with a PTY.
 	ptmx, err := pty.Start(cmd)
@@ -746,6 +755,12 @@ func (m *SessionManager) Launch(command []string, workingDir string, env []strin
 		sess.mu.Lock()
 		sess.Meta.ExitCode = &exitCode
 		sess.Meta.CompletedAt = &now
+		sess.mu.Unlock()
+
+		// Capture result from output log before status change.
+		result := captureResult(sess.logPath, 200)
+		sess.mu.Lock()
+		sess.Meta.Result = result
 		sess.mu.Unlock()
 
 		statusWatcher.Set(StatusCompleted(exitCode))
@@ -1043,7 +1058,7 @@ func (m *SessionManager) buildSessionInfo(s *Session) protocol.SessionInfo {
 		info.OutputSizeBytes = &sz
 	}
 
-	// Exit code and completion info.
+	// Exit code, completion info, and captured result.
 	s.mu.Lock()
 	if s.Meta.ExitCode != nil {
 		info.ExitCode = s.Meta.ExitCode
@@ -1053,6 +1068,9 @@ func (m *SessionManager) buildSessionInfo(s *Session) protocol.SessionInfo {
 		info.CompletedAt = &completedStr
 		durationMs := s.Meta.CompletedAt.Sub(s.Meta.CreatedAt).Milliseconds()
 		info.DurationMs = &durationMs
+	}
+	if s.Meta.Result != nil {
+		info.LastOutputSnippet = s.Meta.Result
 	}
 	s.mu.Unlock()
 
@@ -1154,6 +1172,58 @@ func buildEnv(overrides []string) []string {
 		}
 	}
 	return result
+}
+
+// ansiRegex matches ANSI escape sequences for stripping from output.
+var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b\[[0-9;]*m`)
+
+// captureResult reads the tail of a log file, strips ANSI codes, and returns
+// the last maxLines lines. It reads from the end of the file to avoid loading
+// the entire file into memory.
+func captureResult(logPath string, maxLines int) *string {
+	f, err := os.Open(logPath)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	fi, err := f.Stat()
+	if err != nil || fi.Size() == 0 {
+		return nil
+	}
+
+	// Read up to 64KB from the end — enough for 200 lines.
+	readSize := int64(64 * 1024)
+	if fi.Size() < readSize {
+		readSize = fi.Size()
+	}
+
+	buf := make([]byte, readSize)
+	_, err = f.ReadAt(buf, fi.Size()-readSize)
+	if err != nil && err != io.EOF {
+		return nil
+	}
+
+	// Strip ANSI escape codes.
+	clean := ansiRegex.ReplaceAllString(string(buf), "")
+
+	// Take last N lines.
+	lines := strings.Split(clean, "\n")
+	if len(lines) > maxLines {
+		lines = lines[len(lines)-maxLines:]
+	}
+
+	// Trim trailing empty lines.
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+
+	if len(lines) == 0 {
+		return nil
+	}
+
+	result := strings.Join(lines, "\n")
+	return &result
 }
 
 // isEIO returns true if err is an EIO (errno 5) wrapped in an *os.PathError.

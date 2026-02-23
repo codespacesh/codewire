@@ -24,6 +24,7 @@ import (
 // and optionally a WebSocket listener.
 type Node struct {
 	Manager    *session.SessionManager
+	KVStore    *session.KVStore
 	socketPath string
 	pidPath    string
 	config     *config.Config
@@ -51,6 +52,7 @@ func NewNode(dataDir string) (*Node, error) {
 
 	return &Node{
 		Manager:    mgr,
+		KVStore:    session.NewKVStore(),
 		socketPath: filepath.Join(dataDir, "codewire.sock"),
 		pidPath:    filepath.Join(dataDir, "codewire.pid"),
 		config:     cfg,
@@ -137,6 +139,7 @@ func (n *Node) Run(ctx context.Context) error {
 			connection.NewUnixReader(conn),
 			connection.NewUnixWriter(conn),
 			n.Manager,
+			n.KVStore,
 		)
 	}
 }
@@ -175,7 +178,7 @@ func (n *Node) runWSServer(ctx context.Context, addr string) error {
 		wsCtx := r.Context()
 		reader := connection.NewWSReader(wsCtx, wsConn)
 		writer := connection.NewWSWriter(wsCtx, wsConn)
-		handleClient(reader, writer, n.Manager)
+		handleClient(reader, writer, n.Manager, n.KVStore)
 	})
 
 	srv := &http.Server{

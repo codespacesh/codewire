@@ -155,7 +155,7 @@ func getTools() []tool {
 					},
 					"max_chars": map[string]interface{}{
 						"type":        "integer",
-						"description": "Maximum characters to return (default: 50000)",
+						"description": "Maximum characters to return (default: 500000)",
 					},
 				},
 				"required": []string{"session_id"},
@@ -624,7 +624,7 @@ func toolReadSessionOutput(dataDir string, args map[string]interface{}) (string,
 		tail = &t
 	}
 
-	maxChars := uint64(50000)
+	maxChars := uint64(500000)
 	if v, ok := args["max_chars"].(float64); ok {
 		maxChars = uint64(v)
 	}
@@ -1335,8 +1335,8 @@ func watchSessionTimed(dataDir string, sessionID uint32, includeHistory bool, hi
 
 		case <-deadline:
 			output += "\n[Watch timeout]\n"
-			if len(output) > 100000 {
-				output = output[:100000] + "\n... [output truncated to 100KB]"
+			if len(output) > 500000 {
+				output = output[:500000] + "\n... [output truncated to 500KB]"
 			}
 			return output, nil
 		}
