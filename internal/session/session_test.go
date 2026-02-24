@@ -42,6 +42,16 @@ func TestBuildEnvAppliesOverrides(t *testing.T) {
 	}
 }
 
+func TestBuildEnvStripsClaudeCodeEntrypoint(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_ENTRYPOINT", "cli")
+	env := buildEnv(nil)
+	for _, e := range env {
+		if strings.HasPrefix(e, "CLAUDE_CODE_ENTRYPOINT=") {
+			t.Fatalf("CLAUDE_CODE_ENTRYPOINT should be stripped, got: %s", e)
+		}
+	}
+}
+
 func TestBuildEnvOverridesExisting(t *testing.T) {
 	t.Setenv("CW_TEST_VAR", "original")
 	env := buildEnv([]string{"CW_TEST_VAR=override"})

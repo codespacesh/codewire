@@ -22,8 +22,10 @@ import (
 	"github.com/BurntSushi/toml"
 	qrcode "github.com/skip2/go-qrcode"
 
+	"github.com/codespacesh/codewire/internal/config"
 	"github.com/codespacesh/codewire/internal/connection"
 	"github.com/codespacesh/codewire/internal/protocol"
+	"github.com/codespacesh/codewire/internal/relay"
 	"github.com/codespacesh/codewire/internal/statusbar"
 	"github.com/codespacesh/codewire/internal/terminal"
 )
@@ -1560,20 +1562,41 @@ func Invite(dataDir string, uses int, ttl string, showQR bool) error {
 	fmt.Fprintf(os.Stderr, "  cw setup %s --invite %s\n", relayURL, invite.Token)
 
 	if showQR {
-		printQR(joinURL)
+		PrintQR(joinURL)
 	}
 
 	return nil
 }
 
-// printQR renders a QR code to the terminal using Unicode half-blocks.
-func printQR(content string) {
+// PrintQR renders a QR code to the terminal using Unicode half-blocks.
+func PrintQR(content string) {
 	q, err := qrcode.New(content, qrcode.Medium)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "\n(QR generation failed: %v)\n", err)
 		return
 	}
 	fmt.Fprintf(os.Stderr, "\n%s\n", q.ToSmallString(false))
+}
+
+// SSHQRCode prints an SSH connection QR code from existing config.
+func SSHQRCode(dataDir string, sshPort int) error {
+	cfg, err := config.LoadConfig(dataDir)
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+	if cfg.RelayURL == nil || *cfg.RelayURL == "" {
+		return fmt.Errorf("relay not configured (run 'cw setup <relay-url>')")
+	}
+	if cfg.RelayToken == nil || *cfg.RelayToken == "" {
+		return fmt.Errorf("no relay token in config (run 'cw setup <relay-url>')")
+	}
+
+	nodeName := cfg.Node.Name
+	uri := relay.SSHURI(*cfg.RelayURL, nodeName, *cfg.RelayToken, sshPort)
+
+	fmt.Fprintf(os.Stderr, "SSH URI: %s\n", uri)
+	PrintQR(uri)
+	return nil
 }
 
 // ---------------------------------------------------------------------------
