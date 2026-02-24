@@ -1137,13 +1137,13 @@ func (m *SessionManager) KillByTags(tags []string) int {
 	return len(ids)
 }
 
-// buildEnv constructs child env from os.Environ() with CLAUDECODE stripped
+// buildEnv constructs child env from os.Environ() with Claude Code vars stripped
 // and optional KEY=VALUE overrides applied.
 func buildEnv(overrides []string) []string {
 	base := os.Environ()
 	filtered := make([]string, 0, len(base))
 	for _, e := range base {
-		if !strings.HasPrefix(e, "CLAUDECODE=") {
+		if !strings.HasPrefix(e, "CLAUDECODE=") && !strings.HasPrefix(e, "CLAUDE_CODE_ENTRYPOINT=") {
 			filtered = append(filtered, e)
 		}
 	}

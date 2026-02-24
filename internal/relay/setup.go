@@ -7,11 +7,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/BurntSushi/toml"
+	qrcode "github.com/skip2/go-qrcode"
+
 	"github.com/codespacesh/codewire/internal/config"
 )
 
@@ -21,6 +24,8 @@ type SetupOptions struct {
 	DataDir   string
 	Token     string // invite token or positional token (empty = auto-detect)
 	AuthToken string // admin/CI token (--token flag)
+	ShowQR    bool   // print SSH connection QR code after registration
+	SSHPort   int    // SSH port for QR URI (default 2222)
 }
 
 // RunSetup registers this node with the relay and writes relay_url + relay_token
@@ -54,9 +59,23 @@ func RunSetup(ctx context.Context, opts SetupOptions) error {
 	if err := writeRelayConfig(opts.DataDir, opts.RelayURL, nodeToken); err != nil {
 		return fmt.Errorf("writing config: %w", err)
 	}
+
+	sshPort := opts.SSHPort
+	if sshPort == 0 {
+		sshPort = 2222
+	}
+	relayHost := extractHost(opts.RelayURL)
+
 	fmt.Fprintln(os.Stderr, "→ Configuration saved.")
 	fmt.Fprintf(os.Stderr, "→ Start node agent: cw node -d\n")
-	fmt.Fprintf(os.Stderr, "→ SSH access: ssh %s@<relay-host> -p 2222\n", nodeName)
+	fmt.Fprintf(os.Stderr, "→ SSH access: ssh %s@%s -p %d\n", nodeName, relayHost, sshPort)
+
+	if opts.ShowQR {
+		uri := SSHURI(opts.RelayURL, nodeName, nodeToken, sshPort)
+		fmt.Fprintf(os.Stderr, "→ SSH URI: %s\n", uri)
+		printSetupQR(uri)
+	}
+
 	return nil
 }
 
@@ -267,4 +286,29 @@ func writeRelayConfig(dataDir, relayURL, nodeToken string) error {
 	}
 	defer f.Close()
 	return toml.NewEncoder(f).Encode(cfg)
+}
+
+// SSHURI builds an ssh:// URI for the given relay and node credentials.
+func SSHURI(relayURL, nodeName, nodeToken string, port int) string {
+	host := extractHost(relayURL)
+	return fmt.Sprintf("ssh://%s:%s@%s:%d", nodeName, nodeToken, host, port)
+}
+
+// extractHost returns the hostname from a URL, falling back to the raw string.
+func extractHost(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Hostname() == "" {
+		return rawURL
+	}
+	return u.Hostname()
+}
+
+// printSetupQR renders a QR code to stderr using Unicode half-blocks.
+func printSetupQR(content string) {
+	q, err := qrcode.New(content, qrcode.Medium)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "\n(QR generation failed: %v)\n", err)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "\n%s\n", q.ToSmallString(false))
 }

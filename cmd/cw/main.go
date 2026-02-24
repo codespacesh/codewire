@@ -61,6 +61,7 @@ func main() {
 		serverCmd(),
 		relayCmd(),
 		setupCmd(),
+		qrCmd(),
 		inviteCmd(),
 		revokeCmd(),
 		msgCmd(),
@@ -1004,7 +1005,10 @@ func serverListCmd() *cobra.Command {
 // ---------------------------------------------------------------------------
 
 func setupCmd() *cobra.Command {
-	var authToken string
+	var (
+		authToken string
+		qr        bool
+	)
 
 	cmd := &cobra.Command{
 		Use:   "setup <relay-url> [token]",
@@ -1038,11 +1042,33 @@ func setupCmd() *cobra.Command {
 				DataDir:   dir,
 				Token:     token,
 				AuthToken: authToken,
+				ShowQR:    qr,
 			})
 		},
 	}
 
 	cmd.Flags().StringVar(&authToken, "token", "", "Admin auth token (for headless/CI use)")
+	cmd.Flags().BoolVar(&qr, "qr", false, "Print QR code with SSH connection URI (for Termius iOS)")
+
+	return cmd
+}
+
+// ---------------------------------------------------------------------------
+// qrCmd — show SSH connection QR code
+// ---------------------------------------------------------------------------
+
+func qrCmd() *cobra.Command {
+	var port int
+
+	cmd := &cobra.Command{
+		Use:   "qr",
+		Short: "Show QR code for SSH access (scan with Termius)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return client.SSHQRCode(dataDir(), port)
+		},
+	}
+
+	cmd.Flags().IntVar(&port, "port", 2222, "SSH port on the relay")
 
 	return cmd
 }

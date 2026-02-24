@@ -82,7 +82,8 @@
       "Bash(go -C /Users/noel/src/sonica/codewire test ./internal/... ./tests/... -timeout 120s -count=1)",
       "Bash(/Users/noel/src/sonica/codewire/cw hook:*)",
       "Bash(go -C /Users/noel/src/sonica/codewire test ./tests/... -run \"TestHookNoGateway|TestHookReadOnlyBypass|TestHookDenied\" -v -timeout 30s)",
-      "Bash(go get:*)"
+      "Bash(go get:*)",
+      "WebFetch(domain:exe.dev)"
     ]
   },
   "enableAllProjectMcpServers": true
