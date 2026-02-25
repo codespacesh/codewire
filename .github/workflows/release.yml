@@ -390,7 +390,8 @@ jobs:
           mkdir -p ~/.ssh
           echo "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur
           chmod 600 ~/.ssh/aur
-          echo -e "Host aur.archlinux.org\n  IdentityFile ~/.ssh/aur\n  StrictHostKeyChecking no" > ~/.ssh/config
+          ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts 2>/dev/null
+          printf 'Host aur.archlinux.org\n  IdentityFile ~/.ssh/aur\n' > ~/.ssh/config
 
           git clone ssh://aur@aur.archlinux.org/codewire-bin.git aur-repo
           cp PKGBUILD .SRCINFO aur-repo/
