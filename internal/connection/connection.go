@@ -1,6 +1,6 @@
 package connection
 
-import "github.com/codespacesh/codewire/internal/protocol"
+import "github.com/codewiresh/codewire/internal/protocol"
 
 // FrameReader reads protocol frames from a transport.
 type FrameReader interface {

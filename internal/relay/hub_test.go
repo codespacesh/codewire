@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/codespacesh/codewire/internal/relay"
+	"github.com/codewiresh/codewire/internal/relay"
 )
 
 func TestHubRegisterUnregister(t *testing.T) {

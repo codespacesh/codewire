@@ -26,12 +26,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	codewire "github.com/codespacesh/codewire/operator/api/v1alpha1"
+	codewire "github.com/codewiresh/codewire/operator/api/v1alpha1"
 )
 
 const (
 	finalizerName = "codewire.io/finalizer"
-	defaultImage  = "ghcr.io/codespacesh/codewire:latest"
+	defaultImage  = "ghcr.io/codewiresh/codewire:latest"
 )
 
 // Condition types for CodewireRelay status.

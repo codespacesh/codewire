@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/codespacesh/codewire/internal/store"
+	"github.com/codewiresh/codewire/internal/store"
 )
 
 // GitHubTokenResponse is the response from GitHub's OAuth token exchange.

@@ -14,7 +14,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/codespacesh/codewire/internal/store"
+	"github.com/codewiresh/codewire/internal/store"
 )
 
 // SSHServer wraps an ssh.ServerConfig with relay-specific auth and routing.

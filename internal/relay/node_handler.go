@@ -9,7 +9,7 @@ import (
 
 	"nhooyr.io/websocket"
 
-	"github.com/codespacesh/codewire/internal/store"
+	"github.com/codewiresh/codewire/internal/store"
 )
 
 // RegisterNodeConnectHandler adds GET /node/connect to mux.

@@ -8,7 +8,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/codespacesh/codewire/internal/store"
+	"github.com/codewiresh/codewire/internal/store"
 )
 
 // ManifestPayload is the GitHub App manifest sent to GitHub.
@@ -76,7 +76,7 @@ h2{font-weight:600}
 
 		manifest := ManifestPayload{
 			Name:         appName,
-			URL:          "https://github.com/codespacesh/codewire",
+			URL:          "https://github.com/codewiresh/codewire",
 			CallbackURLs: []string{baseURL + "/auth/github/callback"},
 			Public:       false,
 			DefaultPermissions: map[string]string{

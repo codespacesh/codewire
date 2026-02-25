@@ -193,7 +193,7 @@ import (
     "testing"
     "time"
 
-    "github.com/codespacesh/codewire/internal/relay"
+    "github.com/codewiresh/codewire/internal/relay"
 )
 
 func TestHubRegisterUnregister(t *testing.T) {
@@ -337,8 +337,8 @@ import (
     "nhooyr.io/websocket"
     "nhooyr.io/websocket/wsjson"
 
-    "github.com/codespacesh/codewire/internal/relay"
-    "github.com/codespacesh/codewire/internal/store"
+    "github.com/codewiresh/codewire/internal/relay"
+    "github.com/codewiresh/codewire/internal/store"
 )
 
 func TestNodeConnect(t *testing.T) {
@@ -397,7 +397,7 @@ import (
 
     "nhooyr.io/websocket"
 
-    "github.com/codespacesh/codewire/internal/store"
+    "github.com/codewiresh/codewire/internal/store"
 )
 
 // RegisterNodeConnectHandler adds GET /node/connect to mux.
@@ -549,7 +549,7 @@ import (
 
     "nhooyr.io/websocket"
 
-    "github.com/codespacesh/codewire/internal/store"
+    "github.com/codewiresh/codewire/internal/store"
 )
 
 // PendingSessions tracks back-connections that SSH sessions are waiting for.
@@ -670,8 +670,8 @@ import (
 
     "golang.org/x/crypto/ssh"
 
-    localrelay "github.com/codespacesh/codewire/internal/relay"
-    "github.com/codespacesh/codewire/internal/store"
+    localrelay "github.com/codewiresh/codewire/internal/relay"
+    "github.com/codewiresh/codewire/internal/store"
 )
 
 func TestSSHConnectAndShell(t *testing.T) {
@@ -771,7 +771,7 @@ import (
 
     "golang.org/x/crypto/ssh"
 
-    "github.com/codespacesh/codewire/internal/store"
+    "github.com/codewiresh/codewire/internal/store"
 )
 
 // SSHServer wraps an ssh.Server with relay-specific auth and routing.
@@ -1009,8 +1009,8 @@ import (
 
     "nhooyr.io/websocket"
 
-    localrelay "github.com/codespacesh/codewire/internal/relay"
-    "github.com/codespacesh/codewire/internal/store"
+    localrelay "github.com/codewiresh/codewire/internal/relay"
+    "github.com/codewiresh/codewire/internal/store"
 )
 
 func TestAgentConnectsToHub(t *testing.T) {
@@ -1229,8 +1229,8 @@ import (
     "os"
     "time"
 
-    "github.com/codespacesh/codewire/internal/oauth"
-    "github.com/codespacesh/codewire/internal/store"
+    "github.com/codewiresh/codewire/internal/oauth"
+    "github.com/codewiresh/codewire/internal/store"
 )
 
 type RelayConfig struct {
@@ -1419,7 +1419,7 @@ import (
     "os"
 
     "github.com/BurntSushi/toml"
-    "github.com/codespacesh/codewire/internal/config"
+    "github.com/codewiresh/codewire/internal/config"
 )
 
 type SetupOptions struct {
@@ -1581,7 +1581,7 @@ if n.config.RelayURL != nil && n.config.RelayToken != nil {
 }
 ```
 
-Update imports: remove `"github.com/codespacesh/codewire/internal/tunnel"`, add `"github.com/codespacesh/codewire/internal/relay"`.
+Update imports: remove `"github.com/codewiresh/codewire/internal/tunnel"`, add `"github.com/codewiresh/codewire/internal/relay"`.
 
 Remove `runWSServerOnListener` method if it's only used for the tunnel listener.
 
@@ -1720,8 +1720,8 @@ import (
 
     "golang.org/x/crypto/ssh"
 
-    localrelay "github.com/codespacesh/codewire/internal/relay"
-    "github.com/codespacesh/codewire/internal/store"
+    localrelay "github.com/codewiresh/codewire/internal/relay"
+    "github.com/codewiresh/codewire/internal/store"
 )
 
 func TestRelayE2E(t *testing.T) {

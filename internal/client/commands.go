@@ -22,12 +22,12 @@ import (
 	"github.com/BurntSushi/toml"
 	qrcode "github.com/skip2/go-qrcode"
 
-	"github.com/codespacesh/codewire/internal/config"
-	"github.com/codespacesh/codewire/internal/connection"
-	"github.com/codespacesh/codewire/internal/protocol"
-	"github.com/codespacesh/codewire/internal/relay"
-	"github.com/codespacesh/codewire/internal/statusbar"
-	"github.com/codespacesh/codewire/internal/terminal"
+	"github.com/codewiresh/codewire/internal/config"
+	"github.com/codewiresh/codewire/internal/connection"
+	"github.com/codewiresh/codewire/internal/protocol"
+	"github.com/codewiresh/codewire/internal/relay"
+	"github.com/codewiresh/codewire/internal/statusbar"
+	"github.com/codewiresh/codewire/internal/terminal"
 )
 
 // ResolveSessionArg resolves a session argument that can be either a numeric ID

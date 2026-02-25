@@ -24,7 +24,7 @@ type Config struct {
 func configFromEnv() Config {
 	return Config{
 		Namespace:     envOr("DEMO_NAMESPACE", "codewire-demo"),
-		DemoImage:     envOr("DEMO_IMAGE", "ghcr.io/codespacesh/codewire-demo:latest"),
+		DemoImage:     envOr("DEMO_IMAGE", "ghcr.io/codewiresh/codewire-demo:latest"),
 		PoolSize:      envInt("DEMO_POOL_SIZE", 3),
 		PodMaxAge:     envInt("DEMO_POD_MAX_AGE", 300),
 		ListenAddr:    envOr("DEMO_LISTEN", ":8080"),

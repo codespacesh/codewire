@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/codespacesh/codewire/internal/connection"
-	"github.com/codespacesh/codewire/internal/protocol"
-	"github.com/codespacesh/codewire/internal/session"
+	"github.com/codewiresh/codewire/internal/connection"
+	"github.com/codewiresh/codewire/internal/protocol"
+	"github.com/codewiresh/codewire/internal/session"
 )
 
 // handleClient reads the first control frame from a client, dispatches the

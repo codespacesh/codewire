@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/codespacesh/codewire/internal/protocol"
+	"github.com/codewiresh/codewire/internal/protocol"
 )
 
 // uint64Ptr returns a pointer to a uint64 value.

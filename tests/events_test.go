@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/codespacesh/codewire/internal/protocol"
+	"github.com/codewiresh/codewire/internal/protocol"
 )
 
 func TestSessionTags(t *testing.T) {

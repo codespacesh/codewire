@@ -1,4 +1,4 @@
-module github.com/codespacesh/codewire/demo/broker
+module github.com/codewiresh/codewire/demo/broker
 
 go 1.25.5
 

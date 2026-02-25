@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/codespacesh/codewire/internal/config"
-	"github.com/codespacesh/codewire/internal/connection"
-	"github.com/codespacesh/codewire/internal/protocol"
+	"github.com/codewiresh/codewire/internal/config"
+	"github.com/codewiresh/codewire/internal/connection"
+	"github.com/codewiresh/codewire/internal/protocol"
 )
 
 // ---------------------------------------------------------------------------

@@ -15,7 +15,7 @@ import (
 	"github.com/BurntSushi/toml"
 	qrcode "github.com/skip2/go-qrcode"
 
-	"github.com/codespacesh/codewire/internal/config"
+	"github.com/codewiresh/codewire/internal/config"
 )
 
 // SetupOptions configures the relay setup flow.

@@ -15,7 +15,7 @@ echo "Updating Homebrew formula for ${VERSION}..."
 
 # Download checksums
 echo "Downloading SHA256SUMS..."
-curl -fsSL -o /tmp/SHA256SUMS "https://github.com/codespacesh/codewire/releases/download/${VERSION}/SHA256SUMS"
+curl -fsSL -o /tmp/SHA256SUMS "https://github.com/codewiresh/codewire/releases/download/${VERSION}/SHA256SUMS"
 
 # Extract checksums
 ARM64_MAC=$(grep "aarch64-apple-darwin" /tmp/SHA256SUMS | awk '{print $1}')

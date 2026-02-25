@@ -18,10 +18,10 @@ spec:
       serviceAccountName: codewire-operator
       containers:
         - name: operator
-          image: ghcr.io/codespacesh/codewire-operator:latest
+          image: ghcr.io/codewiresh/codewire-operator:latest
           args:
             - --health-probe-bind-address=:8081
-            - --relay-image=ghcr.io/codespacesh/codewire:latest
+            - --relay-image=ghcr.io/codewiresh/codewire:latest
           ports:
             - containerPort: 8081
               name: health

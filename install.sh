@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="codespacesh/codewire"
+REPO="codewiresh/codewire"
 BINARY_NAME="cw"
 GPG_KEY_URL="https://raw.githubusercontent.com/${REPO}/main/GPG_PUBLIC_KEY.asc"
 GPG_KEY_ID="C4B13740A089E3A3A810F5005CEBC1359D01F52B"

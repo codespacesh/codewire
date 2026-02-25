@@ -13,11 +13,11 @@ import (
 
 	"nhooyr.io/websocket"
 
-	"github.com/codespacesh/codewire/internal/auth"
-	"github.com/codespacesh/codewire/internal/config"
-	"github.com/codespacesh/codewire/internal/connection"
-	"github.com/codespacesh/codewire/internal/relay"
-	"github.com/codespacesh/codewire/internal/session"
+	"github.com/codewiresh/codewire/internal/auth"
+	"github.com/codewiresh/codewire/internal/config"
+	"github.com/codewiresh/codewire/internal/connection"
+	"github.com/codewiresh/codewire/internal/relay"
+	"github.com/codewiresh/codewire/internal/session"
 )
 
 // Node manages PTY sessions, accepting connections over a Unix domain socket

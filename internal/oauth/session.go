@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/codespacesh/codewire/internal/store"
+	"github.com/codewiresh/codewire/internal/store"
 )
 
 const (

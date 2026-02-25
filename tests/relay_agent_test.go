@@ -11,8 +11,8 @@ import (
 
 	"nhooyr.io/websocket"
 
-	"github.com/codespacesh/codewire/internal/relay"
-	"github.com/codespacesh/codewire/internal/store"
+	"github.com/codewiresh/codewire/internal/relay"
+	"github.com/codewiresh/codewire/internal/store"
 )
 
 func TestNodeConnect(t *testing.T) {

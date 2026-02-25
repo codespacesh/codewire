@@ -7,7 +7,7 @@ on:
 
 env:
   REGISTRY: git.noel.sh
-  DOCS_IMAGE_NAME: codespace/codewire.sh
+  DOCS_IMAGE_NAME: codewire/codewire.sh
   DEPLOY_CONTEXT: app
   DOCS_NAMESPACE: codewire-prod
 

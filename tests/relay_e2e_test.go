@@ -12,8 +12,8 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	localrelay "github.com/codespacesh/codewire/internal/relay"
-	"github.com/codespacesh/codewire/internal/store"
+	localrelay "github.com/codewiresh/codewire/internal/relay"
+	"github.com/codewiresh/codewire/internal/store"
 )
 
 func TestRelayE2E(t *testing.T) {

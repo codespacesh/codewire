@@ -1,5 +1,5 @@
-IMG ?= ghcr.io/codespacesh/codewire-operator:latest
-RELAY_IMG ?= ghcr.io/codespacesh/codewire:latest
+IMG ?= ghcr.io/codewiresh/codewire-operator:latest
+RELAY_IMG ?= ghcr.io/codewiresh/codewire:latest
 
 .PHONY: build test lint docker-build docker-push install-crd run
 

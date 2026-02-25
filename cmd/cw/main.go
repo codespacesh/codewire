@@ -15,11 +15,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/codespacesh/codewire/internal/client"
-	"github.com/codespacesh/codewire/internal/config"
-	"github.com/codespacesh/codewire/internal/mcp"
-	"github.com/codespacesh/codewire/internal/node"
-	"github.com/codespacesh/codewire/internal/relay"
+	"github.com/codewiresh/codewire/internal/client"
+	"github.com/codewiresh/codewire/internal/config"
+	"github.com/codewiresh/codewire/internal/mcp"
+	"github.com/codewiresh/codewire/internal/node"
+	"github.com/codewiresh/codewire/internal/relay"
 )
 
 var (

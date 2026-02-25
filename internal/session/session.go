@@ -19,7 +19,7 @@ import (
 
 	"github.com/creack/pty"
 
-	"github.com/codespacesh/codewire/internal/protocol"
+	"github.com/codewiresh/codewire/internal/protocol"
 )
 
 // namePattern validates session names: alphanumeric + hyphens, 1-32 chars.

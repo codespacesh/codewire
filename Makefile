@@ -5,8 +5,8 @@ BINARY := cw
 BUILD_DIR := ./cmd/cw
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -X main.version=$(VERSION)
-DEMO_IMAGE ?= ghcr.io/codespacesh/codewire-demo
-BROKER_IMAGE ?= ghcr.io/codespacesh/codewire-demo-broker
+DEMO_IMAGE ?= ghcr.io/codewiresh/codewire-demo
+BROKER_IMAGE ?= ghcr.io/codewiresh/codewire-demo-broker
 IMAGE_TAG ?= latest
 
 # Build release binary

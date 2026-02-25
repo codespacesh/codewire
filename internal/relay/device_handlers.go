@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/codespacesh/codewire/internal/oauth"
-	"github.com/codespacesh/codewire/internal/store"
+	"github.com/codewiresh/codewire/internal/oauth"
+	"github.com/codewiresh/codewire/internal/store"
 )
 
 // RegisterDeviceHandlersForTest registers the OIDC device flow handlers on the

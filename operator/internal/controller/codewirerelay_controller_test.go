@@ -19,7 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	codewire "github.com/codespacesh/codewire/operator/api/v1alpha1"
+	codewire "github.com/codewiresh/codewire/operator/api/v1alpha1"
 )
 
 // mockRoundTripper returns HTTP 200 for all requests (used to mock health checks).

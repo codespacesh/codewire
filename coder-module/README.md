@@ -2,17 +2,17 @@
 display_name: Codewire
 description: Persistent process server for AI coding agents
 icon: ../.icons/codewire.svg
-maintainer_github: codespacesh
+maintainer_github: codewiresh
 tags: [agent, codewire, terminal]
 ---
 
 # Codewire
 
-Install and run [Codewire](https://github.com/codespacesh/codewire) in your Coder workspace. Codewire is a persistent process server for AI coding agents — it manages terminal sessions that survive reconnects.
+Install and run [Codewire](https://github.com/codewiresh/codewire) in your Coder workspace. Codewire is a persistent process server for AI coding agents — it manages terminal sessions that survive reconnects.
 
 ```tf
 module "codewire" {
-  source   = "github.com/codespacesh/codewire//coder-module"
+  source   = "github.com/codewiresh/codewire//coder-module"
   agent_id = coder_agent.main.id
   folder   = "/home/coder/project"
 }
@@ -42,7 +42,7 @@ module "codewire" {
 
 ```tf
 module "codewire" {
-  source           = "github.com/codespacesh/codewire//coder-module"
+  source           = "github.com/codewiresh/codewire//coder-module"
   agent_id         = coder_agent.main.id
   codewire_version = "v0.1.0"
 }
@@ -52,7 +52,7 @@ module "codewire" {
 
 ```tf
 module "codewire" {
-  source           = "github.com/codespacesh/codewire//coder-module"
+  source           = "github.com/codewiresh/codewire//coder-module"
   agent_id         = coder_agent.main.id
   install_codewire = false
 }
@@ -62,7 +62,7 @@ module "codewire" {
 
 ```tf
 module "codewire" {
-  source                  = "github.com/codespacesh/codewire//coder-module"
+  source                  = "github.com/codewiresh/codewire//coder-module"
   agent_id                = coder_agent.main.id
   experiment_report_tasks = true
 }

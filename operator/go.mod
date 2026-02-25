@@ -1,4 +1,4 @@
-module github.com/codespacesh/codewire/operator
+module github.com/codewiresh/codewire/operator
 
 go 1.23.0
 

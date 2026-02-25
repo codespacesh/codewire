@@ -5,7 +5,7 @@ import (
 	"net"
 	"sync"
 
-	"github.com/codespacesh/codewire/internal/protocol"
+	"github.com/codewiresh/codewire/internal/protocol"
 )
 
 // UnixReader reads protocol frames from a Unix socket connection.

@@ -9,7 +9,7 @@ import (
 
 	"nhooyr.io/websocket"
 
-	"github.com/codespacesh/codewire/internal/protocol"
+	"github.com/codewiresh/codewire/internal/protocol"
 )
 
 // WSReader reads protocol frames from a WebSocket connection.

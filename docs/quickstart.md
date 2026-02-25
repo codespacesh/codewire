@@ -8,10 +8,10 @@ later. Designed for AI agents managing long-running tasks.
 ## Install
 
 ```bash
-brew install codespacesh/tap/codewire
+brew install codewiresh/tap/codewire
 ```
 
-Or download a binary from [GitHub releases](https://github.com/codespacesh/codewire/releases).
+Or download a binary from [GitHub releases](https://github.com/codewiresh/codewire/releases).
 
 The node auto-starts on first use. No daemon to configure.
 

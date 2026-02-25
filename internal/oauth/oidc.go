@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/codespacesh/codewire/internal/store"
+	"github.com/codewiresh/codewire/internal/store"
 )
 
 // OIDCProvider handles OIDC discovery and authentication flows.

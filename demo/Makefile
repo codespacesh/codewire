@@ -1,7 +1,7 @@
 .PHONY: demo-image broker-image broker-build clean
 
-DEMO_IMAGE ?= ghcr.io/codespacesh/codewire-demo
-BROKER_IMAGE ?= ghcr.io/codespacesh/codewire-demo-broker
+DEMO_IMAGE ?= ghcr.io/codewiresh/codewire-demo
+BROKER_IMAGE ?= ghcr.io/codewiresh/codewire-demo-broker
 TAG ?= latest
 
 # Build demo container image

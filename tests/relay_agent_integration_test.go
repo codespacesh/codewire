@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	localrelay "github.com/codespacesh/codewire/internal/relay"
-	"github.com/codespacesh/codewire/internal/store"
+	localrelay "github.com/codewiresh/codewire/internal/relay"
+	"github.com/codewiresh/codewire/internal/store"
 )
 
 func TestAgentConnectsToHub(t *testing.T) {

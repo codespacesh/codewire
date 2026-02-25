@@ -11,13 +11,13 @@ Works with any CLI-based AI agent: Claude Code, Aider, Goose, Codex, or anything
 ### Homebrew (macOS/Linux)
 
 ```bash
-brew install codespacesh/codewire/codewire
+brew install codewiresh/codewire/codewire
 ```
 
 ### Install Script
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/codespacesh/codewire/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/codewiresh/codewire/main/install.sh | bash
 ```
 
 This downloads the latest binary, verifies its SHA256 checksum (and GPG signature if `gpg` is installed), and installs `cw` to `/usr/local/bin`.
@@ -472,7 +472,7 @@ docker compose down
 ### Helm Chart (Kubernetes)
 
 ```bash
-helm install my-relay oci://ghcr.io/codespacesh/charts/codewire-relay \
+helm install my-relay oci://ghcr.io/codewiresh/charts/codewire-relay \
   --set relay.baseURL=https://relay.example.com
 ```
 
@@ -628,7 +628,7 @@ cw attach 1
 Install the codewire skill so Claude Code knows how to use `cw` for session management:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/codespacesh/codewire/main/.claude/skills/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/codewiresh/codewire/main/.claude/skills/install.sh | bash
 ```
 
 This installs two skills to `~/.claude/skills/`:
@@ -700,7 +700,7 @@ To verify a release:
 
 ```bash
 # Import the public key
-curl -fsSL https://raw.githubusercontent.com/codespacesh/codewire/main/GPG_PUBLIC_KEY.asc | gpg --import
+curl -fsSL https://raw.githubusercontent.com/codewiresh/codewire/main/GPG_PUBLIC_KEY.asc | gpg --import
 
 # Verify checksums signature
 gpg --verify SHA256SUMS.asc SHA256SUMS

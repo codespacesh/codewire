@@ -10,8 +10,8 @@ import (
 
 	"nhooyr.io/websocket"
 
-	"github.com/codespacesh/codewire/internal/connection"
-	"github.com/codespacesh/codewire/internal/protocol"
+	"github.com/codewiresh/codewire/internal/connection"
+	"github.com/codewiresh/codewire/internal/protocol"
 )
 
 // Target describes where to connect: either a local Unix socket or a remote

@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/codespacesh/codewire/internal/client"
-	"github.com/codespacesh/codewire/internal/connection"
-	"github.com/codespacesh/codewire/internal/node"
-	"github.com/codespacesh/codewire/internal/protocol"
+	"github.com/codewiresh/codewire/internal/client"
+	"github.com/codewiresh/codewire/internal/connection"
+	"github.com/codewiresh/codewire/internal/node"
+	"github.com/codewiresh/codewire/internal/protocol"
 )
 
 // tempDir creates a unique temporary directory for a test and registers cleanup.

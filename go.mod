@@ -1,4 +1,4 @@
-module github.com/codespacesh/codewire
+module github.com/codewiresh/codewire
 
 go 1.25.5
 

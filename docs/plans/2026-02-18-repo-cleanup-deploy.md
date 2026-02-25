@@ -101,7 +101,7 @@ Expected: no output (history clean).
 **Step 4:** Re-add remotes (filter-repo removes them)
 
 ```bash
-git remote add origin git@github.com:codespacesh/codewire.git
+git remote add origin git@github.com:codewiresh/codewire.git
 git remote add gitea git@git.noel.sh:codespace/codewire.git
 ```
 
@@ -124,8 +124,8 @@ git push gitea main --force
 **Step 3:** Verify on GitHub that `.gitea/` and `deployments/` directories are gone
 
 ```bash
-gh api repos/codespacesh/codewire/contents/.gitea 2>&1 | grep -c "Not Found"
-gh api repos/codespacesh/codewire/contents/deployments 2>&1 | grep -c "Not Found"
+gh api repos/codewiresh/codewire/contents/.gitea 2>&1 | grep -c "Not Found"
+gh api repos/codewiresh/codewire/contents/deployments 2>&1 | grep -c "Not Found"
 ```
 
 Expected: both print `1` (Not Found).
@@ -157,8 +157,8 @@ Create `infra/apps/codewire-demo/k8s/namespace.yaml` — copy from codewire as-i
 Create `infra/apps/codewire-demo/k8s/rbac.yaml` — copy from codewire as-is.
 
 Create `infra/apps/codewire-demo/k8s/broker-deployment.yaml` — copy from codewire but change:
-- `image: ghcr.io/codespacesh/codewire-demo-broker:latest` → `git.noel.sh/codespace/codewire-demo-broker:latest`
-- `DEMO_IMAGE: ghcr.io/codespacesh/codewire-demo:latest` → `git.noel.sh/codespace/codewire-demo:latest`
+- `image: ghcr.io/codewiresh/codewire-demo-broker:latest` → `git.noel.sh/codespace/codewire-demo-broker:latest`
+- `DEMO_IMAGE: ghcr.io/codewiresh/codewire-demo:latest` → `git.noel.sh/codespace/codewire-demo:latest`
 - Add `imagePullSecrets: [{name: gitea-registry}]` to pod spec
 
 Copy broker-service.yaml, ingress.yaml, networkpolicy.yaml as-is.
@@ -236,7 +236,7 @@ jobs:
       - name: Checkout codewire
         uses: actions/checkout@v4
         with:
-          repository: codespacesh/codewire
+          repository: codewiresh/codewire
           ref: ${{ inputs.ref || 'main' }}
           path: codewire
 
@@ -417,7 +417,7 @@ git log --all --full-history -- .gitea/ | wc -l   # 0
 git log --all --full-history -- deployments/ | wc -l  # 0
 
 # 2. Public repo has no sensitive dirs
-gh api repos/codespacesh/codewire/contents/.gitea 2>&1 | grep "Not Found"
+gh api repos/codewiresh/codewire/contents/.gitea 2>&1 | grep "Not Found"
 
 # 3. Demo is live
 curl -s https://demo.codewire.sh/api/health | jq .
@@ -426,6 +426,6 @@ curl -s https://demo.codewire.sh/api/health | jq .
 curl -sI https://codewire.sh/ | grep "200"
 
 # 5. Infra deploy workflow exists
-gh api repos/codespacesh/infra/contents/.gitea/workflows/deploy-codewire.yml \
+gh api repos/codewiresh/infra/contents/.gitea/workflows/deploy-codewire.yml \
   --hostname git.noel.sh 2>&1 | grep "name"
 ```

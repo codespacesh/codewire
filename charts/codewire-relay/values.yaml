@@ -17,7 +17,7 @@ oidc:
   allowedGroups: []
 
 image:
-  repository: ghcr.io/codespacesh/codewire
+  repository: ghcr.io/codewiresh/codewire
   tag: ""  # Defaults to appVersion
   pullPolicy: IfNotPresent
 

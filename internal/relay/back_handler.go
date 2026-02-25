@@ -8,7 +8,7 @@ import (
 
 	"nhooyr.io/websocket"
 
-	"github.com/codespacesh/codewire/internal/store"
+	"github.com/codewiresh/codewire/internal/store"
 )
 
 // PendingSessions tracks back-connections that SSH sessions are waiting for.

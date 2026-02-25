@@ -14,8 +14,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	codewireiov1alpha1 "github.com/codespacesh/codewire/operator/api/v1alpha1"
-	"github.com/codespacesh/codewire/operator/internal/controller"
+	codewireiov1alpha1 "github.com/codewiresh/codewire/operator/api/v1alpha1"
+	"github.com/codewiresh/codewire/operator/internal/controller"
 )
 
 var scheme = runtime.NewScheme()

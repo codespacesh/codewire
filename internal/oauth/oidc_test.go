@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/codespacesh/codewire/internal/store"
+	"github.com/codewiresh/codewire/internal/store"
 )
 
 // TestCheckGroups_EmptyAllowed verifies that an empty AllowedGroups list

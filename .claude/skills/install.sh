@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SKILL_DIR="$HOME/.claude/skills"
-REPO_URL="https://raw.githubusercontent.com/codespacesh/codewire/main/.claude/skills"
+REPO_URL="https://raw.githubusercontent.com/codewiresh/codewire/main/.claude/skills"
 
 mkdir -p "$SKILL_DIR"
 
