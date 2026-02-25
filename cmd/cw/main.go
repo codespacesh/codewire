@@ -33,7 +33,7 @@ var (
 func main() {
 	rootCmd := &cobra.Command{
 		Use:     "cw",
-		Short:   "Persistent process server for AI coding agents",
+		Short:   "Persistent process server + agent-first dev environments",
 		Version: version,
 	}
 	rootCmd.PersistentFlags().StringVarP(&serverFlag, "server", "s", "", "Connect to a remote server (name from servers.toml or ws://host:port)")
@@ -43,6 +43,7 @@ func main() {
 	rootCmd.CompletionOptions.DisableDefaultCmd = true
 
 	rootCmd.AddCommand(
+		// Session management
 		nodeCmd(),
 		stopCmd(),
 		runCmd(),
@@ -53,24 +54,36 @@ func main() {
 		sendCmd(),
 		watchCmd(),
 		statusCmd(),
-		mcpServerCmd(),
-		nodesCmd(),
 		subscribeCmd(),
 		waitSessionCmd(),
-		kvCmd(),
-		serverCmd(),
+		// Relay
 		relayCmd(),
-		setupCmd(),
+		relaySetupCmd(),
 		qrCmd(),
+		nodesCmd(),
+		serverCmd(),
 		inviteCmd(),
 		revokeCmd(),
+		// Communication
 		msgCmd(),
 		inboxCmd(),
 		requestCmd(),
 		replyCmd(),
 		listenCmd(),
+		// Agent integration
 		gatewayCmd(),
 		hookCmd(),
+		mcpServerCmd(),
+		// KV
+		kvCmd(),
+		// Platform
+		platformSetupCmd(),
+		loginCmd(),
+		logoutCmd(),
+		whoamiCmd(),
+		orgsCmd(),
+		resourcesCmd(),
+		// Shell completion
 		completionCmd(rootCmd),
 	)
 
@@ -1004,14 +1017,14 @@ func serverListCmd() *cobra.Command {
 // setupCmd
 // ---------------------------------------------------------------------------
 
-func setupCmd() *cobra.Command {
+func relaySetupCmd() *cobra.Command {
 	var (
 		authToken string
 		qr        bool
 	)
 
 	cmd := &cobra.Command{
-		Use:   "setup <relay-url> [token]",
+		Use:   "relay-setup <relay-url> [token]",
 		Short: "Connect this node to a relay",
 		Long:  "Connect this node to a relay. With no token, uses OIDC device flow if the relay supports it.",
 		Args:  cobra.RangeArgs(1, 2),
