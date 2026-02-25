@@ -388,11 +388,12 @@ jobs:
         env:
           AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
         run: |
-          mkdir -p ~/.ssh
-          echo "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur
-          chmod 600 ~/.ssh/aur
-          ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts 2>/dev/null
-          printf 'Host aur.archlinux.org\n  IdentityFile ~/.ssh/aur\n' > ~/.ssh/config
+          export HOME=/root
+          mkdir -p /root/.ssh
+          echo "$AUR_SSH_PRIVATE_KEY" > /root/.ssh/aur
+          chmod 600 /root/.ssh/aur
+          ssh-keyscan aur.archlinux.org >> /root/.ssh/known_hosts 2>/dev/null
+          printf 'Host aur.archlinux.org\n  IdentityFile /root/.ssh/aur\n' > /root/.ssh/config
 
           git clone ssh://aur@aur.archlinux.org/codewire-bin.git aur-repo
           cp PKGBUILD .SRCINFO aur-repo/
