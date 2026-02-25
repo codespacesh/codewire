@@ -83,6 +83,12 @@ func main() {
 		whoamiCmd(),
 		orgsCmd(),
 		resourcesCmd(),
+		// Workspaces
+		launchCmd(),
+		openCmd(),
+		workspaceStartCmd(),
+		workspaceStopCmd(),
+		workspacesListCmd(),
 		// Shell completion
 		completionCmd(rootCmd),
 	)
@@ -181,7 +187,7 @@ func runCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:     "run [name] [tag] -- command...",
-		Aliases: []string{"launch"},
+		Aliases: []string{},
 		Short:   "Launch a new session",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target, err := resolveTarget()
