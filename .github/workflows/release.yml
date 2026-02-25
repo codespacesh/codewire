@@ -349,6 +349,7 @@ jobs:
     name: Publish AUR Package
     needs: release
     runs-on: ubuntu-latest
+    environment: build
     container: archlinux:base
     steps:
       - uses: actions/checkout@v4
