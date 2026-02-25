@@ -377,10 +377,11 @@ jobs:
               -e "s/SHA256_ARM64/${SHA_ARM64}/" \
               aur/PKGBUILD > PKGBUILD
 
-          # Generate .SRCINFO (must run as non-root)
+          # Generate .SRCINFO (must run as non-root in writable dir)
           useradd -m builder
-          chown builder:builder PKGBUILD
-          su builder -c "makepkg --printsrcinfo" > .SRCINFO
+          cp PKGBUILD /home/builder/PKGBUILD
+          chown builder:builder /home/builder/PKGBUILD
+          su builder -c "cd /home/builder && makepkg --printsrcinfo" > .SRCINFO
 
       - name: Push to AUR
         env:
