@@ -240,3 +240,163 @@ jobs:
           git diff --cached --quiet && { echo "No changes to commit"; exit 0; }
           git commit -m "brew: update codewire to ${{ github.ref_name }}"
           git push origin main
+
+  deb-packages:
+    name: Build .deb Packages
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install nfpm
+        run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+
+      - name: Download linux artifacts from release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=${{ github.ref_name }}
+          gh release download ${VERSION} \
+            --repo ${{ github.repository }} \
+            --pattern "cw-${VERSION}-x86_64-unknown-linux-musl" \
+            --pattern "cw-${VERSION}-aarch64-unknown-linux-gnu"
+
+      - name: Build .deb packages
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          for pair in "amd64:x86_64-unknown-linux-musl" "arm64:aarch64-unknown-linux-gnu"; do
+            ARCH="${pair%%:*}"
+            SUFFIX="${pair##*:}"
+            cp "cw-${{ github.ref_name }}-${SUFFIX}" cw
+            chmod +x cw
+            ARCH="${ARCH}" VERSION="${VERSION}" nfpm package --packager deb --target "codewire_${VERSION}_${ARCH}.deb"
+            rm cw
+          done
+
+      - name: Upload .deb packages to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload ${{ github.ref_name }} codewire_*.deb --clobber
+
+  apt-repo:
+    name: Update APT Repository
+    needs: deb-packages
+    runs-on: ubuntu-latest
+    environment: build
+    steps:
+      - name: Checkout gh-pages branch
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          fetch-depth: 0
+
+      - name: Download .deb packages from release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=${{ github.ref_name }}
+          mkdir -p pool
+          gh release download ${VERSION} \
+            --repo ${{ github.repository }} \
+            --pattern "*.deb" \
+            --dir pool
+
+      - name: Generate APT repository metadata
+        run: |
+          mkdir -p dists/stable/main/binary-amd64
+          mkdir -p dists/stable/main/binary-arm64
+
+          apt-ftparchive packages pool/ > dists/stable/main/binary-amd64/Packages
+          cp dists/stable/main/binary-amd64/Packages dists/stable/main/binary-arm64/Packages
+          gzip -kf dists/stable/main/binary-amd64/Packages
+          gzip -kf dists/stable/main/binary-arm64/Packages
+
+          apt-ftparchive release dists/stable/ > dists/stable/Release
+
+      - name: Sign APT repository
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+
+          gpg --batch --yes --pinentry-mode loopback \
+            --passphrase "$GPG_PASSPHRASE" \
+            --detach-sign -a -o dists/stable/Release.gpg dists/stable/Release
+
+          gpg --batch --yes --pinentry-mode loopback \
+            --passphrase "$GPG_PASSPHRASE" \
+            --clearsign -o dists/stable/InRelease dists/stable/Release
+
+          gpg --batch --yes --armor --export > gpg.key
+
+      - name: Commit and push to gh-pages
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add pool/ dists/ gpg.key
+          git diff --cached --quiet && { echo "No changes to commit"; exit 0; }
+          git commit -m "apt: update repo for ${{ github.ref_name }}"
+          git push origin gh-pages
+
+  aur-publish:
+    name: Publish AUR Package
+    needs: release
+    runs-on: ubuntu-latest
+    container: archlinux:base
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: pacman -Sy --noconfirm openssh git base-devel
+
+      - name: Download SHA256SUMS from release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pacman -S --noconfirm github-cli
+          gh release download ${{ github.ref_name }} \
+            --repo ${{ github.repository }} \
+            --pattern SHA256SUMS \
+            --output SHA256SUMS
+
+      - name: Generate PKGBUILD
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          SHA_AMD64=$(grep x86_64-unknown-linux-musl SHA256SUMS | awk '{print $1}')
+          SHA_ARM64=$(grep aarch64-unknown-linux-gnu SHA256SUMS | awk '{print $1}')
+
+          sed -e "s/^pkgver=VERSION/pkgver=${VERSION}/" \
+              -e "s/SHA256_AMD64/${SHA_AMD64}/" \
+              -e "s/SHA256_ARM64/${SHA_ARM64}/" \
+              aur/PKGBUILD > PKGBUILD
+
+          # Generate .SRCINFO (must run as non-root)
+          useradd -m builder
+          chown builder:builder PKGBUILD
+          su builder -c "makepkg --printsrcinfo" > .SRCINFO
+
+      - name: Push to AUR
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+          echo -e "Host aur.archlinux.org\n  IdentityFile ~/.ssh/aur\n  StrictHostKeyChecking no" > ~/.ssh/config
+
+          git clone ssh://aur@aur.archlinux.org/codewire-bin.git aur-repo
+          cp PKGBUILD .SRCINFO aur-repo/
+          cd aur-repo
+          git config user.name "Codespace Bot"
+          git config user.email "hello@codespace.sh"
+          git add PKGBUILD .SRCINFO
+          git diff --cached --quiet && { echo "No changes to commit"; exit 0; }
+          git commit -m "Update to ${GITHUB_REF_NAME#v}"
+          git push
