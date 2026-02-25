@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<html>
+<head><title>Codewire APT Repository</title></head>
+<body>
+<h1>Codewire APT Repository</h1>
+<pre>
+curl -fsSL https://codespacesh.github.io/codewire/gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/codewire.gpg
+echo "deb [signed-by=/usr/share/keyrings/codewire.gpg] https://codespacesh.github.io/codewire stable main" | sudo tee /etc/apt/sources.list.d/codewire.list
+sudo apt update && sudo apt install codewire
+</pre>
+</body>
+</html>
