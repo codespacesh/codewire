@@ -166,8 +166,35 @@ func configPath() string {
 	return filepath.Join(configDir(), "config.json")
 }
 
+func csConfigPath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".config", "cs", "config.json")
+}
+
+func migrateCSConfig(src, dst string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(dst, data, 0o600)
+}
+
 // LoadConfig reads the platform config from ~/.config/cw/config.json.
 func LoadConfig() (*PlatformConfig, error) {
+	// Migrate from cs config if cw config doesn't exist yet
+	cwPath := configPath()
+	if _, err := os.Stat(cwPath); os.IsNotExist(err) {
+		csPath := csConfigPath()
+		if _, err := os.Stat(csPath); err == nil {
+			if err := migrateCSConfig(csPath, cwPath); err == nil {
+				fmt.Fprintf(os.Stderr, "Migrated config from %s to %s\n", csPath, cwPath)
+			}
+		}
+	}
+
 	data, err := os.ReadFile(configPath())
 	if err != nil {
 		return nil, err
