@@ -206,3 +206,22 @@ func HasConfig() bool {
 	_, err := os.Stat(configPath())
 	return err == nil
 }
+
+// SetCurrentWorkspace updates just the current_workspace field in config.
+func SetCurrentWorkspace(name string) error {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return err
+	}
+	cfg.CurrentWorkspace = name
+	return SaveConfig(cfg)
+}
+
+// GetCurrentWorkspace returns the current workspace name from config.
+func GetCurrentWorkspace() string {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return ""
+	}
+	return cfg.CurrentWorkspace
+}

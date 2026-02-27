@@ -4,11 +4,12 @@ import "time"
 
 // PlatformConfig is stored at ~/.config/cw/config.json.
 type PlatformConfig struct {
-	ServerURL       string `json:"server_url"`
-	SessionToken    string `json:"session_token"`
-	DefaultOrg      string `json:"default_org,omitempty"`
-	DefaultResource string `json:"default_resource,omitempty"`
-	CoderBinary     string `json:"coder_binary,omitempty"`
+	ServerURL        string `json:"server_url"`
+	SessionToken     string `json:"session_token"`
+	DefaultOrg       string `json:"default_org,omitempty"`
+	DefaultResource  string `json:"default_resource,omitempty"`
+	CoderBinary      string `json:"coder_binary,omitempty"`
+	CurrentWorkspace string `json:"current_workspace,omitempty"`
 }
 
 // Auth types
