@@ -100,6 +100,7 @@ func main() {
 		orgsCmd(),
 		resourcesCmd(),
 		secretsCmd(),
+		costCmd(),
 		// Workspaces
 		launchCmd(),
 		openCmd(),
@@ -207,6 +208,28 @@ func runCmd() *cobra.Command {
 		Aliases: []string{},
 		Short:   "Launch a new session",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Platform mode: run in remote workspace via coder ssh
+			if platform.HasConfig() && platform.GetCurrentWorkspace() != "" {
+				dash := cmd.ArgsLenAtDash()
+				if dash == -1 {
+					return fmt.Errorf("command required after --\n\nUsage: cw run [workspace] -- <command> [args...]")
+				}
+
+				// Parse: cw run [workspace] -- command...
+				wsName := platform.GetCurrentWorkspace()
+				if dash >= 1 {
+					wsName = args[0] // explicit workspace override
+				}
+				command := args[dash:]
+
+				if len(command) == 0 {
+					return fmt.Errorf("command required after --")
+				}
+
+				return runInWorkspace(wsName, name, command)
+			}
+
+			// Standalone mode: existing code below
 			target, err := resolveTarget()
 			if err != nil {
 				return err
