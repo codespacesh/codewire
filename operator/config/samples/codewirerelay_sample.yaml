@@ -4,7 +4,7 @@ metadata:
   name: example
   namespace: default
 spec:
-  baseURL: https://example.relay.codespace.sh
+  baseURL: https://example.relay.codewire.sh
   authMode: token
   persistence:
     size: 1Gi
@@ -25,7 +25,7 @@ spec:
   # OIDC authentication (uncomment to use instead of token mode):
   # authMode: oidc
   # oidc:
-  #   issuer: https://auth.codespace.sh
+  #   issuer: https://auth.codewire.sh
   #   clientID: codewire-relay
   #   clientSecretRef:
   #     name: codewire-oidc-secret

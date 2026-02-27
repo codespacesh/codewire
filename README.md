@@ -249,7 +249,7 @@ cw nodes
 Authorize this node with a relay using the device authorization flow.
 
 ```bash
-cw setup https://relay.codespace.sh
+cw setup https://relay.codewire.sh
 ```
 
 ### `cw relay`
@@ -373,7 +373,7 @@ All settings via `~/.codewire/config.toml` or environment variables:
 name = "my-node"                          # CODEWIRE_NODE_NAME
 listen = "0.0.0.0:9100"                   # CODEWIRE_LISTEN — direct WebSocket (optional)
 external_url = "wss://host/ws"            # CODEWIRE_EXTERNAL_URL
-relay_url = "https://relay.codespace.sh"  # CODEWIRE_RELAY_URL — opt-in remote access
+relay_url = "https://relay.codewire.sh"  # CODEWIRE_RELAY_URL — opt-in remote access
 ```
 
 When no config file exists, codewire runs in standalone mode (Unix socket only, no relay).
@@ -386,10 +386,10 @@ Codewire uses an SSH gateway for remote access. Nodes establish persistent WebSo
 
 ```bash
 # Register your node with a relay
-cw setup --relay-url https://relay.codespace.sh
+cw setup --relay-url https://relay.codewire.sh
 
 # Or with an invite token
-cw setup --relay-url https://relay.codespace.sh --invite <token>
+cw setup --relay-url https://relay.codewire.sh --invite <token>
 
 # That's it. Your node is now accessible remotely via SSH.
 ```

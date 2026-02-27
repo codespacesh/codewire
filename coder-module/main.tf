@@ -47,7 +47,7 @@ variable "codewire_version" {
 variable "relay_url" {
   type        = string
   default     = ""
-  description = "Codewire relay URL (e.g. https://user.relay.codespace.sh). Leave empty for standalone mode."
+  description = "Codewire relay URL (e.g. https://user.relay.codewire.sh). Leave empty for standalone mode."
 }
 
 variable "relay_token" {
@@ -78,7 +78,7 @@ resource "coder_script" "codewire" {
       if [ "${var.codewire_version}" != "latest" ]; then
         INSTALL_ARGS="--version ${var.codewire_version}"
       fi
-      curl -fsSL https://raw.githubusercontent.com/codespacesh/codewire/main/install.sh | bash -s -- $INSTALL_ARGS
+      curl -fsSL https://raw.githubusercontent.com/codewiresh/codewire/main/install.sh | bash -s -- $INSTALL_ARGS
     fi
 
     # Verify cw is installed

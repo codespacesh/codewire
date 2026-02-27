@@ -1,26 +1,26 @@
 # Homebrew Formula for CodeWire
 class Codewire < Formula
   desc "Persistent process server for AI coding agents"
-  homepage "https://github.com/codespacesh/codewire"
+  homepage "https://github.com/codewiresh/codewire"
   version "0.2.35"
   license "MIT"
 
   on_macos do
     if Hardware::CPU.arm?
-      url "https://github.com/codespacesh/codewire/releases/download/v#{version}/cw-v#{version}-aarch64-apple-darwin"
+      url "https://github.com/codewiresh/codewire/releases/download/v#{version}/cw-v#{version}-aarch64-apple-darwin"
       sha256 "a318537384db7ee79532939a356541351f2f2ff0d6071df2aad10e5e2225fd24"
     else
-      url "https://github.com/codespacesh/codewire/releases/download/v#{version}/cw-v#{version}-x86_64-apple-darwin"
+      url "https://github.com/codewiresh/codewire/releases/download/v#{version}/cw-v#{version}-x86_64-apple-darwin"
       sha256 "6e674c9d21e5c09462c98dbec5aabb1db2afb7f486d1adb9394d6aaa2ee2441a"
     end
   end
 
   on_linux do
     if Hardware::CPU.arm?
-      url "https://github.com/codespacesh/codewire/releases/download/v#{version}/cw-v#{version}-aarch64-unknown-linux-gnu"
+      url "https://github.com/codewiresh/codewire/releases/download/v#{version}/cw-v#{version}-aarch64-unknown-linux-gnu"
       sha256 "689bc8c203501f76db5285315973a6cac4667120b0d2eeb57415548cfc641b9b"
     else
-      url "https://github.com/codespacesh/codewire/releases/download/v#{version}/cw-v#{version}-x86_64-unknown-linux-musl"
+      url "https://github.com/codewiresh/codewire/releases/download/v#{version}/cw-v#{version}-x86_64-unknown-linux-musl"
       sha256 "997023e90cdb3e8125832a4d5df2357c808f511b042ba61bc7cc3fc3be73d40e"
     end
   end
@@ -63,7 +63,7 @@ class Codewire < Formula
         cw attach 1
 
       For more information:
-        https://github.com/codespacesh/codewire
+        https://github.com/codewiresh/codewire
     EOS
   end
 end

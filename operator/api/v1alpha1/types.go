@@ -6,7 +6,7 @@ import (
 
 // CodewireRelaySpec defines the desired state of a Codewire Relay instance.
 type CodewireRelaySpec struct {
-	// BaseURL is the public URL of the relay (e.g. https://acme.relay.codespace.sh).
+	// BaseURL is the public URL of the relay (e.g. https://acme.relay.codewire.sh).
 	BaseURL string `json:"baseURL"`
 
 	// AuthMode is the authentication mode: "token" or "none".
@@ -124,7 +124,7 @@ type ImageSpec struct {
 }
 
 type OIDCSpec struct {
-	// Issuer is the OIDC provider issuer URL (e.g. https://auth.codespace.sh).
+	// Issuer is the OIDC provider issuer URL (e.g. https://auth.codewire.sh).
 	Issuer string `json:"issuer"`
 
 	// ClientID is the registered OIDC client ID.

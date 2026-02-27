@@ -57,7 +57,7 @@ spec:
                 baseURL:
                   description: >-
                     BaseURL is the public URL of the relay
-                    (e.g. https://acme.relay.codespace.sh).
+                    (e.g. https://acme.relay.codewire.sh).
                   type: string
                 authMode:
                   description: 'AuthMode is the authentication mode: "token" or "none".'

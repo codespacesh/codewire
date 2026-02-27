@@ -16,7 +16,7 @@ import (
 
 // AgentConfig configures the node agent.
 type AgentConfig struct {
-	RelayURL  string // e.g. "https://relay.codespace.sh"
+	RelayURL  string // e.g. "https://relay.codewire.sh"
 	NodeName  string
 	NodeToken string
 }

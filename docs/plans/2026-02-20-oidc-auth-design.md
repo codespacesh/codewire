@@ -1,6 +1,6 @@
 # OIDC Authentication for Codewire Relay
 
-**Goal:** Replace GitHub OAuth with standard OIDC (Codespace.sh Dex IdP) for both the relay admin UI and node registration via device flow.
+**Goal:** Replace GitHub OAuth with standard OIDC (Codewire.sh Dex IdP) for both the relay admin UI and node registration via device flow.
 
 **Date:** 2026-02-20
 
@@ -8,7 +8,7 @@
 
 ## Overview
 
-Add `authMode: "oidc"` to the relay. A single OIDC client registered in Codespace.sh Dex serves two flows:
+Add `authMode: "oidc"` to the relay. A single OIDC client registered in Codewire.sh Dex serves two flows:
 
 - **Admin web UI** — OIDC authorization code flow (browser login)
 - **Node registration** — RFC 8628 device authorization flow, proxied through the relay
@@ -21,7 +21,7 @@ Existing `token` and `none` modes are unchanged (backwards compat).
 
 ### Admin Web UI (authorization code flow)
 
-1. User visits relay URL → redirected to Codespace.sh Dex authorize endpoint
+1. User visits relay URL → redirected to Codewire.sh Dex authorize endpoint
 2. User authenticates at Dex (Gitea upstream)
 3. Callback to `/auth/oidc/callback` with code
 4. Relay exchanges code for ID token, calls userinfo endpoint
@@ -33,10 +33,10 @@ Existing `token` and `none` modes are unchanged (backwards compat).
 
 ```bash
 # OIDC relay — no token needed
-cw setup https://user.relay.codespace.sh
+cw setup https://user.relay.codewire.sh
 
 # Token/invite relay — token as second positional arg (unchanged)
-cw setup https://user.relay.codespace.sh <invite-token>
+cw setup https://user.relay.codewire.sh <invite-token>
 ```
 
 1. `cw setup <relay-url>` calls `GET /api/v1/auth/config` (unauthenticated)
@@ -44,7 +44,7 @@ cw setup https://user.relay.codespace.sh <invite-token>
 3. CLI calls `POST /api/v1/device/authorize` on relay
 4. Relay initiates device auth with Dex, stores `device_code` in SQLite
 5. Relay returns `user_code` + `verification_uri` to CLI
-6. CLI prints: `Open https://auth.codespace.sh/activate and enter code: WXYZ-1234`
+6. CLI prints: `Open https://auth.codewire.sh/activate and enter code: WXYZ-1234`
 7. CLI polls `POST /api/v1/device/poll` (passes relay's opaque poll token)
 8. Relay polls Dex token endpoint until approved
 9. Relay validates `groups` claim on the issued token
@@ -59,7 +59,7 @@ The OIDC client secret never leaves the relay.
 
 `allowedGroups []string` — configurable list of OIDC `groups` claim values.
 
-- Empty list → any authenticated Codespace.sh user is allowed
+- Empty list → any authenticated Codewire.sh user is allowed
 - Non-empty → user must be a member of at least one listed group
 - Matches the pattern already used for k8s RBAC in the infra (same `groups` claim from Dex/Gitea)
 
@@ -88,7 +88,7 @@ Existing endpoints unchanged. GitHub-specific endpoints (`/auth/github/*`) remov
 New `relay.Config` fields:
 
 ```go
-OIDCIssuer        string   // e.g. https://auth.codespace.sh
+OIDCIssuer        string   // e.g. https://auth.codewire.sh
 OIDCClientID      string
 OIDCClientSecret  string
 OIDCAllowedGroups []string // e.g. ["sonica"]

@@ -3,7 +3,7 @@
 Codewire is a persistent process server for AI coding agents. Single binary (`cw`) manages
 PTY sessions that survive process exits — launch agents, detach, reconnect later.
 
-Source: https://github.com/codespacesh/codewire
+Source: https://github.com/codewiresh/codewire
 Homepage: https://codewire.sh
 
 ---
@@ -25,10 +25,10 @@ Homepage: https://codewire.sh
 ## 1. Install
 
 ```bash
-brew install codespacesh/tap/codewire
+brew install codewiresh/tap/codewire
 ```
 
-Or download from https://github.com/codespacesh/codewire/releases — binaries for
+Or download from https://github.com/codewiresh/codewire/releases — binaries for
 linux/amd64, linux/arm64, darwin/amd64, darwin/arm64.
 
 Verify:
@@ -645,10 +645,10 @@ the target node via a back-connection WebSocket.
 
 ```bash
 # With admin token
-cw setup https://relay.codespace.sh --token <admin-token>
+cw setup https://relay.codewire.sh --token <admin-token>
 
 # With invite code (for onboarding without sharing admin token)
-cw setup https://relay.codespace.sh --invite <token>
+cw setup https://relay.codewire.sh --invite <token>
 ```
 
 After setup, start the node agent (connects to relay automatically):
@@ -660,7 +660,7 @@ cw node -d
 
 ```bash
 # Standard SSH client
-ssh <node-name>@relay.codespace.sh -p 2222
+ssh <node-name>@relay.codewire.sh -p 2222
 # Password: <node-token printed by cw setup>
 
 # Termius, VS Code Remote SSH, etc. — same credentials
@@ -676,7 +676,7 @@ cw --server mynode logs 5
 
 Save named connections:
 ```bash
-cw server add mynode https://relay.codespace.sh
+cw server add mynode https://relay.codewire.sh
 cw server list
 cw --server mynode list
 ```

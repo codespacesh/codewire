@@ -4,7 +4,7 @@
 
 **Goal:** Replace the `coder/wgtunnel` WireGuard overlay with persistent WebSocket node agents and an SSH gateway, enabling Termius-style SSH access to nodes via a hosted relay.
 
-**Architecture:** Nodes connect outward to the relay via persistent authenticated WebSocket (`/node/connect`). The relay maintains an in-memory hub of connected nodes. Users SSH into `relay.codespace.sh:2222` with username=nodename and password=node-token. The relay finds the node in the hub, sends an `SSHRequest` JSON message, and the node opens a back-connection WebSocket (`/node/back/{id}`) to bridge raw PTY bytes. No WireGuard, no wildcard DNS, no root required.
+**Architecture:** Nodes connect outward to the relay via persistent authenticated WebSocket (`/node/connect`). The relay maintains an in-memory hub of connected nodes. Users SSH into `relay.codewire.sh:2222` with username=nodename and password=node-token. The relay finds the node in the hub, sends an `SSHRequest` JSON message, and the node opens a back-connection WebSocket (`/node/back/{id}`) to bridge raw PTY bytes. No WireGuard, no wildcard DNS, no root required.
 
 **Tech Stack:** `golang.org/x/crypto/ssh` (new; already indirect dep), `nhooyr.io/websocket` (existing), `creack/pty` (existing for PTY in node agent), `modernc.org/sqlite` (existing store)
 
@@ -1080,7 +1080,7 @@ import (
 
 // AgentConfig configures the node agent.
 type AgentConfig struct {
-    RelayURL  string // e.g. "https://relay.codespace.sh"
+    RelayURL  string // e.g. "https://relay.codewire.sh"
     NodeName  string
     NodeToken string
 }
@@ -1402,7 +1402,7 @@ git commit -m "feat(relay): implement new RunRelay without WireGuard, with SSH s
 **Files:**
 - Create: `internal/relay/setup.go` (new setup, no WireGuard)
 
-**Context:** `cw setup relay.codespace.sh --token <admintoken>` now registers the node name, receives a node token, and writes `relay_url` + `relay_token` to config.
+**Context:** `cw setup relay.codewire.sh --token <admintoken>` now registers the node name, receives a node token, and writes `relay_url` + `relay_token` to config.
 
 **Step 1: Implement `internal/relay/setup.go`**
 
@@ -1831,7 +1831,7 @@ git commit -m "test: add E2E relay+SSH integration test"
 In the Optional section, replace the relay description:
 ```
 - [Relay mode](https://codewire.sh/llms-full.txt): Run a persistent relay at
-  relay.codespace.sh. Nodes connect outward via WSS. Users SSH in from anywhere
+  relay.codewire.sh. Nodes connect outward via WSS. Users SSH in from anywhere
   (Termius, standard ssh client). No WireGuard, no wildcard DNS.
 ```
 
@@ -1841,7 +1841,7 @@ Replace the entire relay section. Key content:
 ```
 ## 9. Relay mode
 
-The hosted relay at relay.codespace.sh (or self-hosted) lets nodes connect from
+The hosted relay at relay.codewire.sh (or self-hosted) lets nodes connect from
 anywhere and exposes them via SSH. Replaces Termius + tmux + Tailscale.
 
 ### Architecture
@@ -1852,13 +1852,13 @@ anywhere and exposes them via SSH. Replaces Termius + tmux + Tailscale.
 
 ### Setup (node side)
 ```
-cw setup https://relay.codespace.sh --token <admin-token>
+cw setup https://relay.codewire.sh --token <admin-token>
 cw node -d
 ```
 
 ### Connect from SSH client / Termius
 ```
-ssh mynode@relay.codespace.sh -p 2222
+ssh mynode@relay.codewire.sh -p 2222
 Password: <node-token>
 ```
 

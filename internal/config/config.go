@@ -24,7 +24,7 @@ type NodeConfig struct {
 	// WebSocket listen address (e.g. "0.0.0.0:9100"). Nil means no listener.
 	Listen *string `toml:"listen,omitempty"`
 	// Externally-accessible WSS URL for fleet discovery
-	// (e.g. "wss://9100--workspace.coder.codespace.sh/ws").
+	// (e.g. "wss://9100--workspace.coder.codewire.sh/ws").
 	ExternalURL *string `toml:"external_url,omitempty"`
 }
 

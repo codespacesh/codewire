@@ -37,7 +37,7 @@ type RelayConfig struct {
 	GitHubClientID string
 	// GitHubClientSecret is a manual override for GitHub OAuth App client secret.
 	GitHubClientSecret string
-	// OIDCIssuer is the OIDC provider issuer URL (e.g. https://auth.codespace.sh).
+	// OIDCIssuer is the OIDC provider issuer URL (e.g. https://auth.codewire.sh).
 	// Required when AuthMode is "oidc".
 	OIDCIssuer string
 	// OIDCClientID is the registered OIDC client ID.

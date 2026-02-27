@@ -6,7 +6,7 @@ version: 0.1.0
 appVersion: "0.1.0"
 maintainers:
   - name: Sonica
-    url: https://codespace.sh
+    url: https://codewire.sh
 home: https://codewire.sh
 sources:
   - https://github.com/codewiresh/codewire

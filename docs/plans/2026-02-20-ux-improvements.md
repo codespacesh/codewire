@@ -684,7 +684,7 @@ registers via device auth.
 ### Connect a node to a relay
 
 ```bash
-cw setup https://relay.codespace.sh
+cw setup https://relay.codewire.sh
 # Opens browser for GitHub OAuth (or use --invite token for headless)
 ```
 
@@ -693,10 +693,10 @@ same relay become accessible via `--server`.
 
 ```bash
 # Headless / CI
-cw setup https://relay.codespace.sh --invite <token>
+cw setup https://relay.codewire.sh --invite <token>
 
 # With admin token
-cw setup https://relay.codespace.sh --token <admin-token>
+cw setup https://relay.codewire.sh --token <admin-token>
 ```
 
 ### Access remote nodes
@@ -709,7 +709,7 @@ cw --server mynode logs 5
 
 Save named connections to avoid repeating --server:
 ```bash
-cw server add mynode https://relay.codespace.sh
+cw server add mynode https://relay.codewire.sh
 cw server list
 cw --server mynode list
 ```
