@@ -87,7 +87,8 @@ func launchCmd() *cobra.Command {
 			}
 
 			if noWait {
-				fmt.Printf("Workspace %s created (status: %s)\n", ws.Name, ws.Status)
+				_ = platform.SetCurrentWorkspace(ws.Name)
+				fmt.Printf("Workspace %q is now active. (status: %s)\n", ws.Name, ws.Status)
 				return nil
 			}
 
@@ -104,9 +105,10 @@ func launchCmd() *cobra.Command {
 				return fmt.Errorf("workspace ended with status: %s", ws.Status)
 			}
 
-			fmt.Printf("\nWorkspace %s is running.\n", ws.Name)
-			fmt.Printf("  cw open %s          # Open in browser\n", ws.Name)
-			fmt.Printf("  coder ssh %s        # SSH into workspace\n", ws.Name)
+			_ = platform.SetCurrentWorkspace(ws.Name)
+			fmt.Printf("\nWorkspace %q is now active.\n", ws.Name)
+			fmt.Printf("  cw run -- <command>  # Run in workspace\n")
+			fmt.Printf("  cw open              # Open in browser\n")
 			return nil
 		},
 	}
@@ -123,10 +125,20 @@ func openCmd() *cobra.Command {
 	var resourceID string
 
 	cmd := &cobra.Command{
-		Use:   "open <workspace>",
+		Use:   "open [workspace]",
 		Short: "Open workspace in browser",
-		Args:  cobra.ExactArgs(1),
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			wsName := ""
+			if len(args) > 0 {
+				wsName = args[0]
+			} else {
+				wsName = platform.GetCurrentWorkspace()
+				if wsName == "" {
+					return fmt.Errorf("no workspace specified and no current workspace set")
+				}
+			}
+
 			client, err := platform.NewClient()
 			if err != nil {
 				return err
@@ -156,7 +168,7 @@ func openCmd() *cobra.Command {
 				return fmt.Errorf("resource has no domain")
 			}
 
-			wsURL := fmt.Sprintf("https://%s/@admin/%s", domain, args[0])
+			wsURL := fmt.Sprintf("https://%s/@admin/%s", domain, wsName)
 			fmt.Printf("Opening %s\n", wsURL)
 			return openBrowser(wsURL)
 		},
@@ -170,15 +182,25 @@ func workspaceStartCmd() *cobra.Command {
 	var resourceID string
 
 	cmd := &cobra.Command{
-		Use:   "start <workspace-id>",
+		Use:   "start [workspace]",
 		Short: "Start a stopped workspace",
-		Args:  cobra.ExactArgs(1),
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			wsName := ""
+			if len(args) > 0 {
+				wsName = args[0]
+			} else {
+				wsName = platform.GetCurrentWorkspace()
+				if wsName == "" {
+					return fmt.Errorf("no workspace specified and no current workspace set")
+				}
+			}
+
 			client, resID, err := resolveResourceClient(resourceID)
 			if err != nil {
 				return err
 			}
-			if err := client.StartWorkspace(resID, args[0]); err != nil {
+			if err := client.StartWorkspace(resID, wsName); err != nil {
 				return fmt.Errorf("start workspace: %w", err)
 			}
 			fmt.Println("Workspace starting.")
@@ -194,15 +216,25 @@ func workspaceStopCmd() *cobra.Command {
 	var resourceID string
 
 	cmd := &cobra.Command{
-		Use:   "stop <workspace-id>",
+		Use:   "stop [workspace]",
 		Short: "Stop a running workspace",
-		Args:  cobra.ExactArgs(1),
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			wsName := ""
+			if len(args) > 0 {
+				wsName = args[0]
+			} else {
+				wsName = platform.GetCurrentWorkspace()
+				if wsName == "" {
+					return fmt.Errorf("no workspace specified and no current workspace set")
+				}
+			}
+
 			client, resID, err := resolveResourceClient(resourceID)
 			if err != nil {
 				return err
 			}
-			if err := client.StopWorkspace(resID, args[0]); err != nil {
+			if err := client.StopWorkspace(resID, wsName); err != nil {
 				return fmt.Errorf("stop workspace: %w", err)
 			}
 			fmt.Println("Workspace stopping.")
