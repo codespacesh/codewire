@@ -19,6 +19,7 @@ import (
 	"github.com/codewiresh/codewire/internal/config"
 	"github.com/codewiresh/codewire/internal/mcp"
 	"github.com/codewiresh/codewire/internal/node"
+	"github.com/codewiresh/codewire/internal/platform"
 	"github.com/codewiresh/codewire/internal/relay"
 )
 
@@ -32,9 +33,24 @@ var (
 
 func main() {
 	rootCmd := &cobra.Command{
-		Use:     "cw",
+		Use:     "cw [workspace]",
 		Short:   "Persistent process server + agent-first dev environments",
 		Version: version,
+		Args:    cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				if platform.HasConfig() {
+					return showCurrentWorkspace()
+				}
+				return cmd.Help()
+			}
+			// Try workspace switching in platform mode
+			if platform.HasConfig() {
+				return switchWorkspace(args[0], false)
+			}
+			return fmt.Errorf("unknown command %q\nRun 'cw --help' for usage.", args[0])
+		},
+		SilenceUsage: true,
 	}
 	rootCmd.PersistentFlags().StringVarP(&serverFlag, "server", "s", "", "Connect to a remote server (name from servers.toml or ws://host:port)")
 	rootCmd.PersistentFlags().StringVar(&tokenFlag, "token", "", "Auth token for remote server")
@@ -47,7 +63,7 @@ func main() {
 		nodeCmd(),
 		stopCmd(),
 		runCmd(),
-		listCmd(),
+		platformListCmd(),
 		attachCmd(),
 		killCmd(),
 		logsCmd(),
@@ -83,6 +99,7 @@ func main() {
 		whoamiCmd(),
 		orgsCmd(),
 		resourcesCmd(),
+		secretsCmd(),
 		// Workspaces
 		launchCmd(),
 		openCmd(),
@@ -270,40 +287,6 @@ func runCmd() *cobra.Command {
 
 // ---------------------------------------------------------------------------
 // listCmd
-// ---------------------------------------------------------------------------
-
-func listCmd() *cobra.Command {
-	var jsonOutput bool
-	var statusFilter string
-
-	cmd := &cobra.Command{
-		Use:   "list",
-		Short: "List all sessions",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			target, err := resolveTarget()
-			if err != nil {
-				return err
-			}
-
-			if target.IsLocal() {
-				if err := ensureNode(); err != nil {
-					return err
-				}
-			}
-
-			return client.List(target, jsonOutput, statusFilter)
-		},
-	}
-
-	cmd.Flags().BoolVarP(&jsonOutput, "json", "j", false, "Output as JSON")
-	cmd.Flags().StringVar(&statusFilter, "status", "all", "Filter by status: all, running, completed, killed")
-	_ = cmd.RegisterFlagCompletionFunc("status", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		return []string{"all", "running", "completed", "killed"}, cobra.ShellCompDirectiveNoFileComp
-	})
-
-	return cmd
-}
-
 // ---------------------------------------------------------------------------
 // attachCmd
 // ---------------------------------------------------------------------------
@@ -1158,7 +1141,7 @@ func relayCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&baseURL, "base-url", "", "Public base URL of the relay (e.g. https://relay.codespace.sh)")
+	cmd.Flags().StringVar(&baseURL, "base-url", "", "Public base URL of the relay (e.g. https://relay.codewire.sh)")
 	cmd.Flags().StringVar(&listen, "listen", ":8080", "HTTP listen address")
 	cmd.Flags().StringVar(&sshListen, "ssh-listen", ":2222", "SSH listen address")
 	cmd.Flags().StringVar(&relayDir, "data-dir", "", "Data directory for relay (default: ~/.codewire/relay)")
