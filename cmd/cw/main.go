@@ -102,6 +102,7 @@ func main() {
 		resourcesCmd(),
 		secretsCmd(),
 		costCmd(),
+		billingCmd(),
 		// Workspaces
 		launchCmd(),
 		openCmd(),

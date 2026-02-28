@@ -97,3 +97,12 @@ func (c *Client) GetResourceBilling(resourceID string) (*ResourceBilling, error)
 	}
 	return &resp, nil
 }
+
+func (c *Client) CreateResourceCheckout(resourceID string, req *ResourceCheckoutRequest) (*CheckoutURLResponse, error) {
+	var resp CheckoutURLResponse
+	err := c.do("POST", fmt.Sprintf("/api/v1/resources/%s/billing/checkout", resourceID), req, &resp)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}

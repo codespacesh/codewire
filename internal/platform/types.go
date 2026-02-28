@@ -150,6 +150,18 @@ type CreateResourceResult struct {
 	CheckoutURL string `json:"checkout_url,omitempty"`
 }
 
+// Billing checkout types
+
+type ResourceCheckoutRequest struct {
+	Plan       string `json:"plan"`
+	SuccessURL string `json:"success_url"`
+	CancelURL  string `json:"cancel_url"`
+}
+
+type CheckoutURLResponse struct {
+	CheckoutURL string `json:"checkout_url"`
+}
+
 // API error
 
 type APIError struct {
