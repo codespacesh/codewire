@@ -50,6 +50,20 @@ func showCurrentWorkspace() error {
 	return nil
 }
 
+// resolveWorkspaceName returns the workspace name from:
+// 1. workspaceOverride (set by "cw api run" prefix interception)
+// 2. explicit positional arg
+// 3. empty string (caller should fall back to GetCurrentWorkspace or error)
+func resolveWorkspaceName(explicit string) string {
+	if workspaceOverride != "" {
+		return workspaceOverride
+	}
+	if explicit != "" {
+		return explicit
+	}
+	return ""
+}
+
 // switchWorkspace validates the workspace exists and sets it as current.
 func switchWorkspace(name string, jsonOutput bool) error {
 	if !platform.HasConfig() {

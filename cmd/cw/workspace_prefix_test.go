@@ -6,6 +6,30 @@ import (
 	"github.com/spf13/cobra"
 )
 
+func TestResolveWorkspaceName(t *testing.T) {
+	// Test priority: override > explicit > current
+	orig := workspaceOverride
+	defer func() { workspaceOverride = orig }()
+
+	workspaceOverride = "from-override"
+	name := resolveWorkspaceName("from-explicit")
+	if name != "from-override" {
+		t.Errorf("expected override, got %q", name)
+	}
+
+	workspaceOverride = ""
+	name = resolveWorkspaceName("from-explicit")
+	if name != "from-explicit" {
+		t.Errorf("expected explicit, got %q", name)
+	}
+
+	workspaceOverride = ""
+	name = resolveWorkspaceName("")
+	if name != "" {
+		t.Errorf("expected empty, got %q", name)
+	}
+}
+
 func TestIsKnownCommand(t *testing.T) {
 	root := &cobra.Command{Use: "cw"}
 	root.AddCommand(&cobra.Command{Use: "run", Aliases: []string{}})
