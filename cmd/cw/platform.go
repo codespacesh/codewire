@@ -161,7 +161,7 @@ func orgsCmd() *cobra.Command {
 		Use:   "orgs",
 		Short: "Manage organizations",
 	}
-	cmd.AddCommand(orgsListCmd())
+	cmd.AddCommand(orgsListCmd(), orgsCreateCmd(), orgsDeleteCmd(), orgsInviteCmd())
 	return cmd
 }
 
