@@ -133,3 +133,100 @@ func orgsInviteCmd() *cobra.Command {
 	cmd.Flags().StringVar(&orgFlag, "org", "", "Organization ID or slug (default: from config)")
 	return cmd
 }
+
+func resourcesCreateCmd() *cobra.Command {
+	var name, slug, orgFlag, resType, plan string
+
+	cmd := &cobra.Command{
+		Use:   "create",
+		Short: "Create a new resource",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if name == "" {
+				return fmt.Errorf("--name is required")
+			}
+			if resType == "" {
+				return fmt.Errorf("--type is required (coder, codewire-relay)")
+			}
+			if slug == "" {
+				slug = slugify(name)
+			}
+
+			pc, err := platform.NewClient()
+			if err != nil {
+				return err
+			}
+
+			orgID, err := resolveOrgID(pc, orgFlag)
+			if err != nil {
+				return err
+			}
+
+			result, err := pc.CreateResource(&platform.CreateResourceRequest{
+				OrgID: orgID,
+				Type:  resType,
+				Name:  name,
+				Slug:  slug,
+				Plan:  plan,
+			})
+			if err != nil {
+				return fmt.Errorf("create resource: %w", err)
+			}
+
+			fmt.Printf("Created resource %q (slug: %s, status: %s)\n", result.Name, result.Slug, result.Status)
+
+			if result.CheckoutURL != "" {
+				fmt.Printf("Checkout URL: %s\n", result.CheckoutURL)
+				fmt.Println("Opening in browser...")
+				_ = openBrowser(result.CheckoutURL)
+			}
+
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&name, "name", "", "Resource name (required)")
+	cmd.Flags().StringVar(&slug, "slug", "", "URL-safe slug (default: auto-generated from name)")
+	cmd.Flags().StringVar(&orgFlag, "org", "", "Organization ID or slug (default: from config)")
+	cmd.Flags().StringVar(&resType, "type", "", "Resource type: coder, codewire-relay (required)")
+	cmd.Flags().StringVar(&plan, "plan", "", "Billing plan (optional)")
+	return cmd
+}
+
+func resourcesDeleteCmd() *cobra.Command {
+	var yes bool
+
+	cmd := &cobra.Command{
+		Use:   "delete <id-or-slug>",
+		Short: "Delete a resource",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if !yes {
+				pc, err := platform.NewClient()
+				if err != nil {
+					return err
+				}
+				resource, err := pc.GetResource(args[0])
+				if err != nil {
+					return fmt.Errorf("resource not found: %w", err)
+				}
+				if err := confirmDelete("resource", resource.Name); err != nil {
+					return err
+				}
+			}
+
+			pc, err := platform.NewClient()
+			if err != nil {
+				return err
+			}
+			if err := pc.DeleteResource(args[0]); err != nil {
+				return fmt.Errorf("delete resource: %w", err)
+			}
+
+			fmt.Println("Resource deleted.")
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVar(&yes, "yes", false, "Skip confirmation prompt")
+	return cmd
+}

@@ -216,7 +216,7 @@ func resourcesCmd() *cobra.Command {
 		Use:   "resources",
 		Short: "Manage resources",
 	}
-	cmd.AddCommand(resourcesListCmd(), resourcesGetCmd())
+	cmd.AddCommand(resourcesListCmd(), resourcesGetCmd(), resourcesCreateCmd(), resourcesDeleteCmd())
 	return cmd
 }
 
