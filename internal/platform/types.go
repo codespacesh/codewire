@@ -71,6 +71,24 @@ type OrgWithRole struct {
 	Resources     []ResourceSummary  `json:"resources,omitempty"`
 }
 
+type CreateOrgRequest struct {
+	Name string `json:"name"`
+	Slug string `json:"slug"`
+}
+
+type OrgInvitation struct {
+	ID        string `json:"id"`
+	Email     string `json:"email"`
+	Role      string `json:"role"`
+	Status    string `json:"status"`
+	CreatedAt string `json:"created_at"`
+}
+
+type InviteMemberRequest struct {
+	Email string `json:"email"`
+	Role  string `json:"role"`
+}
+
 type ResourceSummary struct {
 	ID           string `json:"id"`
 	Name         string `json:"name"`
