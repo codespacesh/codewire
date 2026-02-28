@@ -129,14 +129,16 @@ func openCmd() *cobra.Command {
 		Short: "Open workspace in browser",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			wsName := ""
+			explicit := ""
 			if len(args) > 0 {
-				wsName = args[0]
-			} else {
+				explicit = args[0]
+			}
+			wsName := resolveWorkspaceName(explicit)
+			if wsName == "" {
 				wsName = platform.GetCurrentWorkspace()
-				if wsName == "" {
-					return fmt.Errorf("no workspace specified and no current workspace set")
-				}
+			}
+			if wsName == "" {
+				return fmt.Errorf("no workspace specified\n\nUsage: cw <workspace> open\n   or: cw open <workspace>")
 			}
 
 			client, err := platform.NewClient()
@@ -186,14 +188,16 @@ func workspaceStartCmd() *cobra.Command {
 		Short: "Start a stopped workspace",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			wsName := ""
+			explicit := ""
 			if len(args) > 0 {
-				wsName = args[0]
-			} else {
+				explicit = args[0]
+			}
+			wsName := resolveWorkspaceName(explicit)
+			if wsName == "" {
 				wsName = platform.GetCurrentWorkspace()
-				if wsName == "" {
-					return fmt.Errorf("no workspace specified and no current workspace set")
-				}
+			}
+			if wsName == "" {
+				return fmt.Errorf("no workspace specified\n\nUsage: cw <workspace> start\n   or: cw start <workspace>")
 			}
 
 			client, resID, err := resolveResourceClient(resourceID)
@@ -220,14 +224,16 @@ func workspaceStopCmd() *cobra.Command {
 		Short: "Stop a running workspace",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			wsName := ""
+			explicit := ""
 			if len(args) > 0 {
-				wsName = args[0]
-			} else {
+				explicit = args[0]
+			}
+			wsName := resolveWorkspaceName(explicit)
+			if wsName == "" {
 				wsName = platform.GetCurrentWorkspace()
-				if wsName == "" {
-					return fmt.Errorf("no workspace specified and no current workspace set")
-				}
+			}
+			if wsName == "" {
+				return fmt.Errorf("no workspace specified\n\nUsage: cw <workspace> stop\n   or: cw stop <workspace>")
 			}
 
 			client, resID, err := resolveResourceClient(resourceID)
