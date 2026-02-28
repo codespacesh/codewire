@@ -239,16 +239,24 @@ func runCmd() *cobra.Command {
 		Short:   "Launch a new session",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Platform mode: run in remote workspace via coder ssh
-			if platform.HasConfig() && platform.GetCurrentWorkspace() != "" {
+			if platform.HasConfig() {
 				dash := cmd.ArgsLenAtDash()
 				if dash == -1 {
 					return fmt.Errorf("command required after --\n\nUsage: cw run [workspace] -- <command> [args...]")
 				}
 
 				// Parse: cw run [workspace] -- command...
-				wsName := platform.GetCurrentWorkspace()
+				// Priority: workspaceOverride > positional arg > current workspace
+				explicit := ""
 				if dash >= 1 {
-					wsName = args[0] // explicit workspace override
+					explicit = args[0]
+				}
+				wsName := resolveWorkspaceName(explicit)
+				if wsName == "" {
+					wsName = platform.GetCurrentWorkspace()
+				}
+				if wsName == "" {
+					return fmt.Errorf("no workspace specified\n\nUsage: cw <workspace> run -- <command>\n   or: cw run <workspace> -- <command>\n   or: set current workspace with 'cw <name>'")
 				}
 				command := args[dash:]
 
