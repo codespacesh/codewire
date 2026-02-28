@@ -27,8 +27,9 @@ var (
 	// version is set at build time via -ldflags "-X main.version=..."
 	version = "dev"
 
-	serverFlag string
-	tokenFlag  string
+	serverFlag        string
+	tokenFlag         string
+	workspaceOverride string // set by workspace prefix interception (e.g. "cw api run")
 )
 
 func main() {
@@ -111,9 +112,38 @@ func main() {
 		completionCmd(rootCmd),
 	)
 
+	// Workspace prefix interception: "cw api run -- cmd" → workspaceOverride="api"
+	// Only when: platform mode, >= 3 args, first arg is not a known command or flag.
+	if len(os.Args) >= 3 && platform.HasConfig() {
+		candidate := os.Args[1]
+		if !strings.HasPrefix(candidate, "-") && !isKnownCommand(rootCmd, candidate) {
+			workspaceOverride = candidate
+			os.Args = append(os.Args[:1], os.Args[2:]...)
+		}
+	}
+
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
+}
+
+// isKnownCommand checks if name matches any registered cobra command or alias.
+func isKnownCommand(root *cobra.Command, name string) bool {
+	// Built-in cobra commands
+	if name == "help" || name == "version" || name == "completion" {
+		return true
+	}
+	for _, cmd := range root.Commands() {
+		if cmd.Name() == name {
+			return true
+		}
+		for _, alias := range cmd.Aliases {
+			if alias == name {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // ---------------------------------------------------------------------------
