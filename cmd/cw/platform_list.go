@@ -39,6 +39,11 @@ func platformListCmd() *cobra.Command {
 				return err
 			}
 
+			// If workspace override is set (e.g. "cw api list"), show sessions for that workspace
+			if workspaceOverride != "" {
+				return listWorkspaceSessions(pc, workspaceOverride, jsonOutput)
+			}
+
 			orgs, err := pc.ListOrgs()
 			if err != nil {
 				return fmt.Errorf("list orgs: %w", err)
@@ -87,15 +92,20 @@ func platformListCmd() *cobra.Command {
 						continue
 					}
 
+					currentWs := platform.GetCurrentWorkspace()
 					for _, ws := range workspaces.Workspaces {
 						sessionCount, activeCount := countSessions(sessionIndex, res.ID, ws.ID)
+						marker := " "
+						if ws.Name == currentWs {
+							marker = "*"
+						}
 						sessionInfo := ""
 						if sessionCount > 0 {
 							sessionInfo = fmt.Sprintf("%d sessions (%d active)", sessionCount, activeCount)
 						} else {
 							sessionInfo = "0 sessions"
 						}
-						fmt.Printf("  %-20s %-10s %s\n", ws.Name, ws.Status, sessionInfo)
+						fmt.Printf("  %s %-19s %-10s %s\n", marker, ws.Name, ws.Status, sessionInfo)
 					}
 					fmt.Println()
 				}
@@ -143,4 +153,61 @@ func countSessions(idx map[sessionKey][]platform.SessionSnapshot, resourceID, wo
 		}
 	}
 	return total, active
+}
+
+func listWorkspaceSessions(pc *platform.Client, wsName string, jsonOutput bool) error {
+	cfg, err := platform.LoadConfig()
+	if err != nil {
+		return err
+	}
+	if cfg.DefaultResource == "" {
+		return fmt.Errorf("no default resource configured (run 'cw setup')")
+	}
+
+	// Verify workspace exists
+	workspaces, err := pc.ListWorkspaces(cfg.DefaultResource)
+	if err != nil {
+		return fmt.Errorf("list workspaces: %w", err)
+	}
+	var wsID string
+	for _, ws := range workspaces.Workspaces {
+		if ws.Name == wsName {
+			wsID = ws.ID
+			break
+		}
+	}
+	if wsID == "" {
+		return fmt.Errorf("workspace %q not found", wsName)
+	}
+
+	sessions, err := pc.ListWorkspaceSessions(cfg.DefaultResource, wsID)
+	if err != nil {
+		// Session listing may fail if workspace has no agent — show empty
+		sessions = nil
+	}
+
+	if jsonOutput {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(sessions)
+	}
+
+	if len(sessions) == 0 {
+		fmt.Printf("No sessions in workspace %q.\n", wsName)
+		return nil
+	}
+
+	fmt.Printf("ID  %-36s  %-10s  %s\n", "COMMAND", "STATUS", "NAME")
+	for _, s := range sessions {
+		cmd := s.Command
+		if len(cmd) > 36 {
+			cmd = cmd[:33] + "..."
+		}
+		name := s.Name
+		if name == "" {
+			name = "\u2014"
+		}
+		fmt.Printf("%-3d %-36s  %-10s  %s\n", s.ID, cmd, s.Status, name)
+	}
+	return nil
 }
