@@ -33,7 +33,7 @@ func secretsListCmd() *cobra.Command {
 				return err
 			}
 
-			oid, err := resolveOrgID(orgID)
+			oid, err := resolveOrgID(client, orgID)
 			if err != nil {
 				return err
 			}
@@ -81,7 +81,7 @@ func secretsSetCmd() *cobra.Command {
 				return err
 			}
 
-			oid, err := resolveOrgID(orgID)
+			oid, err := resolveOrgID(client, orgID)
 			if err != nil {
 				return err
 			}
@@ -121,7 +121,7 @@ func secretsDeleteCmd() *cobra.Command {
 				return err
 			}
 
-			oid, err := resolveOrgID(orgID)
+			oid, err := resolveOrgID(client, orgID)
 			if err != nil {
 				return err
 			}
@@ -140,17 +140,3 @@ func secretsDeleteCmd() *cobra.Command {
 	return cmd
 }
 
-// resolveOrgID returns the explicit org ID or falls back to the configured default.
-func resolveOrgID(explicit string) (string, error) {
-	if explicit != "" {
-		return explicit, nil
-	}
-	cfg, err := platform.LoadConfig()
-	if err != nil {
-		return "", fmt.Errorf("no --org flag and no default org configured (run 'cw setup')")
-	}
-	if cfg.DefaultOrg == "" {
-		return "", fmt.Errorf("no --org flag and no default org configured (run 'cw setup')")
-	}
-	return cfg.DefaultOrg, nil
-}
