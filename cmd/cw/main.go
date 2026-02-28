@@ -62,7 +62,6 @@ func main() {
 	rootCmd.AddCommand(
 		// Session management
 		nodeCmd(),
-		stopCmd(),
 		runCmd(),
 		platformListCmd(),
 		attachCmd(),
@@ -148,14 +147,13 @@ func isKnownCommand(root *cobra.Command, name string) bool {
 }
 
 // ---------------------------------------------------------------------------
-// nodeCmd (aliases: start)
+// nodeCmd — "cw node" starts the node, "cw node stop" stops it
 // ---------------------------------------------------------------------------
 
 func nodeCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:     "node",
-		Aliases: []string{"start"},
-		Short:   "Start the codewire node",
+	cmd := &cobra.Command{
+		Use:   "node",
+		Short: "Start the codewire node",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir := dataDir()
 			if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -182,13 +180,11 @@ func nodeCmd() *cobra.Command {
 			return n.Run(ctx)
 		},
 	}
+	cmd.AddCommand(nodeStopCmd())
+	return cmd
 }
 
-// ---------------------------------------------------------------------------
-// stopCmd
-// ---------------------------------------------------------------------------
-
-func stopCmd() *cobra.Command {
+func nodeStopCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "stop",
 		Short: "Stop the running node",
