@@ -135,6 +135,21 @@ type WorkspacesListResponse struct {
 	Count      int                `json:"count"`
 }
 
+// Resource CRUD types
+
+type CreateResourceRequest struct {
+	OrgID string `json:"orgId"`
+	Type  string `json:"type"`
+	Name  string `json:"name"`
+	Slug  string `json:"slug"`
+	Plan  string `json:"plan,omitempty"`
+}
+
+type CreateResourceResult struct {
+	PlatformResource
+	CheckoutURL string `json:"checkout_url,omitempty"`
+}
+
 // API error
 
 type APIError struct {
