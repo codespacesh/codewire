@@ -162,6 +162,22 @@ type CheckoutURLResponse struct {
 	CheckoutURL string `json:"checkout_url"`
 }
 
+// Device auth types
+
+type DeviceAuthResponse struct {
+	DeviceCode      string `json:"device_code"`
+	UserCode        string `json:"user_code"`
+	VerificationURI string `json:"verification_uri"`
+	ExpiresIn       int    `json:"expires_in"`
+	Interval        int    `json:"interval"`
+}
+
+type DeviceTokenResponse struct {
+	Status       string `json:"status,omitempty"`
+	SessionToken string `json:"session_token,omitempty"`
+	User         *User  `json:"user,omitempty"`
+}
+
 // API error
 
 type APIError struct {

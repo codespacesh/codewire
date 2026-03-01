@@ -9,7 +9,9 @@ import (
 )
 
 func platformSetupCmd() *cobra.Command {
-	return &cobra.Command{
+	var usePassword bool
+
+	cmd := &cobra.Command{
 		Use:   "setup",
 		Short: "Interactive Codewire setup wizard",
 		Long:  "Connect to a Codewire server, sign in, and select your default organization and resource.",
@@ -39,45 +41,21 @@ func platformSetupCmd() *cobra.Command {
 
 			// [2/4] Login
 			fmt.Println("[2/4] Sign in")
-			email, err := prompt("      Email: ")
-			if err != nil {
-				return err
-			}
-			password, err := promptPassword("      Password: ")
-			if err != nil {
-				return err
-			}
-
-			resp, err := client.Login(email, password)
-			if err != nil {
-				return fmt.Errorf("login failed: %w", err)
-			}
-
-			if resp.TwoFactorRequired {
-				code, err := prompt("      2FA Code: ")
+			var displayName string
+			if usePassword {
+				name, err := loginWithPassword(client)
 				if err != nil {
 					return err
 				}
-				authResp, err := client.ValidateTOTP(code, resp.TwoFactorToken)
-				if err != nil {
-					return fmt.Errorf("2FA failed: %w", err)
-				}
-				if authResp.User != nil {
-					displayName := authResp.User.Name
-					if displayName == "" {
-						displayName = authResp.User.Email
-					}
-					fmt.Printf("      Logged in as %s\n", displayName)
-				}
+				displayName = name
 			} else {
-				if resp.User != nil {
-					displayName := resp.User.Name
-					if displayName == "" {
-						displayName = resp.User.Email
-					}
-					fmt.Printf("      Logged in as %s\n", displayName)
+				name, err := loginWithDevice(client)
+				if err != nil {
+					return err
 				}
+				displayName = name
 			}
+			fmt.Printf("      Logged in as %s\n", displayName)
 			fmt.Println()
 
 			// [3/4] Select organization
@@ -150,4 +128,7 @@ func platformSetupCmd() *cobra.Command {
 			return nil
 		},
 	}
+
+	cmd.Flags().BoolVar(&usePassword, "password", false, "Use email/password login instead of browser")
+	return cmd
 }

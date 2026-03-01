@@ -87,6 +87,29 @@ func (c *Client) Logout() error {
 	return c.do("POST", "/api/auth/sign-out", nil, nil)
 }
 
+// DeviceAuthorize starts the device authorization flow.
+func (c *Client) DeviceAuthorize() (*DeviceAuthResponse, error) {
+	var resp DeviceAuthResponse
+	if err := c.do("POST", "/api/auth/device/authorize", nil, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// DeviceToken polls for the device authorization result.
+// Returns the response and HTTP status code.
+func (c *Client) DeviceToken(deviceCode string) (*DeviceTokenResponse, int, error) {
+	body := map[string]string{"device_code": deviceCode}
+	resp, statusCode, err := c.doWithStatus("POST", "/api/auth/device/token", body)
+	if err != nil {
+		return nil, statusCode, err
+	}
+	if resp.SessionToken != "" {
+		c.SessionToken = resp.SessionToken
+	}
+	return resp, statusCode, nil
+}
+
 // Healthz checks if the server is reachable.
 func (c *Client) Healthz() error {
 	resp, err := c.HTTP.Get(c.ServerURL + "/api/healthz")
@@ -150,6 +173,60 @@ func (c *Client) do(method, path string, body any, result any) error {
 	}
 
 	return nil
+}
+
+// doWithStatus is like do but returns a DeviceTokenResponse and the HTTP status code.
+// It handles 2xx as success (not just 200) and returns errors for 4xx/5xx.
+func (c *Client) doWithStatus(method, path string, body any) (*DeviceTokenResponse, int, error) {
+	var bodyReader io.Reader
+	if body != nil {
+		data, err := json.Marshal(body)
+		if err != nil {
+			return nil, 0, fmt.Errorf("marshal request: %w", err)
+		}
+		bodyReader = bytes.NewReader(data)
+	}
+
+	req, err := http.NewRequest(method, c.ServerURL+path, bodyReader)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if c.SessionToken != "" {
+		req.Header.Set("Authorization", "Bearer "+c.SessionToken)
+	}
+
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, 0, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		var apiErr APIError
+		if json.Unmarshal(respBody, &apiErr) == nil && apiErr.Title != "" {
+			apiErr.Status = resp.StatusCode
+			return nil, resp.StatusCode, &apiErr
+		}
+		return nil, resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result DeviceTokenResponse
+	if len(respBody) > 0 {
+		if err := json.Unmarshal(respBody, &result); err != nil {
+			return nil, resp.StatusCode, fmt.Errorf("decode response: %w", err)
+		}
+	}
+
+	return &result, resp.StatusCode, nil
 }
 
 // Config file management

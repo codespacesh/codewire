@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"text/tabwriter"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -13,6 +14,7 @@ import (
 
 func loginCmd() *cobra.Command {
 	var serverURL string
+	var usePassword bool
 
 	cmd := &cobra.Command{
 		Use:   "login",
@@ -30,36 +32,20 @@ func loginCmd() *cobra.Command {
 
 			client := platform.NewClientWithURL(url)
 
-			// Read credentials
-			email, err := prompt("Email: ")
-			if err != nil {
-				return err
-			}
-			password, err := promptPassword("Password: ")
-			if err != nil {
-				return err
-			}
+			var displayName string
 
-			resp, err := client.Login(email, password)
-			if err != nil {
-				return fmt.Errorf("login failed: %w", err)
-			}
-
-			// Handle 2FA
-			if resp.TwoFactorRequired {
-				code, err := prompt("2FA Code: ")
+			if usePassword {
+				name, err := loginWithPassword(client)
 				if err != nil {
 					return err
 				}
-				authResp, err := client.ValidateTOTP(code, resp.TwoFactorToken)
+				displayName = name
+			} else {
+				name, err := loginWithDevice(client)
 				if err != nil {
-					return fmt.Errorf("2FA validation failed: %w", err)
+					return err
 				}
-				if authResp.Session == nil {
-					return fmt.Errorf("no session returned after 2FA")
-				}
-			} else if resp.Session == nil {
-				return fmt.Errorf("no session returned")
+				displayName = name
 			}
 
 			// Save config
@@ -77,20 +63,116 @@ func loginCmd() *cobra.Command {
 				return fmt.Errorf("save config: %w", err)
 			}
 
-			name := ""
-			if resp.User != nil {
-				name = resp.User.Name
-				if name == "" {
-					name = resp.User.Email
-				}
-			}
-			fmt.Printf("Logged in as %s\n", name)
+			fmt.Printf("Logged in as %s\n", displayName)
 			return nil
 		},
 	}
 
 	cmd.Flags().StringVar(&serverURL, "server", "", "Codewire server URL")
+	cmd.Flags().BoolVar(&usePassword, "password", false, "Use email/password login instead of browser")
 	return cmd
+}
+
+func loginWithPassword(client *platform.Client) (string, error) {
+	email, err := prompt("Email: ")
+	if err != nil {
+		return "", err
+	}
+	password, err := promptPassword("Password: ")
+	if err != nil {
+		return "", err
+	}
+
+	resp, err := client.Login(email, password)
+	if err != nil {
+		return "", fmt.Errorf("login failed: %w", err)
+	}
+
+	// Handle 2FA
+	if resp.TwoFactorRequired {
+		code, err := prompt("2FA Code: ")
+		if err != nil {
+			return "", err
+		}
+		authResp, err := client.ValidateTOTP(code, resp.TwoFactorToken)
+		if err != nil {
+			return "", fmt.Errorf("2FA validation failed: %w", err)
+		}
+		if authResp.Session == nil {
+			return "", fmt.Errorf("no session returned after 2FA")
+		}
+	} else if resp.Session == nil {
+		return "", fmt.Errorf("no session returned")
+	}
+
+	name := ""
+	if resp.User != nil {
+		name = resp.User.Name
+		if name == "" {
+			name = resp.User.Email
+		}
+	}
+	return name, nil
+}
+
+func loginWithDevice(client *platform.Client) (string, error) {
+	dauth, err := client.DeviceAuthorize()
+	if err != nil {
+		return "", fmt.Errorf("device auth failed: %w", err)
+	}
+
+	fmt.Println("Opening browser to authorize...")
+	fmt.Printf("If browser doesn't open, visit: %s\n", dauth.VerificationURI)
+	fmt.Printf("Your code: %s\n", dauth.UserCode)
+
+	_ = openBrowser(dauth.VerificationURI)
+
+	// Poll for approval
+	interval := time.Duration(dauth.Interval) * time.Second
+	if interval < 5*time.Second {
+		interval = 5 * time.Second
+	}
+	expiresIn := dauth.ExpiresIn
+	if expiresIn <= 0 {
+		expiresIn = 300
+	}
+	deadline := time.Now().Add(time.Duration(expiresIn) * time.Second)
+
+	for time.Now().Before(deadline) {
+		time.Sleep(interval)
+
+		resp, statusCode, err := client.DeviceToken(dauth.DeviceCode)
+		if err != nil {
+			if statusCode == 410 {
+				return "", fmt.Errorf("device code expired")
+			}
+			if statusCode == 403 {
+				return "", fmt.Errorf("authorization denied")
+			}
+			// Network error or other transient failure, retry
+			continue
+		}
+
+		if statusCode == 202 {
+			// Still pending
+			if resp.Status == "slow_down" {
+				interval *= 2
+			}
+			continue
+		}
+
+		// Success
+		if resp.User != nil {
+			name := resp.User.Name
+			if name == "" {
+				name = resp.User.Email
+			}
+			return name, nil
+		}
+		return "", nil
+	}
+
+	return "", fmt.Errorf("timed out waiting for authorization")
 }
 
 func logoutCmd() *cobra.Command {
