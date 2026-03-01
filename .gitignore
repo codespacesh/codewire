@@ -5,3 +5,6 @@ demo/cw
 demo/broker/broker
 .env
 operator/bin/
+.DS_Store
+.terraform/
+.terraform.lock.hcl
