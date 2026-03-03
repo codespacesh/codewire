@@ -20,13 +20,13 @@ func platformSetupCmd() *cobra.Command {
 			fmt.Println("Welcome to Codewire!")
 			fmt.Println()
 
-			// [1/4] Server URL
+			// [1/5] Server URL
 			defaultURL := "https://codewire.sh"
 			if existing, err := platform.LoadConfig(); err == nil {
 				defaultURL = existing.ServerURL
 			}
 
-			serverURL, err := promptDefault("[1/4] Server URL", defaultURL)
+			serverURL, err := promptDefault("[1/5] Server URL", defaultURL)
 			if err != nil {
 				return err
 			}
@@ -40,8 +40,8 @@ func platformSetupCmd() *cobra.Command {
 			fmt.Printf("      Connected to %s\n", serverURL)
 			fmt.Println()
 
-			// [2/4] Login
-			fmt.Println("[2/4] Sign in")
+			// [2/5] Login
+			fmt.Println("[2/5] Sign in")
 			var displayName string
 			if usePassword {
 				name, err := loginWithPassword(client)
@@ -59,19 +59,31 @@ func platformSetupCmd() *cobra.Command {
 			fmt.Printf("      Logged in as %s\n", displayName)
 			fmt.Println()
 
-			// [3/4] Select or create organization
+			// [3/5] Select or create organization
 			selectedOrg, err := setupSelectOrg(client)
 			if err != nil {
 				return err
 			}
 			fmt.Println()
 
-			// [4/4] Select or create resource
+			// [4/5] Select or create resource
 			var selectedResourceID string
 			if selectedOrg.ID != "" {
 				selectedResourceID, err = setupSelectResource(client, &selectedOrg)
 				if err != nil {
 					return err
+				}
+			}
+			fmt.Println()
+
+			// [5/5] Connect GitHub (optional)
+			fmt.Println("[5/5] Connect GitHub (optional)")
+			fmt.Println("      Connecting GitHub enables launching private repositories.")
+			idx, ghErr := promptSelect("      Connect GitHub?", []string{"Yes", "Skip"})
+			if ghErr == nil && idx == 0 {
+				if err := setupGitHub(client); err != nil {
+					fmt.Printf("      Warning: GitHub setup failed: %v\n", err)
+					fmt.Println("      You can retry later with: cw github login")
 				}
 			}
 			fmt.Println()
@@ -110,7 +122,7 @@ func setupSelectOrg(client *platform.Client) (platform.OrgWithRole, error) {
 	}
 
 	if len(orgs) == 1 {
-		fmt.Printf("[3/4] Organization: %s (%s)\n", orgs[0].Name, orgs[0].Role)
+		fmt.Printf("[3/5] Organization: %s (%s)\n", orgs[0].Name, orgs[0].Role)
 		return orgs[0], nil
 	}
 
@@ -118,7 +130,7 @@ func setupSelectOrg(client *platform.Client) (platform.OrgWithRole, error) {
 	for i, org := range orgs {
 		options[i] = fmt.Sprintf("%s (%s, %d resources)", org.Name, org.Role, len(org.Resources))
 	}
-	idx, err := promptSelect("[3/4] Select organization:", options)
+	idx, err := promptSelect("[3/5] Select organization:", options)
 	if err != nil {
 		return platform.OrgWithRole{}, err
 	}
@@ -128,7 +140,7 @@ func setupSelectOrg(client *platform.Client) (platform.OrgWithRole, error) {
 
 // setupCreateOrg prompts the user to create a new organization.
 func setupCreateOrg(client *platform.Client) (platform.OrgWithRole, error) {
-	fmt.Println("[3/4] Organization")
+	fmt.Println("[3/5] Organization")
 	ok, err := promptConfirm("      No organizations found. Create one? [Y/n]")
 	if err != nil {
 		return platform.OrgWithRole{}, err
@@ -182,7 +194,7 @@ func setupSelectResource(client *platform.Client, org *platform.OrgWithRole) (st
 
 	resources := org.Resources
 	if len(resources) == 1 {
-		fmt.Printf("[4/4] Resource: %s (%s, %s)\n", resources[0].Name, resources[0].Type, resources[0].Status)
+		fmt.Printf("[4/5] Resource: %s (%s, %s)\n", resources[0].Name, resources[0].Type, resources[0].Status)
 		return resources[0].ID, nil
 	}
 
@@ -190,7 +202,7 @@ func setupSelectResource(client *platform.Client, org *platform.OrgWithRole) (st
 	for i, r := range resources {
 		options[i] = fmt.Sprintf("%-20s %-12s %-10s %s", r.Name, r.Type, r.Status, r.HealthStatus)
 	}
-	idx, err := promptSelect("[4/4] Select resource:", options)
+	idx, err := promptSelect("[4/5] Select resource:", options)
 	if err != nil {
 		return "", err
 	}
@@ -200,7 +212,7 @@ func setupSelectResource(client *platform.Client, org *platform.OrgWithRole) (st
 
 // setupCreateResource prompts the user to create a new resource with billing.
 func setupCreateResource(client *platform.Client, org *platform.OrgWithRole) (string, error) {
-	fmt.Println("[4/4] Resource")
+	fmt.Println("[4/5] Resource")
 	ok, err := promptConfirm(fmt.Sprintf("      No resources in %q. Create a Coder instance? [Y/n]", org.Name))
 	if err != nil {
 		return "", err

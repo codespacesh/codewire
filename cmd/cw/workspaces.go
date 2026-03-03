@@ -32,23 +32,52 @@ func launchCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "launch <repo-url>",
-		Short: "Create a workspace from a repo URL",
-		Long:  "Create a new workspace on the default Coder resource, cloning the given repository.\nUses AI to detect the project type and configure the workspace automatically.",
+		Use:   "launch <repo-url|directory>",
+		Short: "Create a workspace from a repo URL or local directory",
+		Long:  "Create a new workspace on the default Coder resource, cloning the given repository.\nUses AI to detect the project type and configure the workspace automatically.\n\nPass '.' or a local directory to detect the git remote and use that.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			repoURL := args[0]
+
+			// Detect local directory → resolve git remote
+			if isLocalPath(repoURL) {
+				detected, detectedBranch, err := detectLocalRepo(repoURL)
+				if err != nil {
+					return fmt.Errorf("detect local repo: %w", err)
+				}
+				repoURL = detected
+				if branch == "" && detectedBranch != "" {
+					branch = detectedBranch
+				}
+				fmt.Printf("Detected remote: %s", repoURL)
+				if branch != "" {
+					fmt.Printf(" (branch: %s)", branch)
+				}
+				fmt.Println()
+			}
 
 			client, err := platform.NewClient()
 			if err != nil {
 				return err
 			}
 
+			// Check GitHub connection if detection might fail
+			ghStatus, ghErr := client.GetGitHubStatus()
+			if ghErr == nil && !ghStatus.Connected {
+				fmt.Println("Tip: Connect GitHub for private repo access: cw github login")
+			}
+
 			// Call detection endpoint first (before resource resolution)
 			fmt.Printf("Analyzing %s...\n", repoURL)
 			detection, err := client.DetectRepo(repoURL, branch)
 			if err != nil {
-				fmt.Printf("Detection failed: %v\nFalling back to defaults.\n", err)
+				errMsg := err.Error()
+				if (ghStatus == nil || !ghStatus.Connected) && (strings.Contains(errMsg, "404") || strings.Contains(errMsg, "failed to fetch repo")) {
+					fmt.Printf("Detection failed (possibly private repo): %v\n", err)
+					fmt.Println("Connect GitHub for private repo access: cw github login")
+				} else {
+					fmt.Printf("Detection failed: %v\nFalling back to defaults.\n", err)
+				}
 				detection = nil
 			}
 
@@ -454,4 +483,68 @@ func openBrowser(url string) error {
 		return fmt.Errorf("unsupported platform")
 	}
 	return exec.Command(cmd, url).Start()
+}
+
+// isLocalPath returns true if the argument looks like a local directory (not a URL).
+func isLocalPath(arg string) bool {
+	if arg == "." || arg == ".." {
+		return true
+	}
+	if strings.HasPrefix(arg, "/") || strings.HasPrefix(arg, "./") || strings.HasPrefix(arg, "../") {
+		return true
+	}
+	// Not a URL if it doesn't contain "://" or "@"
+	if !strings.Contains(arg, "://") && !strings.Contains(arg, "@") && !strings.Contains(arg, ".") {
+		return true
+	}
+	return false
+}
+
+// detectLocalRepo reads the git origin remote from a local directory and returns the HTTPS URL + current branch.
+func detectLocalRepo(dir string) (string, string, error) {
+	// Get the origin remote URL
+	remoteCmd := exec.Command("git", "-C", dir, "remote", "get-url", "origin")
+	remoteOut, err := remoteCmd.Output()
+	if err != nil {
+		return "", "", fmt.Errorf("not a git repository or no 'origin' remote: %w", err)
+	}
+	remoteURL := strings.TrimSpace(string(remoteOut))
+
+	// Normalize to HTTPS
+	repoURL := normalizeGitURL(remoteURL)
+
+	// Get current branch
+	branchCmd := exec.Command("git", "-C", dir, "rev-parse", "--abbrev-ref", "HEAD")
+	branchOut, err := branchCmd.Output()
+	if err != nil {
+		return repoURL, "", nil
+	}
+	branch := strings.TrimSpace(string(branchOut))
+	if branch == "HEAD" {
+		branch = "" // detached HEAD
+	}
+
+	return repoURL, branch, nil
+}
+
+// normalizeGitURL converts SSH git URLs to HTTPS.
+func normalizeGitURL(rawURL string) string {
+	rawURL = strings.TrimSpace(rawURL)
+	rawURL = strings.TrimSuffix(rawURL, ".git")
+
+	// git@github.com:owner/repo → https://github.com/owner/repo
+	if strings.HasPrefix(rawURL, "git@") {
+		rawURL = strings.TrimPrefix(rawURL, "git@")
+		rawURL = strings.Replace(rawURL, ":", "/", 1)
+		return "https://" + rawURL
+	}
+
+	// ssh://git@github.com/owner/repo → https://github.com/owner/repo
+	if strings.HasPrefix(rawURL, "ssh://") {
+		rawURL = strings.TrimPrefix(rawURL, "ssh://")
+		rawURL = strings.TrimPrefix(rawURL, "git@")
+		return "https://" + rawURL
+	}
+
+	return rawURL
 }

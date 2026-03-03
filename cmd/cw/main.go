@@ -102,6 +102,7 @@ func main() {
 		secretsCmd(),
 		costCmd(),
 		billingCmd(),
+		githubCmd(),
 		// Workspaces
 		launchCmd(),
 		openCmd(),
