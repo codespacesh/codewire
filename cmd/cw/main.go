@@ -21,6 +21,7 @@ import (
 	"github.com/codewiresh/codewire/internal/node"
 	"github.com/codewiresh/codewire/internal/platform"
 	"github.com/codewiresh/codewire/internal/relay"
+	"github.com/codewiresh/codewire/internal/update"
 )
 
 var (
@@ -111,6 +112,8 @@ func main() {
 		workspacesListCmd(),
 		// Shell completion
 		completionCmd(rootCmd),
+		// Self-update
+		updateCmd(),
 	)
 
 	// Workspace prefix interception: "cw api run -- cmd" → workspaceOverride="api"
@@ -123,7 +126,10 @@ func main() {
 		}
 	}
 
-	if err := rootCmd.Execute(); err != nil {
+	printUpdateNotice := update.BackgroundCheck(version)
+	err := rootCmd.Execute()
+	printUpdateNotice()
+	if err != nil {
 		os.Exit(1)
 	}
 }
