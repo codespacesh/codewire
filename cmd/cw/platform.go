@@ -302,7 +302,7 @@ func resourcesCmd() *cobra.Command {
 		Use:   "resources",
 		Short: "Manage resources",
 	}
-	cmd.AddCommand(resourcesListCmd(), resourcesGetCmd(), resourcesCreateCmd(), resourcesDeleteCmd())
+	cmd.AddCommand(resourcesListCmd(), resourcesGetCmd(), resourcesCreateCmd(), resourcesDeleteCmd(), resourceStatusCmd())
 	return cmd
 }
 

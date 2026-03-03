@@ -1,6 +1,9 @@
 package platform
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // PlatformConfig is stored at ~/.config/cw/config.json.
 type PlatformConfig struct {
@@ -194,6 +197,17 @@ type DeviceTokenResponse struct {
 	Status       string `json:"status,omitempty"`
 	SessionToken string `json:"session_token,omitempty"`
 	User         *User  `json:"user,omitempty"`
+}
+
+// ProvisionEvent represents a provisioning phase event.
+type ProvisionEvent struct {
+	ID         string          `json:"id"`
+	ResourceID string          `json:"resource_id"`
+	Phase      string          `json:"phase"`
+	Status     string          `json:"status"`
+	Message    string          `json:"message,omitempty"`
+	Metadata   json.RawMessage `json:"metadata,omitempty"`
+	CreatedAt  string          `json:"created_at"`
 }
 
 // Detection types
