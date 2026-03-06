@@ -2,6 +2,7 @@ package session
 
 import (
 	"encoding/json"
+	"os"
 	"testing"
 	"time"
 )
@@ -296,4 +297,129 @@ func searchSubstring(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestSendMessageAnonymousSender(t *testing.T) {
+	sm, err := NewSessionManager(t.TempDir())
+	if err != nil {
+		t.Fatalf("failed to create session manager: %v", err)
+	}
+
+	recipient := launchSleepSession(t, sm)
+
+	// fromID=0 should succeed (anonymous sender).
+	msgID, err := sm.SendMessage(0, recipient, "hello from anonymous")
+	if err != nil {
+		t.Fatalf("SendMessage with fromID=0 failed: %v", err)
+	}
+	if msgID == "" {
+		t.Fatal("expected non-empty message ID")
+	}
+
+	// Verify the message appears in the recipient's message log.
+	events, err := sm.ReadMessages(recipient, 0)
+	if err != nil {
+		t.Fatalf("ReadMessages failed: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 message in recipient log, got %d", len(events))
+	}
+
+	var dm DirectMessageData
+	if err := json.Unmarshal(events[0].Data, &dm); err != nil {
+		t.Fatalf("failed to unmarshal message data: %v", err)
+	}
+	if dm.Body != "hello from anonymous" {
+		t.Fatalf("expected body %q, got %q", "hello from anonymous", dm.Body)
+	}
+	if dm.From != 0 {
+		t.Fatalf("expected From=0, got %d", dm.From)
+	}
+}
+
+// launchCatSession launches a "cat" session and returns its ID.
+// cat echoes stdin to stdout, which gets captured in the PTY log.
+func launchCatSession(t *testing.T, sm *SessionManager) uint32 {
+	t.Helper()
+	id, err := sm.Launch([]string{"cat"}, "/tmp", nil, nil, "")
+	if err != nil {
+		t.Fatalf("failed to launch cat session: %v", err)
+	}
+	t.Cleanup(func() { _ = sm.Kill(id) })
+	time.Sleep(200 * time.Millisecond) // let PTY stabilize
+	return id
+}
+
+func TestDeliverDirectMessagePrompt(t *testing.T) {
+	sm, err := NewSessionManager(t.TempDir())
+	if err != nil {
+		t.Fatalf("failed to create session manager: %v", err)
+	}
+
+	recipient := launchCatSession(t, sm)
+	if err := sm.SetName(recipient, "worker"); err != nil {
+		t.Fatalf("SetName failed: %v", err)
+	}
+
+	err = sm.DeliverDirectMessagePrompt(recipient, "planner", 1, "start with auth module")
+	if err != nil {
+		t.Fatalf("DeliverDirectMessagePrompt failed: %v", err)
+	}
+
+	// Wait for cat to echo the prompt back through the PTY.
+	time.Sleep(500 * time.Millisecond)
+
+	logPath, err := sm.LogPath(recipient)
+	if err != nil {
+		t.Fatalf("LogPath failed: %v", err)
+	}
+	content, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("failed to read log: %v", err)
+	}
+
+	log := string(content)
+	if !containsSubstring(log, "Codewire message from planner") {
+		t.Fatalf("PTY log should contain prompt header, got: %q", log)
+	}
+	if !containsSubstring(log, "start with auth module") {
+		t.Fatalf("PTY log should contain message body, got: %q", log)
+	}
+}
+
+func TestDeliverRequestPrompt(t *testing.T) {
+	sm, err := NewSessionManager(t.TempDir())
+	if err != nil {
+		t.Fatalf("failed to create session manager: %v", err)
+	}
+
+	recipient := launchCatSession(t, sm)
+
+	err = sm.DeliverRequestPrompt(recipient, "req_123", "planner", 1, "ready for review?")
+	if err != nil {
+		t.Fatalf("DeliverRequestPrompt failed: %v", err)
+	}
+
+	// Wait for cat to echo the prompt back through the PTY.
+	time.Sleep(500 * time.Millisecond)
+
+	logPath, err := sm.LogPath(recipient)
+	if err != nil {
+		t.Fatalf("LogPath failed: %v", err)
+	}
+	content, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("failed to read log: %v", err)
+	}
+
+	log := string(content)
+	if !containsSubstring(log, "Codewire request req_123 from planner") {
+		t.Fatalf("PTY log should contain request header, got: %q", log)
+	}
+	if !containsSubstring(log, "ready for review?") {
+		t.Fatalf("PTY log should contain request body, got: %q", log)
+	}
+	if !containsSubstring(log, "cw reply req_123") {
+		t.Fatalf("PTY log should contain reply hint, got: %q", log)
+	}
 }

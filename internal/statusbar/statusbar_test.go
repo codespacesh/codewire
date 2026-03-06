@@ -24,14 +24,14 @@ func TestPtySizeFullWhenDisabled(t *testing.T) {
 	}
 }
 
-func TestSetupDrawsBarWithoutScrollRegion(t *testing.T) {
+func TestSetupSetsScrollRegionAndDrawsBar(t *testing.T) {
 	bar := New(1, 80, 24)
 	out := string(bar.Setup())
 	if strings.Contains(out, "\x1b[?1049h") {
 		t.Fatal("should not contain alt screen")
 	}
-	if strings.Contains(out, "\x1b[1;23r") {
-		t.Fatal("should not contain scroll region")
+	if !strings.Contains(out, "\x1b[1;23r") {
+		t.Fatal("should contain scroll region")
 	}
 	if !strings.Contains(out, "\x1b[7m") {
 		t.Fatal("should contain reverse video")
@@ -51,6 +51,7 @@ func TestTeardownExitsAltScreenAndClearsBar(t *testing.T) {
 		"\x1b[?1004l": "focus events disable",
 		"\x1b[?1000l": "mouse tracking disable",
 		"\x1b[?1006l": "SGR mouse disable",
+		"\x1b[r":      "scroll region reset",
 		"\x1b[24;1H":  "move to last row",
 		"\x1b[2K":     "clear line",
 	}

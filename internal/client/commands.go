@@ -385,9 +385,6 @@ func Attach(target *Target, id *uint32, noHistory bool) error {
 			switch fe.frame.Type {
 			case protocol.FrameData:
 				os.Stdout.Write(fe.frame.Payload)
-				if draw := bar.Draw(); draw != nil {
-					os.Stdout.Write(draw)
-				}
 			case protocol.FrameControl:
 				var ctrlResp protocol.Response
 				if err := json.Unmarshal(fe.frame.Payload, &ctrlResp); err != nil {
@@ -1239,12 +1236,13 @@ func KVDelete(target *Target, namespace, key string) error {
 // ---------------------------------------------------------------------------
 
 // Msg sends a direct message to a session.
-func Msg(target *Target, fromID *uint32, toID uint32, body string) error {
+func Msg(target *Target, fromID *uint32, toID uint32, body string, delivery string) error {
 	resp, err := requestResponse(target, &protocol.Request{
-		Type:  "MsgSend",
-		ID:    fromID,
-		ToID:  &toID,
-		Body:  body,
+		Type:     "MsgSend",
+		ID:       fromID,
+		ToID:     &toID,
+		Body:     body,
+		Delivery: delivery,
 	})
 	if err != nil {
 		return err
@@ -1313,7 +1311,7 @@ func Inbox(target *Target, sessionID uint32, tail int) error {
 
 // Request sends a request to a session and blocks until a reply arrives.
 // When rawOutput is true, only the reply body is printed (no "[reply from X]" prefix).
-func Request(target *Target, fromID *uint32, toID uint32, body string, timeout uint64, rawOutput bool) error {
+func Request(target *Target, fromID *uint32, toID uint32, body string, timeout uint64, rawOutput bool, delivery string) error {
 	reader, writer, err := target.Connect()
 	if err != nil {
 		return err
@@ -1327,6 +1325,7 @@ func Request(target *Target, fromID *uint32, toID uint32, body string, timeout u
 		ToID:           &toID,
 		Body:           body,
 		TimeoutSeconds: &timeout,
+		Delivery:       delivery,
 	}
 	if err := writer.SendRequest(req); err != nil {
 		return fmt.Errorf("sending request: %w", err)
@@ -1932,8 +1931,8 @@ func Hook(target *Target, r io.Reader, w io.Writer) (bool, error) {
 	reply := strings.TrimSpace(reqResp.ReplyBody)
 	upper := strings.ToUpper(reply)
 	if strings.HasPrefix(upper, "DENIED") {
-		reason := strings.TrimSpace(reply[6:])           // strip "DENIED"
-		reason = strings.TrimLeft(reason, ":, \t")       // strip leading punctuation
+		reason := strings.TrimSpace(reply[6:])     // strip "DENIED"
+		reason = strings.TrimLeft(reason, ":, \t") // strip leading punctuation
 		out := hookOutput{Decision: "block", Reason: "Gateway denied: " + reason}
 		if err := json.NewEncoder(w).Encode(out); err != nil {
 			return true, err

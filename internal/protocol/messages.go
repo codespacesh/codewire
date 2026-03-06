@@ -72,6 +72,7 @@ type Request struct {
 	ToName    string  `json:"to_name,omitempty"`
 	Body      string  `json:"body,omitempty"`
 	RequestID string  `json:"request_id,omitempty"`
+	Delivery  string  `json:"delivery,omitempty"`
 }
 
 // UnmarshalJSON implements custom JSON unmarshalling for Request.

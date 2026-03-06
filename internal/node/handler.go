@@ -785,6 +785,16 @@ func resolveRecipient(manager *session.SessionManager, toID *uint32, toName stri
 	return 0, fmt.Errorf("either to_id or to_name required")
 }
 
+// deliveryIncludesPTY returns true if the delivery mode includes PTY injection.
+func deliveryIncludesPTY(delivery string) bool {
+	return delivery == "pty" || delivery == "both"
+}
+
+// deliveryIncludesInbox returns true if the delivery mode includes inbox logging.
+func deliveryIncludesInbox(delivery string) bool {
+	return delivery == "" || delivery == "inbox" || delivery == "both"
+}
+
 // handleMsgSend processes a MsgSend request.
 func handleMsgSend(writer connection.FrameWriter, manager *session.SessionManager, req protocol.Request) {
 	toID, err := resolveRecipient(manager, req.ToID, req.ToName)
@@ -799,10 +809,23 @@ func handleMsgSend(writer connection.FrameWriter, manager *session.SessionManage
 		fromID = *req.ID
 	}
 
-	msgID, sendErr := manager.SendMessage(fromID, toID, req.Body)
-	if sendErr != nil {
-		_ = writer.SendResponse(&protocol.Response{Type: "Error", Message: sendErr.Error()})
-		return
+	var msgID string
+	if deliveryIncludesInbox(req.Delivery) {
+		msgID, err = manager.SendMessage(fromID, toID, req.Body)
+		if err != nil {
+			_ = writer.SendResponse(&protocol.Response{Type: "Error", Message: err.Error()})
+			return
+		}
+	} else {
+		msgID = fmt.Sprintf("msg_%d_%d_%d", fromID, toID, time.Now().UnixNano())
+	}
+
+	// Inject PTY prompt if delivery includes pty.
+	if deliveryIncludesPTY(req.Delivery) {
+		fromName := manager.GetName(fromID)
+		if ptyErr := manager.DeliverDirectMessagePrompt(toID, fromName, fromID, req.Body); ptyErr != nil {
+			slog.Warn("PTY injection failed for MsgSend", "to", toID, "err", ptyErr)
+		}
 	}
 
 	ts := time.Now().UTC().Format(time.RFC3339Nano)
@@ -927,10 +950,24 @@ func handleMsgRequest(
 		fromID = *req.ID
 	}
 
+	delivery := req.Delivery
+
 	requestID, replyCh, reqErr := manager.SendRequest(fromID, toID, req.Body)
 	if reqErr != nil {
 		_ = writer.SendResponse(&protocol.Response{Type: "Error", Message: reqErr.Error()})
 		return
+	}
+
+	// Inject PTY prompt if delivery includes pty.
+	if deliveryIncludesPTY(delivery) {
+		fromName := manager.GetName(fromID)
+		if ptyErr := manager.DeliverRequestPrompt(toID, requestID, fromName, fromID, req.Body); ptyErr != nil {
+			slog.Warn("PTY injection failed for MsgRequest", "to", toID, "err", ptyErr)
+			// Clean up pending request on PTY failure.
+			manager.CleanupRequest(requestID)
+			_ = writer.SendResponse(&protocol.Response{Type: "Error", Message: fmt.Sprintf("PTY injection failed: %v", ptyErr)})
+			return
+		}
 	}
 
 	timeoutSecs := 60

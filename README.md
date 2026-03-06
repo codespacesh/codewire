@@ -153,7 +153,7 @@ cw watch 1 --no-history         # Only new output
 cw watch 1 --timeout 60         # Auto-exit after 60 seconds
 ```
 
-### `cw msg <target> <body> [-f <session>]`
+### `cw msg <target> <body> [-f <session>] [--delivery auto|inbox|pty|both]`
 
 Send a direct message to a session. Target can be a session ID or name.
 
@@ -161,7 +161,15 @@ Send a direct message to a session. Target can be a session ID or name.
 cw msg coder "start with the auth module"              # by name
 cw msg 2 "start with the auth module"                  # by ID
 cw msg -f planner coder "start with the auth module"   # with sender
+cw msg --delivery pty coder "check this out"            # PTY injection only
+cw msg --delivery both coder "review please"            # inbox + PTY injection
 ```
+
+**Delivery modes:**
+- `inbox` — write to inbox/message log only (safe default for shell sessions)
+- `pty` — inject a formatted prompt into the recipient's PTY only
+- `both` — inbox logging + PTY injection
+- `auto` (default) — uses `both` when called from inside another cw session (`--from` or `CW_SESSION_ID` set), otherwise `inbox`
 
 ### `cw inbox <session> [-t <N>]`
 
@@ -172,7 +180,7 @@ cw inbox coder                # latest 50 messages
 cw inbox planner -t 10        # last 10 messages
 ```
 
-### `cw request <target> <body> [-f <session>] [--timeout <s>]`
+### `cw request <target> <body> [-f <session>] [--timeout <s>] [--delivery auto|inbox|pty|both]`
 
 Send a request to a session and block until a reply arrives. Like `msg` but synchronous — the caller waits for a response.
 
@@ -181,7 +189,10 @@ cw request -f planner coder "ready for review?"
 # [reply from coder] yes, PR #42 is up
 
 cw request coder "status?" --timeout 30    # 30s timeout (default: 60s)
+cw request --delivery both coder "need approval"  # inbox + PTY injection
 ```
+
+Uses the same delivery modes as `cw msg`. When `--delivery pty` or `both` is used, the recipient sees a formatted prompt in their terminal with a reply hint.
 
 ### `cw reply <request-id> <body> [-f <session>]`
 

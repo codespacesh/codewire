@@ -34,12 +34,18 @@ func (s *StatusBar) PtySize() (cols, rows uint16) {
 	return s.Cols, s.Rows
 }
 
-// Setup draws the initial status bar.
+// Setup sets the scroll region and draws the initial status bar.
 func (s *StatusBar) Setup() []byte {
 	if !s.Enabled {
 		return nil
 	}
-	return s.Draw()
+	var out []byte
+	// Set scroll region to rows 1..(Rows-1), protecting the last row for the bar.
+	out = append(out, fmt.Sprintf("\x1b[1;%dr", s.Rows-1)...)
+	// Move cursor to top-left of scroll region.
+	out = append(out, "\x1b[H"...)
+	out = append(out, s.Draw()...)
+	return out
 }
 
 // Teardown cleans up terminal state. Mode resets are ALWAYS emitted
@@ -61,6 +67,8 @@ func (s *StatusBar) Teardown() []byte {
 
 	// Bar-specific cleanup
 	if s.Enabled {
+		// Reset scroll region to full terminal.
+		out = append(out, "\x1b[r"...)
 		// Save cursor
 		out = append(out, "\x1b7"...)
 		// Move to status bar row and clear it
@@ -104,7 +112,7 @@ func (s *StatusBar) Draw() []byte {
 	return out
 }
 
-// Resize updates dimensions and redraws.
+// Resize updates dimensions, resets the scroll region, and redraws.
 func (s *StatusBar) Resize(cols, rows uint16) []byte {
 	s.Cols = cols
 	s.Rows = rows
@@ -112,7 +120,11 @@ func (s *StatusBar) Resize(cols, rows uint16) []byte {
 	if !s.Enabled {
 		return nil
 	}
-	return s.Draw()
+	var out []byte
+	// Update scroll region for new dimensions.
+	out = append(out, fmt.Sprintf("\x1b[1;%dr", s.Rows-1)...)
+	out = append(out, s.Draw()...)
+	return out
 }
 
 func formatDuration(secs uint64) string {

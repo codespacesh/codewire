@@ -1270,7 +1270,10 @@ func revokeCmd() *cobra.Command {
 // ---------------------------------------------------------------------------
 
 func msgCmd() *cobra.Command {
-	var from string
+	var (
+		from     string
+		delivery string
+	)
 
 	cmd := &cobra.Command{
 		Use:   "msg <target> <body>",
@@ -1308,13 +1311,27 @@ func msgCmd() *cobra.Command {
 				fromID = &resolved
 			}
 
-			return client.Msg(target, fromID, toID, args[1])
+			resolved := resolveDelivery(delivery, from)
+			return client.Msg(target, fromID, toID, args[1], resolved)
 		},
 	}
 
 	cmd.Flags().StringVarP(&from, "from", "f", "", "Sender session (ID or name)")
+	cmd.Flags().StringVar(&delivery, "delivery", "auto", "Delivery mode: auto|inbox|pty|both")
 
 	return cmd
+}
+
+// resolveDelivery resolves the "auto" delivery mode: if the sender is another
+// session (--from or CW_SESSION_ID), use "both" (inbox + PTY); otherwise "inbox".
+func resolveDelivery(delivery, from string) string {
+	if delivery != "auto" {
+		return delivery
+	}
+	if from != "" || os.Getenv("CW_SESSION_ID") != "" {
+		return "both"
+	}
+	return "inbox"
 }
 
 // ---------------------------------------------------------------------------
@@ -1404,6 +1421,7 @@ func requestCmd() *cobra.Command {
 		from      string
 		timeout   uint64
 		rawOutput bool
+		delivery  string
 	)
 
 	cmd := &cobra.Command{
@@ -1442,13 +1460,15 @@ func requestCmd() *cobra.Command {
 				fromID = &resolved
 			}
 
-			return client.Request(target, fromID, toID, args[1], timeout, rawOutput)
+			resolved := resolveDelivery(delivery, from)
+			return client.Request(target, fromID, toID, args[1], timeout, rawOutput, resolved)
 		},
 	}
 
 	cmd.Flags().StringVarP(&from, "from", "f", "", "Sender session (ID or name)")
 	cmd.Flags().Uint64Var(&timeout, "timeout", 60, "Timeout in seconds")
 	cmd.Flags().BoolVar(&rawOutput, "raw", false, "Print only the reply body without prefix")
+	cmd.Flags().StringVar(&delivery, "delivery", "auto", "Delivery mode: auto|inbox|pty|both")
 
 	return cmd
 }
@@ -1461,7 +1481,7 @@ func replyCmd() *cobra.Command {
 	var from string
 
 	cmd := &cobra.Command{
-		Use:  "reply <request-id> <body>",
+		Use:   "reply <request-id> <body>",
 		Short: "Reply to a pending request",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {

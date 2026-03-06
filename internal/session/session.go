@@ -355,13 +355,14 @@ func (m *SessionManager) GetName(id uint32) string {
 
 // SendMessage sends a direct message from one session to another, recording it
 // in both sessions' message logs and publishing it via the SubscriptionManager.
+// fromID=0 is allowed (anonymous caller, e.g. CLI or gateway hook).
 func (m *SessionManager) SendMessage(fromID, toID uint32, body string) (string, error) {
 	m.mu.RLock()
 	fromSess, fromOK := m.sessions[fromID]
 	toSess, toOK := m.sessions[toID]
 	m.mu.RUnlock()
 
-	if !fromOK {
+	if !fromOK && fromID != 0 {
 		return "", fmt.Errorf("sender session %d not found", fromID)
 	}
 	if !toOK {
@@ -370,9 +371,12 @@ func (m *SessionManager) SendMessage(fromID, toID uint32, body string) (string, 
 
 	msgID := fmt.Sprintf("msg_%d_%d_%d", fromID, toID, time.Now().UnixNano())
 
-	fromSess.mu.Lock()
-	fromName := fromSess.Meta.Name
-	fromSess.mu.Unlock()
+	var fromName string
+	if fromOK {
+		fromSess.mu.Lock()
+		fromName = fromSess.Meta.Name
+		fromSess.mu.Unlock()
+	}
 
 	toSess.mu.Lock()
 	toName := toSess.Meta.Name
@@ -389,7 +393,7 @@ func (m *SessionManager) SendMessage(fromID, toID uint32, body string) (string, 
 	event := NewDirectMessageEvent(msgData)
 
 	// Write to both sessions' message logs.
-	if fromSess.messageLog != nil {
+	if fromOK && fromSess.messageLog != nil {
 		fromSess.messageLog.Append(event)
 	}
 	if toSess.messageLog != nil {
@@ -399,7 +403,7 @@ func (m *SessionManager) SendMessage(fromID, toID uint32, body string) (string, 
 	// Publish to subscriptions (on the recipient's session ID).
 	m.Subscriptions.Publish(toID, toSess.Meta.Tags, event)
 	// Also publish on sender so listen can see sent messages.
-	if fromID != toID {
+	if fromOK && fromID != toID {
 		m.Subscriptions.Publish(fromID, fromSess.Meta.Tags, event)
 	}
 
@@ -535,6 +539,40 @@ func (m *SessionManager) CleanupRequest(requestID string) {
 	m.pendingRequestsMu.Lock()
 	delete(m.pendingRequests, requestID)
 	m.pendingRequestsMu.Unlock()
+}
+
+// FormatDirectMessagePrompt formats a PTY-injectable prompt for a direct message.
+func FormatDirectMessagePrompt(fromName string, fromID uint32, body string) string {
+	sender := fromName
+	if sender == "" {
+		sender = fmt.Sprintf("session-%d", fromID)
+	}
+	return fmt.Sprintf("\n[Codewire message from %s]\n%s\n\n", sender, body)
+}
+
+// FormatRequestPrompt formats a PTY-injectable prompt for a request message.
+func FormatRequestPrompt(requestID string, fromName string, fromID uint32, body string) string {
+	sender := fromName
+	if sender == "" {
+		sender = fmt.Sprintf("session-%d", fromID)
+	}
+	return fmt.Sprintf("\n[Codewire request %s from %s]\n%s\n\nReply with: cw reply %s \"<response>\"\n\n", requestID, sender, body, requestID)
+}
+
+// DeliverDirectMessagePrompt injects a formatted direct-message prompt into a
+// session's PTY via SendInput.
+func (m *SessionManager) DeliverDirectMessagePrompt(toID uint32, fromName string, fromID uint32, body string) error {
+	prompt := FormatDirectMessagePrompt(fromName, fromID, body)
+	_, err := m.SendInput(toID, []byte(prompt))
+	return err
+}
+
+// DeliverRequestPrompt injects a formatted request prompt into a session's PTY
+// via SendInput.
+func (m *SessionManager) DeliverRequestPrompt(toID uint32, requestID string, fromName string, fromID uint32, body string) error {
+	prompt := FormatRequestPrompt(requestID, fromName, fromID, body)
+	_, err := m.SendInput(toID, []byte(prompt))
+	return err
 }
 
 // triggerPersist sends a non-blocking signal on PersistCh.
