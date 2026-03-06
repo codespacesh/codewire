@@ -126,6 +126,35 @@ jobs:
           VERSION=${GITHUB_REF_NAME#v}
           helm push codewire-relay-${VERSION}.tgz oci://ghcr.io/codewiresh
 
+  relay-image:
+    name: Build & Push Relay Image
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push relay image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            VERSION=${{ github.ref_name }}
+          tags: |
+            ghcr.io/codewiresh/codewire:${{ github.ref_name }}
+            ghcr.io/codewiresh/codewire:latest
+
   operator-image:
     name: Build & Push Operator Image
     needs: release
