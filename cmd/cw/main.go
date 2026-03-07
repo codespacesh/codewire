@@ -104,6 +104,8 @@ func main() {
 		costCmd(),
 		billingCmd(),
 		githubCmd(),
+		envParentCmd(),
+		tmplParentCmd(),
 		// Workspaces
 		launchCmd(),
 		openCmd(),
