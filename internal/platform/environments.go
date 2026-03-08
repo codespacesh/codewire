@@ -126,6 +126,23 @@ func (c *Client) UploadFile(orgID, envID, path string, data io.Reader) error {
 	return nil
 }
 
+func (c *Client) LookupRepoConfig(orgID, repoURL string) (*RepoConfig, error) {
+	var rc RepoConfig
+	if err := c.do("GET", fmt.Sprintf("/api/v1/organizations/%s/repo-configs/lookup?repo_url=%s", orgID, repoURL), nil, &rc); err != nil {
+		return nil, err
+	}
+	return &rc, nil
+}
+
+func (c *Client) SaveRepoConfig(orgID string, repoURL, templateID string, setupConfig map[string]any) error {
+	body := map[string]any{
+		"repo_url":     repoURL,
+		"template_id":  templateID,
+		"setup_config": setupConfig,
+	}
+	return c.do("PUT", fmt.Sprintf("/api/v1/organizations/%s/repo-configs", orgID), body, nil)
+}
+
 func (c *Client) DownloadFile(orgID, envID, path string) (io.ReadCloser, error) {
 	url := fmt.Sprintf("%s/api/v1/organizations/%s/environments/%s/files/download?path=%s",
 		c.ServerURL, orgID, envID, path)

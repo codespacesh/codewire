@@ -117,12 +117,12 @@ func launchCmd() *cobra.Command {
 						fmt.Printf("  Script:   %s (+%d lines)\n", lines[0], len(lines)-1)
 					}
 				}
-				if len(detection.Services) > 0 {
-					var svcParts []string
-					for _, s := range detection.Services {
-						svcParts = append(svcParts, fmt.Sprintf("%s:%d", s.Name, s.Port))
+				if len(detection.AppPorts) > 0 {
+					var portParts []string
+					for _, p := range detection.AppPorts {
+						portParts = append(portParts, fmt.Sprintf("%s:%d", p.Label, p.Port))
 					}
-					fmt.Printf("  Services: %s\n", strings.Join(svcParts, ", "))
+					fmt.Printf("  Ports:    %s\n", strings.Join(portParts, ", "))
 				}
 				if detection.SetupNotes != "" {
 					fmt.Printf("  Notes:    %s\n", detection.SetupNotes)

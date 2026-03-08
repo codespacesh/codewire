@@ -9,8 +9,14 @@ import (
 
 	"github.com/spf13/cobra"
 
+	cwconfig "github.com/codewiresh/codewire/internal/config"
 	"github.com/codewiresh/codewire/internal/platform"
 )
+
+// loadCodewireYAML is a convenience wrapper around config.LoadCodewireConfig.
+func loadCodewireYAML(path string) (*cwconfig.CodewireConfig, error) {
+	return cwconfig.LoadCodewireConfig(path)
+}
 
 func envParentCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -65,19 +71,21 @@ func timeAgo(s string) string {
 
 func envCreateCmd() *cobra.Command {
 	var (
-		templateID string
-		name       string
-		ttl        string
-		cpu        int
-		memory     int
-		disk       int
-		repoURL    string
-		branch     string
-		image      string
-		install    string
-		startup    string
-		agent      string
-		envVars    []string
+		templateSlug   string
+		templateID     string
+		name           string
+		ttl            string
+		cpu            int
+		memory         int
+		disk           int
+		repoURL        string
+		branch         string
+		image          string
+		install        string
+		startup        string
+		agent          string
+		envVars        []string
+		secretProject  string
 	)
 
 	cmd := &cobra.Command{
@@ -87,9 +95,9 @@ func envCreateCmd() *cobra.Command {
 
 Examples:
   cw env create https://github.com/foo/bar
-  cw env create --image python:3.12
-  cw env create --image node:20 --repo https://github.com/foo/bar
-  cw env create --template <id>`,
+  cw env create --template go --name my-env
+  cw env create --image go --name my-env
+  cw env create --secrets my-project https://github.com/foo/bar`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Positional arg is repo URL.
@@ -97,8 +105,50 @@ Examples:
 				repoURL = args[0]
 			}
 
-			if templateID == "" && image == "" && repoURL == "" {
-				return fmt.Errorf("provide a repo URL, --image, or --template")
+			// 0-arg support: look for ./codewire.yaml
+			if templateSlug == "" && templateID == "" && image == "" && repoURL == "" {
+				cfg, err := loadCodewireYAML("codewire.yaml")
+				if err == nil {
+					fmt.Println("Using ./codewire.yaml")
+					if cfg.Template != "" && templateSlug == "" {
+						templateSlug = cfg.Template
+					}
+					if cfg.Install != "" && install == "" {
+						install = cfg.Install
+					}
+					if cfg.Startup != "" && startup == "" {
+						startup = cfg.Startup
+					}
+					if cfg.Secrets != "" && secretProject == "" {
+						secretProject = cfg.Secrets
+					}
+					if cfg.Agent != "" && agent == "" {
+						agent = cfg.Agent
+					}
+					if cfg.CPU > 0 && cpu == 0 {
+						cpu = cfg.CPU
+					}
+					if cfg.Memory > 0 && memory == 0 {
+						memory = cfg.Memory
+					}
+					if cfg.Disk > 0 && disk == 0 {
+						disk = cfg.Disk
+					}
+					for k, v := range cfg.Env {
+						envVars = append(envVars, k+"="+v)
+					}
+				} else {
+					// No codewire.yaml — try to infer repo URL from git remote.
+				if url, b, err := detectLocalRepo("."); err == nil && url != "" {
+					repoURL = url
+					if branch == "" {
+						branch = b
+					}
+					fmt.Printf("Using repo: %s\n", repoURL)
+				} else {
+					return fmt.Errorf("provide a repo URL, --image, or --template")
+				}
+				}
 			}
 
 			orgID, client, err := getDefaultOrg()
@@ -116,15 +166,22 @@ Examples:
 				parsedEnvVars[parts[0]] = parts[1]
 			}
 
+			// Image shorthand: if no slash, resolve to workspace image.
+			if image != "" && !strings.Contains(image, "/") {
+				image = "ghcr.io/codewiresh/workspace-" + image + ":latest"
+			}
+
 			req := &platform.CreateEnvironmentRequest{
-				TemplateID: templateID,
-				Name:       name,
-				RepoURL:    repoURL,
-				Branch:     branch,
-				Image:      image,
+				TemplateID:     templateID,
+				TemplateSlug:   templateSlug,
+				Name:           name,
+				RepoURL:        repoURL,
+				Branch:         branch,
+				Image:          image,
 				InstallCommand: install,
 				StartupScript:  startup,
-				Agent:      agent,
+				Agent:          agent,
+				SecretProject:  secretProject,
 			}
 			if len(parsedEnvVars) > 0 {
 				req.EnvVars = parsedEnvVars
@@ -177,7 +234,8 @@ Examples:
 		},
 	}
 
-	cmd.Flags().StringVar(&templateID, "template", "", "Template ID")
+	cmd.Flags().StringVar(&templateSlug, "template", "", "Template slug (e.g. go, node, python)")
+	cmd.Flags().StringVar(&templateID, "template-id", "", "Template ID (exact)")
 	cmd.Flags().StringVar(&name, "name", "", "Environment name")
 	cmd.Flags().StringVar(&ttl, "ttl", "", "Time to live (e.g. 1h, 30m)")
 	cmd.Flags().IntVar(&cpu, "cpu", 0, "CPU in millicores")
@@ -185,11 +243,12 @@ Examples:
 	cmd.Flags().IntVar(&disk, "disk", 0, "Disk in GB")
 	cmd.Flags().StringVar(&repoURL, "repo", "", "Git repo URL")
 	cmd.Flags().StringVar(&branch, "branch", "", "Branch to checkout")
-	cmd.Flags().StringVar(&image, "image", "", "Container image")
+	cmd.Flags().StringVar(&image, "image", "", "Container image (shorthand: go → workspace-go)")
 	cmd.Flags().StringVar(&install, "install", "", "Install command")
 	cmd.Flags().StringVar(&startup, "startup", "", "Startup script")
 	cmd.Flags().StringVar(&agent, "agent", "", "AI agent (claude-code)")
 	cmd.Flags().StringSliceVar(&envVars, "env", nil, "Env vars (KEY=val)")
+	cmd.Flags().StringVar(&secretProject, "secrets", "", "Secret project to bind")
 	return cmd
 }
 
@@ -370,3 +429,4 @@ func envRmCmd() *cobra.Command {
 		},
 	}
 }
+

@@ -213,24 +213,25 @@ type ProvisionEvent struct {
 // Detection types
 
 type DetectionResult struct {
-	ProjectType    string              `json:"project_type"`
-	TemplateImage  string              `json:"template_image"`
-	InstallCommand string              `json:"install_command"`
-	StartupScript  string              `json:"startup_script"`
-	Language       string              `json:"language"`
-	Framework      string              `json:"framework"`
-	SuggestedName  string              `json:"suggested_name"`
-	NeedsDocker    bool                `json:"needs_docker"`
-	HasCompose     bool                `json:"has_compose"`
-	Services       []ServiceDefinition `json:"services"`
-	CPU            string              `json:"cpu"`
-	Memory         string              `json:"memory"`
-	SetupNotes     string              `json:"setup_notes"`
+	ProjectType    string    `json:"project_type"`
+	TemplateSlug   string    `json:"template_slug"`
+	TemplateImage  string    `json:"template_image"`
+	InstallCommand string    `json:"install_command"`
+	StartupScript  string    `json:"startup_script"`
+	Language       string    `json:"language"`
+	Framework      string    `json:"framework"`
+	SuggestedName  string    `json:"suggested_name"`
+	NeedsDocker    bool      `json:"needs_docker"`
+	HasCompose     bool      `json:"has_compose"`
+	AppPorts       []AppPort `json:"app_ports"`
+	CPU            string    `json:"cpu"`
+	Memory         string    `json:"memory"`
+	SetupNotes     string    `json:"setup_notes"`
 }
 
-type ServiceDefinition struct {
-	Name string `json:"name"`
-	Port int    `json:"port"`
+type AppPort struct {
+	Port  int    `json:"port"`
+	Label string `json:"label"`
 }
 
 // API error
@@ -281,6 +282,9 @@ type EnvironmentTemplate struct {
 	OrgID                string  `json:"org_id"`
 	Type                 string  `json:"type"`
 	Name                 string  `json:"name"`
+	Slug                 *string `json:"slug,omitempty"`
+	Language             *string `json:"language,omitempty"`
+	Official             bool    `json:"official"`
 	Description          *string `json:"description,omitempty"`
 	BuildStatus          string  `json:"build_status"`
 	BuildError           *string `json:"build_error,omitempty"`
@@ -293,6 +297,7 @@ type EnvironmentTemplate struct {
 
 type CreateEnvironmentRequest struct {
 	TemplateID     string            `json:"template_id,omitempty"`
+	TemplateSlug   string            `json:"template_slug,omitempty"`
 	Name           string            `json:"name,omitempty"`
 	CPUMillicores  *int              `json:"cpu_millicores,omitempty"`
 	MemoryMB       *int              `json:"memory_mb,omitempty"`
@@ -321,12 +326,27 @@ type SecretProject struct {
 type CreateTemplateRequest struct {
 	Type                 string `json:"type"`
 	Name                 string `json:"name"`
+	Slug                 string `json:"slug,omitempty"`
 	Description          string `json:"description,omitempty"`
 	DefaultCPUMillicores *int   `json:"default_cpu_millicores,omitempty"`
 	DefaultMemoryMB      *int   `json:"default_memory_mb,omitempty"`
 	DefaultDiskGB        *int   `json:"default_disk_gb,omitempty"`
 	DefaultTTLSeconds    *int   `json:"default_ttl_seconds,omitempty"`
 	Image                string `json:"image,omitempty"`
+	InstallCommand       string `json:"install_command,omitempty"`
+	StartupScript        string `json:"startup_script,omitempty"`
+	SecretProject        string `json:"secret_project,omitempty"`
+}
+
+// RepoConfig represents a saved detection result for a repo URL.
+type RepoConfig struct {
+	ID          string          `json:"id"`
+	OrgID       string          `json:"org_id"`
+	RepoURL     string          `json:"repo_url"`
+	TemplateID  *string         `json:"template_id,omitempty"`
+	SetupConfig json.RawMessage `json:"setup_config"`
+	CreatedBy   string          `json:"created_by"`
+	UpdatedAt   string          `json:"updated_at"`
 }
 
 type StatusResponse struct {

@@ -11,7 +11,7 @@ import (
 
 func TestDetectRepo(t *testing.T) {
 	expected := DetectionResult{
-		TemplateImage:  "ghcr.io/codespacesh/dind:latest",
+		TemplateImage:  "ghcr.io/codewiresh/workspace-node:latest",
 		InstallCommand: "npm install",
 		StartupScript:  "npm run build",
 		Language:       "typescript",
@@ -19,7 +19,7 @@ func TestDetectRepo(t *testing.T) {
 		SuggestedName:  "my-app",
 		NeedsDocker:    true,
 		HasCompose:     false,
-		Services:       []ServiceDefinition{{Name: "web", Port: 3000}},
+		AppPorts:       []AppPort{{Label: "web", Port: 3000}},
 		CPU:            "4",
 		Memory:         "8",
 		SetupNotes:     "Next.js app",
@@ -90,11 +90,11 @@ func TestDetectRepo(t *testing.T) {
 	if result.HasCompose {
 		t.Error("HasCompose = true, want false")
 	}
-	if len(result.Services) != 1 {
-		t.Fatalf("Services len = %d, want 1", len(result.Services))
+	if len(result.AppPorts) != 1 {
+		t.Fatalf("AppPorts len = %d, want 1", len(result.AppPorts))
 	}
-	if result.Services[0].Name != "web" || result.Services[0].Port != 3000 {
-		t.Errorf("Services[0] = %+v, want {web 3000}", result.Services[0])
+	if result.AppPorts[0].Label != "web" || result.AppPorts[0].Port != 3000 {
+		t.Errorf("AppPorts[0] = %+v, want {web 3000}", result.AppPorts[0])
 	}
 	if result.CPU != "4" {
 		t.Errorf("CPU = %q, want 4", result.CPU)
