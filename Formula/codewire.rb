@@ -8,20 +8,20 @@ class Codewire < Formula
   on_macos do
     if Hardware::CPU.arm?
       url "https://github.com/codewiresh/codewire/releases/download/v#{version}/cw-v#{version}-aarch64-apple-darwin"
-      sha256 "72153aea627f27d2facb4a5aaa98b0268b29b7dff5f01676300bb0a450a18996"
+      sha256 "9b8fe9576e9386c1949c55326d357833c5f998b82a96db08517cb0f50773e014"
     else
       url "https://github.com/codewiresh/codewire/releases/download/v#{version}/cw-v#{version}-x86_64-apple-darwin"
-      sha256 "34045aee5291b95e42a223c9d91ff419f801918cb43420bab262ffcbc7279bdc"
+      sha256 "e8ee6255774cda2773a152993ab4802bef573e66e92cca4726bc20a7e674c600"
     end
   end
 
   on_linux do
     if Hardware::CPU.arm?
       url "https://github.com/codewiresh/codewire/releases/download/v#{version}/cw-v#{version}-aarch64-unknown-linux-gnu"
-      sha256 "6ae24ccfda0213daffed47033a94c6a651e6102686983403911633a4e2f7e1b7"
+      sha256 "0aea2f1d1feb259a480f70ee4efe8c733632c7ef82cc1eb5eb0a770a22d2874f"
     else
       url "https://github.com/codewiresh/codewire/releases/download/v#{version}/cw-v#{version}-x86_64-unknown-linux-musl"
-      sha256 "c8d1a89c17b61786fabf4005b3ecf7f3e3acf620df8ddee580e0795d83d31fa5"
+      sha256 "266a6a2e226a488033d29c2638ae08a28209f2e70e19c2e139f0a6a6bef026da"
     end
   end
 
