@@ -26,7 +26,7 @@ func githubLoginCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client, err := platform.NewClient()
 			if err != nil {
-				return err
+				return fmt.Errorf("not logged in — run 'cw setup' first to connect to Codewire")
 			}
 			return setupGitHub(client)
 		},
@@ -40,7 +40,7 @@ func githubLogoutCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client, err := platform.NewClient()
 			if err != nil {
-				return err
+				return fmt.Errorf("not logged in — run 'cw setup' first to connect to Codewire")
 			}
 			if err := client.DisconnectGitHub(); err != nil {
 				return fmt.Errorf("disconnect github: %w", err)
@@ -58,7 +58,7 @@ func githubStatusCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client, err := platform.NewClient()
 			if err != nil {
-				return err
+				return fmt.Errorf("not logged in — run 'cw setup' first to connect to Codewire")
 			}
 			status, err := client.GetGitHubStatus()
 			if err != nil {
