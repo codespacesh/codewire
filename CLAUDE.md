@@ -80,6 +80,10 @@ git push origin v0.X.Y
 
 GitHub Actions builds binaries, creates the release, and updates `Formula/codewire.rb`.
 
+## Git Remotes
+
+`origin` has two push URLs (GitHub + Gitea). CI auto-commits brew formula updates to `main` on GitHub, which can cause GitHub to be ahead of local. Always `git pull --rebase` before pushing to avoid rejected pushes. If Gitea diverges, force push to Gitea (`git push gitea main --force`) — GitHub is the primary remote.
+
 ## Key Architecture
 
 - **Wire protocol**: `[type:u8][length:u32 BE][payload]` — type 0x00 = Control (JSON), 0x01 = Data (raw bytes)
