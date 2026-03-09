@@ -170,14 +170,26 @@ func (c *Client) do(method, path string, body any, result any) error {
 	}
 
 	if resp.StatusCode == http.StatusUnauthorized {
+		var apiErr APIError
+		if json.Unmarshal(respBody, &apiErr) == nil && apiErr.Code != "" && apiErr.Code != "session_expired" {
+			apiErr.Status = resp.StatusCode
+			return &apiErr
+		}
 		return ErrUnauthorized
 	}
 
 	if resp.StatusCode >= 400 {
 		var apiErr APIError
-		if json.Unmarshal(respBody, &apiErr) == nil && apiErr.Title != "" {
+		if json.Unmarshal(respBody, &apiErr) == nil && (apiErr.Title != "" || apiErr.Code != "") {
 			apiErr.Status = resp.StatusCode
 			return &apiErr
+		}
+		// Try old-format {"error":"..."} responses.
+		var oldErr struct {
+			Error string `json:"error"`
+		}
+		if json.Unmarshal(respBody, &oldErr) == nil && oldErr.Error != "" {
+			return &APIError{Status: resp.StatusCode, Title: oldErr.Error}
 		}
 		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBody))
 	}

@@ -237,17 +237,23 @@ type AppPort struct {
 // API error
 
 type APIError struct {
-	Status  int      `json:"status"`
-	Title   string   `json:"title"`
-	Detail  string   `json:"detail,omitempty"`
-	Errors  []string `json:"errors,omitempty"`
+	Status int      `json:"status"`
+	Title  string   `json:"title"`
+	Detail string   `json:"detail,omitempty"`
+	Errors []string `json:"errors,omitempty"`
+	Code   string   `json:"code,omitempty"`
+	Hint   string   `json:"hint,omitempty"`
 }
 
 func (e *APIError) Error() string {
-	if e.Detail != "" {
-		return e.Detail
+	msg := e.Detail
+	if msg == "" {
+		msg = e.Title
 	}
-	return e.Title
+	if e.Hint != "" {
+		msg += "\nHint: " + e.Hint
+	}
+	return msg
 }
 
 // Environment types
