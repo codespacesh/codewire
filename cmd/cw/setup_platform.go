@@ -20,12 +20,41 @@ func platformSetupCmd() *cobra.Command {
 			fmt.Println("Welcome to Codewire!")
 			fmt.Println()
 
-			// [1/5] Server URL
+			// Check existing config
 			defaultURL := "https://codewire.sh"
 			if existing, err := platform.LoadConfig(); err == nil {
 				defaultURL = existing.ServerURL
+				fmt.Println("Current configuration:")
+				fmt.Printf("  Server:   %s\n", existing.ServerURL)
+
+				// Try to fetch org/resource details
+				c := platform.NewClientWithURL(existing.ServerURL)
+				c.SessionToken = existing.SessionToken
+				if orgs, err := c.ListOrgs(); err == nil {
+					for _, org := range orgs {
+						if org.ID == existing.DefaultOrg {
+							fmt.Printf("  Org:      %s\n", org.Name)
+							for _, r := range org.Resources {
+								if r.ID == existing.DefaultResource {
+									fmt.Printf("  Resource: %s (%s)\n", r.Name, r.Status)
+								}
+							}
+						}
+					}
+				}
+
+				fmt.Println()
+				ok, err := promptConfirm("Run setup again? [y/N]")
+				if err != nil {
+					return err
+				}
+				if !ok {
+					return nil
+				}
+				fmt.Println()
 			}
 
+			// [1/5] Server URL
 			serverURL, err := promptDefault("[1/5] Server URL", defaultURL)
 			if err != nil {
 				return err

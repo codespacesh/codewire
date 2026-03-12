@@ -175,7 +175,9 @@ Examples:
 			}
 
 			// Image shorthand: if no slash, resolve to workspace image.
+			// Strip "workspace-" prefix if user provided it (e.g. "workspace-full" → "full").
 			if image != "" && !strings.Contains(image, "/") {
+				image = strings.TrimPrefix(image, "workspace-")
 				image = "ghcr.io/codewiresh/workspace-" + image + ":latest"
 			}
 
