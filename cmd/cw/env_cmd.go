@@ -34,6 +34,8 @@ func envParentCmd() *cobra.Command {
 	cmd.AddCommand(envSSHCmd())
 	cmd.AddCommand(envCpCmd())
 	cmd.AddCommand(envPruneCmd())
+	cmd.AddCommand(envNukeCmd())
+	cmd.AddCommand(envLogsCmd())
 	return cmd
 }
 
@@ -69,6 +71,65 @@ func getDefaultOrg() (string, *platform.Client, error) {
 		return "", nil, fmt.Errorf("no default org set. Run 'cw login' and set a default org")
 	}
 	return cfg.DefaultOrg, client, nil
+}
+
+func resolveEnvID(client *platform.Client, orgID, ref string) (string, error) {
+	// Fast path: if it looks like a UUID, try direct lookup.
+	if len(ref) >= 36 && strings.Contains(ref, "-") {
+		if _, err := client.GetEnvironment(orgID, ref); err == nil {
+			return ref, nil
+		}
+	}
+
+	// Name lookup: list all and filter by name.
+	envs, err := client.ListEnvironments(orgID, "", "", false)
+	if err != nil {
+		return "", fmt.Errorf("list environments: %w", err)
+	}
+
+	var matches []platform.Environment
+	for _, e := range envs {
+		if e.Name != nil && *e.Name == ref {
+			matches = append(matches, e)
+		}
+	}
+
+	switch len(matches) {
+	case 1:
+		return matches[0].ID, nil
+	case 0:
+		return "", fmt.Errorf("environment %q not found", ref)
+	default:
+		ids := make([]string, len(matches))
+		for i, m := range matches {
+			ids[i] = m.ID
+		}
+		return "", fmt.Errorf("multiple environments named %q, use ID: %s", ref, strings.Join(ids, ", "))
+	}
+}
+
+func envCompletionFunc(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	orgID, client, err := getDefaultOrg()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	envs, err := client.ListEnvironments(orgID, "", "", false)
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	seen := make(map[string]bool)
+	var completions []string
+	// Names first (preferred), then IDs.
+	for _, e := range envs {
+		if e.Name != nil && *e.Name != "" && !seen[*e.Name] {
+			seen[*e.Name] = true
+			completions = append(completions, *e.Name)
+		}
+	}
+	for _, e := range envs {
+		completions = append(completions, e.ID)
+	}
+	return completions, cobra.ShellCompDirectiveNoFileComp
 }
 
 func timeAgo(s string) string {
@@ -108,6 +169,7 @@ func envCreateCmd() *cobra.Command {
 		secretProject  string
 		noOrgSecrets   bool
 		noUserSecrets  bool
+		follow         bool
 	)
 
 	cmd := &cobra.Command{
@@ -295,6 +357,13 @@ Examples:
 			fmt.Printf("  CPU:   %dm\n", env.CPUMillicores)
 			fmt.Printf("  Mem:   %dMB\n", env.MemoryMB)
 			fmt.Printf("  Disk:  %dGB\n", env.DiskGB)
+
+			if follow {
+				fmt.Println()
+				if err := followEnvironmentLogs(client, orgID, env.ID); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: could not follow logs: %v\n", err)
+				}
+			}
 			return nil
 		},
 	}
@@ -316,6 +385,7 @@ Examples:
 	cmd.Flags().StringVar(&secretProject, "secrets", "", "Secret project to bind")
 	cmd.Flags().BoolVar(&noOrgSecrets, "no-org-secrets", false, "Don't inject org-level secrets")
 	cmd.Flags().BoolVar(&noUserSecrets, "no-user-secrets", false, "Don't inject user-level secrets")
+	cmd.Flags().BoolVarP(&follow, "follow", "f", false, "Follow startup logs after creation")
 	return cmd
 }
 
@@ -384,16 +454,22 @@ func envListCmd() *cobra.Command {
 
 func envInfoCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "info <id>",
-		Short: "Show environment details",
-		Args:  cobra.ExactArgs(1),
+		Use:               "info <id-or-name>",
+		Short:             "Show environment details",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: envCompletionFunc,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			orgID, client, err := getDefaultOrg()
 			if err != nil {
 				return err
 			}
 
-			env, err := client.GetEnvironment(orgID, args[0])
+			envID, err := resolveEnvID(client, orgID, args[0])
+			if err != nil {
+				return err
+			}
+
+			env, err := client.GetEnvironment(orgID, envID)
 			if err != nil {
 				return fmt.Errorf("get environment: %w", err)
 			}
@@ -438,16 +514,22 @@ func envInfoCmd() *cobra.Command {
 
 func envStopCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "stop <id>",
-		Short: "Stop an environment",
-		Args:  cobra.ExactArgs(1),
+		Use:               "stop <id-or-name>",
+		Short:             "Stop an environment",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: envCompletionFunc,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			orgID, client, err := getDefaultOrg()
 			if err != nil {
 				return err
 			}
 
-			resp, err := client.StopEnvironment(orgID, args[0])
+			envID, err := resolveEnvID(client, orgID, args[0])
+			if err != nil {
+				return err
+			}
+
+			resp, err := client.StopEnvironment(orgID, envID)
 			if err != nil {
 				return fmt.Errorf("stop environment: %w", err)
 			}
@@ -459,16 +541,22 @@ func envStopCmd() *cobra.Command {
 
 func envStartCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "start <id>",
-		Short: "Start an environment",
-		Args:  cobra.ExactArgs(1),
+		Use:               "start <id-or-name>",
+		Short:             "Start an environment",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: envCompletionFunc,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			orgID, client, err := getDefaultOrg()
 			if err != nil {
 				return err
 			}
 
-			resp, err := client.StartEnvironment(orgID, args[0])
+			envID, err := resolveEnvID(client, orgID, args[0])
+			if err != nil {
+				return err
+			}
+
+			resp, err := client.StartEnvironment(orgID, envID)
 			if err != nil {
 				return fmt.Errorf("start environment: %w", err)
 			}
@@ -480,17 +568,23 @@ func envStartCmd() *cobra.Command {
 
 func envRmCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:     "rm <id>",
-		Short:   "Delete an environment",
-		Aliases: []string{"delete"},
-		Args:    cobra.ExactArgs(1),
+		Use:               "rm <id-or-name>",
+		Short:             "Delete an environment",
+		Aliases:           []string{"delete"},
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: envCompletionFunc,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			orgID, client, err := getDefaultOrg()
 			if err != nil {
 				return err
 			}
 
-			if err := client.DeleteEnvironment(orgID, args[0]); err != nil {
+			envID, err := resolveEnvID(client, orgID, args[0])
+			if err != nil {
+				return err
+			}
+
+			if err := client.DeleteEnvironment(orgID, envID); err != nil {
 				return fmt.Errorf("delete environment: %w", err)
 			}
 			fmt.Printf("Environment %s deleted.\n", args[0])
@@ -592,6 +686,159 @@ func envPruneCmd() *cobra.Command {
 	cmd.Flags().StringVar(&state, "state", "error,creating,pending", "Comma-separated states to prune")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be pruned without deleting")
 	return cmd
+}
+
+func envNukeCmd() *cobra.Command {
+	var yes bool
+
+	cmd := &cobra.Command{
+		Use:   "nuke",
+		Short: "Delete ALL environments",
+		Long:  "Delete every environment in the current org. Requires typed confirmation unless --yes is passed.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			orgID, client, err := getDefaultOrg()
+			if err != nil {
+				return err
+			}
+
+			envs, err := client.ListEnvironments(orgID, "", "", false)
+			if err != nil {
+				return fmt.Errorf("list environments: %w", err)
+			}
+
+			if len(envs) == 0 {
+				fmt.Println("No environments to nuke.")
+				return nil
+			}
+
+			cfg, _ := platform.LoadConfig()
+			orgLabel := orgID
+			if cfg != nil && cfg.DefaultOrg != "" {
+				orgLabel = cfg.DefaultOrg
+			}
+
+			fmt.Printf("This will DELETE ALL %d environments in org %q.\n\n", len(envs), orgLabel)
+
+			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "ID\tNAME\tSTATE")
+			for _, e := range envs {
+				name := "--"
+				if e.Name != nil {
+					name = *e.Name
+				}
+				fmt.Fprintf(w, "%s\t%s\t%s\n", e.ID, name, e.State)
+			}
+			w.Flush()
+			fmt.Println()
+
+			if !yes {
+				expected := fmt.Sprintf("nuke %d environments", len(envs))
+				answer, err := prompt(fmt.Sprintf("Type %q to confirm: ", expected))
+				if err != nil {
+					return err
+				}
+				if answer != expected {
+					fmt.Println("Aborted.")
+					return nil
+				}
+			}
+
+			deleted := 0
+			for _, e := range envs {
+				if err := client.DeleteEnvironment(orgID, e.ID); err != nil {
+					fmt.Fprintf(os.Stderr, "Failed to delete %s: %v\n", e.ID, err)
+					continue
+				}
+				label := e.ID
+				if e.Name != nil {
+					label = fmt.Sprintf("%s (%s)", e.ID, *e.Name)
+				}
+				fmt.Printf("Deleted %s\n", label)
+				deleted++
+			}
+
+			fmt.Printf("Nuked %d environments.\n", deleted)
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Skip typed confirmation")
+	return cmd
+}
+
+func envLogsCmd() *cobra.Command {
+	var follow bool
+
+	cmd := &cobra.Command{
+		Use:               "logs <id>",
+		Short:             "Show environment startup logs",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: envCompletionFunc,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			orgID, client, err := getDefaultOrg()
+			if err != nil {
+				return err
+			}
+
+			envID, err := resolveEnvID(client, orgID, args[0])
+			if err != nil {
+				return err
+			}
+
+			if follow {
+				return followEnvironmentLogs(client, orgID, envID)
+			}
+
+			// Non-follow: fetch and print historical logs.
+			logs, err := client.GetEnvironmentLogs(orgID, envID)
+			if err != nil {
+				return fmt.Errorf("get environment logs: %w", err)
+			}
+			if len(logs) == 0 {
+				fmt.Println("No logs yet.")
+				return nil
+			}
+
+			phases := make(map[string]time.Time)
+			for _, ev := range logs {
+				// Use the event's own created_at for elapsed calculation.
+				if ev.Status == "started" {
+					t, err := time.Parse(time.RFC3339, ev.CreatedAt)
+					if err == nil {
+						phases[ev.Phase] = t
+					}
+				}
+				renderEnvLogEventHistorical(ev, phases)
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVarP(&follow, "follow", "f", true, "Follow live logs (default: true)")
+	return cmd
+}
+
+// renderEnvLogEventHistorical prints a historical log event with server-side timestamps.
+func renderEnvLogEventHistorical(ev platform.EnvironmentLog, phases map[string]time.Time) {
+	switch ev.Status {
+	case "started":
+		fmt.Fprintf(os.Stderr, "  \033[33m◌\033[0m %s...\n", ev.Message)
+	case "completed":
+		elapsed := ""
+		if start, ok := phases[ev.Phase]; ok {
+			end, err := time.Parse(time.RFC3339, ev.CreatedAt)
+			if err == nil {
+				elapsed = fmt.Sprintf("  %s", end.Sub(start).Truncate(time.Second))
+			}
+		}
+		fmt.Fprintf(os.Stderr, "  \033[32m✓\033[0m %s%s\n", ev.Message, elapsed)
+	case "warning":
+		fmt.Fprintf(os.Stderr, "  \033[33m!\033[0m %s\n", ev.Message)
+	case "failed":
+		fmt.Fprintf(os.Stderr, "  \033[31m✗\033[0m %s\n", ev.Message)
+	default:
+		fmt.Fprintf(os.Stderr, "  · %s\n", ev.Message)
+	}
 }
 
 // expandImageRef applies Docker-like image name expansion:

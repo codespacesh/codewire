@@ -17,23 +17,27 @@ func envExecCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "exec <id> -- <command> [args...]",
-		Short: "Execute a command in a running environment",
-		Long:  "Run a one-shot command in a sandbox environment. Streams stdout/stderr and exits with the command's exit code.",
-		Args:  cobra.MinimumNArgs(1),
+		Use:               "exec <id-or-name> -- <command> [args...]",
+		Short:             "Execute a command in a running environment",
+		Long:              "Run a one-shot command in a sandbox environment. Streams stdout/stderr and exits with the command's exit code.",
+		Args:              cobra.MinimumNArgs(1),
+		ValidArgsFunction: envCompletionFunc,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			envID := args[0]
-
 			// Find the -- separator to split env ID from command
 			cmdArgs := args[1:]
 			if cmd.ArgsLenAtDash() > 0 {
 				cmdArgs = args[cmd.ArgsLenAtDash():]
 			}
 			if len(cmdArgs) == 0 {
-				return fmt.Errorf("no command specified. Usage: cw env exec <id> -- <command>")
+				return fmt.Errorf("no command specified. Usage: cw env exec <id-or-name> -- <command>")
 			}
 
 			orgID, client, err := getDefaultOrg()
+			if err != nil {
+				return err
+			}
+
+			envID, err := resolveEnvID(client, orgID, args[0])
 			if err != nil {
 				return err
 			}
@@ -68,14 +72,18 @@ func envExecCmd() *cobra.Command {
 
 func envSSHCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "ssh <id>",
-		Short: "Open an interactive shell in a running environment",
-		Long:  "Start an interactive bash shell in a sandbox environment.",
-		Args:  cobra.ExactArgs(1),
+		Use:               "ssh <id-or-name>",
+		Short:             "Open an interactive shell in a running environment",
+		Long:              "Start an interactive bash shell in a sandbox environment.",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: envCompletionFunc,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			envID := args[0]
-
 			orgID, client, err := getDefaultOrg()
+			if err != nil {
+				return err
+			}
+
+			envID, err := resolveEnvID(client, orgID, args[0])
 			if err != nil {
 				return err
 			}
@@ -130,6 +138,20 @@ Use <env_id>:<path> syntax for remote paths:
 			}
 			if srcEnv == "" && dstEnv == "" {
 				return fmt.Errorf("at least one path must be remote (<env_id>:<path>)")
+			}
+
+			// Resolve env names to IDs.
+			if srcEnv != "" {
+				srcEnv, err = resolveEnvID(client, orgID, srcEnv)
+				if err != nil {
+					return err
+				}
+			}
+			if dstEnv != "" {
+				dstEnv, err = resolveEnvID(client, orgID, dstEnv)
+				if err != nil {
+					return err
+				}
 			}
 
 			if dstEnv != "" {
