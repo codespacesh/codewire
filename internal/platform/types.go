@@ -210,6 +210,17 @@ type ProvisionEvent struct {
 	CreatedAt  string          `json:"created_at"`
 }
 
+// EnvironmentLog represents a log entry from environment provisioning/setup.
+type EnvironmentLog struct {
+	ID            string          `json:"id"`
+	EnvironmentID string          `json:"environment_id"`
+	Phase         string          `json:"phase"`
+	Status        string          `json:"status"`
+	Message       string          `json:"message,omitempty"`
+	Metadata      json.RawMessage `json:"metadata,omitempty"`
+	CreatedAt     string          `json:"created_at"`
+}
+
 // Detection types
 
 type DetectionResult struct {

@@ -60,62 +60,70 @@ func main() {
 	// Disable cobra's auto-generated completion command; we supply our own with --install support.
 	rootCmd.CompletionOptions.DisableDefaultCmd = true
 
+	rootCmd.AddGroup(
+		&cobra.Group{ID: "environment", Title: "Environments:"},
+		&cobra.Group{ID: "session", Title: "Sessions:"},
+		&cobra.Group{ID: "platform", Title: "Platform:"},
+		&cobra.Group{ID: "network", Title: "Network & Relay:"},
+		&cobra.Group{ID: "messaging", Title: "Messaging:"},
+		&cobra.Group{ID: "agent", Title: "Agent Integration:"},
+		&cobra.Group{ID: "system", Title: "System:"},
+	)
+
 	rootCmd.AddCommand(
-		// Session management
-		nodeCmd(),
-		runCmd(),
-		platformListCmd(),
-		attachCmd(),
-		killCmd(),
-		logsCmd(),
-		sendCmd(),
-		watchCmd(),
-		statusCmd(),
-		subscribeCmd(),
-		waitSessionCmd(),
-		// Relay
-		relayCmd(),
-		relaySetupCmd(),
-		qrCmd(),
-		nodesCmd(),
-		serverCmd(),
-		inviteCmd(),
-		revokeCmd(),
-		// Communication
-		msgCmd(),
-		inboxCmd(),
-		requestCmd(),
-		replyCmd(),
-		listenCmd(),
-		// Agent integration
-		gatewayCmd(),
-		hookCmd(),
-		mcpServerCmd(),
-		// KV
-		kvCmd(),
+		// Environments
+		grouped(envParentCmd(), "environment"),
+		grouped(tmplParentCmd(), "environment"),
+		grouped(launchCmd(), "environment"),
+		grouped(openCmd(), "environment"),
+		grouped(workspacesListCmd(), "environment"),
+		grouped(workspaceStartCmd(), "environment"),
+		grouped(workspaceStopCmd(), "environment"),
+		// Sessions
+		grouped(runCmd(), "session"),
+		grouped(attachCmd(), "session"),
+		grouped(killCmd(), "session"),
+		grouped(logsCmd(), "session"),
+		grouped(sendCmd(), "session"),
+		grouped(watchCmd(), "session"),
+		grouped(statusCmd(), "session"),
+		grouped(platformListCmd(), "session"),
+		grouped(subscribeCmd(), "session"),
+		grouped(waitSessionCmd(), "session"),
 		// Platform
-		platformSetupCmd(),
-		loginCmd(),
-		logoutCmd(),
-		whoamiCmd(),
-		orgsCmd(),
-		resourcesCmd(),
-		secretsCmd(),
-		costCmd(),
-		billingCmd(),
-		githubCmd(),
-		envParentCmd(),
-		tmplParentCmd(),
-		// Workspaces
-		launchCmd(),
-		openCmd(),
-		workspaceStartCmd(),
-		workspaceStopCmd(),
-		workspacesListCmd(),
-		// Shell completion
-		completionCmd(rootCmd),
-		// Self-update
-		updateCmd(),
+		grouped(loginCmd(), "platform"),
+		grouped(logoutCmd(), "platform"),
+		grouped(whoamiCmd(), "platform"),
+		grouped(orgsCmd(), "platform"),
+		grouped(resourcesCmd(), "platform"),
+		grouped(secretsCmd(), "platform"),
+		grouped(costCmd(), "platform"),
+		grouped(billingCmd(), "platform"),
+		grouped(githubCmd(), "platform"),
+		grouped(platformSetupCmd(), "platform"),
+		// Network & Relay
+		grouped(nodeCmd(), "network"),
+		grouped(relayCmd(), "network"),
+		grouped(relaySetupCmd(), "network"),
+		grouped(qrCmd(), "network"),
+		grouped(nodesCmd(), "network"),
+		grouped(serverCmd(), "network"),
+		grouped(inviteCmd(), "network"),
+		grouped(revokeCmd(), "network"),
+		// Messaging
+		grouped(msgCmd(), "messaging"),
+		grouped(inboxCmd(), "messaging"),
+		grouped(requestCmd(), "messaging"),
+		grouped(replyCmd(), "messaging"),
+		grouped(listenCmd(), "messaging"),
+		// Agent Integration
+		grouped(gatewayCmd(), "agent"),
+		grouped(hookCmd(), "agent"),
+		grouped(mcpServerCmd(), "agent"),
+		grouped(kvCmd(), "agent"),
+		// System
+		grouped(completionCmd(rootCmd), "system"),
+		grouped(updateCmd(), "system"),
 	)
 
 	// Workspace prefix interception: "cw api run -- cmd" → workspaceOverride="api"
@@ -168,6 +176,12 @@ func isKnownCommand(root *cobra.Command, name string) bool {
 		}
 	}
 	return false
+}
+
+// grouped sets GroupID on cmd and returns it, for use in AddCommand chains.
+func grouped(cmd *cobra.Command, id string) *cobra.Command {
+	cmd.GroupID = id
+	return cmd
 }
 
 // ---------------------------------------------------------------------------
