@@ -214,15 +214,9 @@ Examples:
 				parsedEnvVars[parts[0]] = parts[1]
 			}
 
-			// Image shorthand: if no slash, resolve to workspace image.
-			// Strip "workspace-" prefix if user provided it (e.g. "workspace-full" → "full").
-			if image != "" && !strings.Contains(image, "/") {
-				image = strings.TrimPrefix(image, "workspace-")
-				name := "ghcr.io/codewiresh/workspace-" + image
-				if !strings.Contains(image, ":") {
-					name += ":latest"
-				}
-				image = name
+			// Image expansion with Docker-like semantics.
+			if image != "" {
+				image = expandImageRef(image)
 			}
 
 			req := &platform.CreateEnvironmentRequest{
@@ -598,5 +592,48 @@ func envPruneCmd() *cobra.Command {
 	cmd.Flags().StringVar(&state, "state", "error,creating,pending", "Comma-separated states to prune")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be pruned without deleting")
 	return cmd
+}
+
+// expandImageRef applies Docker-like image name expansion:
+//   - Has registry domain (first segment contains "." or ":") → as-is
+//   - Starts with "workspace-" → ghcr.io/codewiresh/workspace-*
+//   - No "/" → docker.io/library/<image> (official image)
+//   - One "/" → docker.io/<image> (user image)
+func expandImageRef(image string) string {
+	// Split name from tag.
+	name, tag, hasTag := strings.Cut(image, ":")
+
+	// Check if first path segment looks like a registry domain.
+	if slash := strings.Index(name, "/"); slash > 0 {
+		firstSeg := name[:slash]
+		if strings.Contains(firstSeg, ".") || strings.Contains(firstSeg, ":") {
+			return image // fully qualified
+		}
+	}
+
+	if strings.HasPrefix(name, "workspace-") {
+		// Codewire workspace shorthand.
+		ref := "ghcr.io/codewiresh/" + name
+		if hasTag {
+			return ref + ":" + tag
+		}
+		return ref + ":latest"
+	}
+
+	if !strings.Contains(name, "/") {
+		// Bare name → Docker Hub official image.
+		ref := "docker.io/library/" + name
+		if hasTag {
+			return ref + ":" + tag
+		}
+		return ref + ":latest"
+	}
+
+	// user/repo → Docker Hub user image.
+	ref := "docker.io/" + name
+	if hasTag {
+		return ref + ":" + tag
+	}
+	return ref + ":latest"
 }
 
