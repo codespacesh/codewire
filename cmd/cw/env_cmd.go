@@ -33,6 +33,7 @@ func envParentCmd() *cobra.Command {
 	cmd.AddCommand(envExecCmd())
 	cmd.AddCommand(envSSHCmd())
 	cmd.AddCommand(envCpCmd())
+	cmd.AddCommand(envPruneCmd())
 	return cmd
 }
 
@@ -217,7 +218,11 @@ Examples:
 			// Strip "workspace-" prefix if user provided it (e.g. "workspace-full" → "full").
 			if image != "" && !strings.Contains(image, "/") {
 				image = strings.TrimPrefix(image, "workspace-")
-				image = "ghcr.io/codewiresh/workspace-" + image + ":latest"
+				name := "ghcr.io/codewiresh/workspace-" + image
+				if !strings.Contains(image, ":") {
+					name += ":latest"
+				}
+				image = name
 			}
 
 			req := &platform.CreateEnvironmentRequest{
@@ -498,5 +503,100 @@ func envRmCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func envPruneCmd() *cobra.Command {
+	var (
+		yes    bool
+		state  string
+		dryRun bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "prune",
+		Short: "Bulk delete stale environments",
+		Long:  "Delete environments stuck in error, creating, or pending states.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			orgID, client, err := getDefaultOrg()
+			if err != nil {
+				return err
+			}
+
+			pruneStates := make(map[string]bool)
+			for _, s := range strings.Split(state, ",") {
+				s = strings.TrimSpace(s)
+				if s != "" {
+					pruneStates[s] = true
+				}
+			}
+
+			envs, err := client.ListEnvironments(orgID, "", "", false)
+			if err != nil {
+				return fmt.Errorf("list environments: %w", err)
+			}
+
+			var targets []platform.Environment
+			for _, e := range envs {
+				if pruneStates[e.State] {
+					targets = append(targets, e)
+				}
+			}
+
+			if len(targets) == 0 {
+				fmt.Println("No environments to prune.")
+				return nil
+			}
+
+			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			fmt.Fprintf(w, "ID\tNAME\tSTATE\tAGE\n")
+			for _, e := range targets {
+				name := "--"
+				if e.Name != nil {
+					name = *e.Name
+				}
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", e.ID, name, e.State, timeAgo(e.CreatedAt))
+			}
+			w.Flush()
+			fmt.Println()
+
+			if dryRun {
+				fmt.Printf("Would prune %d environments (dry run).\n", len(targets))
+				return nil
+			}
+
+			if !yes {
+				answer, err := prompt(fmt.Sprintf("Delete %d environments? [y/N] ", len(targets)))
+				if err != nil {
+					return err
+				}
+				if strings.ToLower(answer) != "y" {
+					fmt.Println("Aborted.")
+					return nil
+				}
+			}
+
+			deleted := 0
+			for _, e := range targets {
+				if err := client.DeleteEnvironment(orgID, e.ID); err != nil {
+					fmt.Fprintf(os.Stderr, "Failed to delete %s: %v\n", e.ID, err)
+					continue
+				}
+				label := e.ID
+				if e.Name != nil {
+					label = fmt.Sprintf("%s (%s)", e.ID, *e.Name)
+				}
+				fmt.Printf("Deleted %s\n", label)
+				deleted++
+			}
+
+			fmt.Printf("Pruned %d environments.\n", deleted)
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Skip confirmation prompt")
+	cmd.Flags().StringVar(&state, "state", "error,creating,pending", "Comma-separated states to prune")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be pruned without deleting")
+	return cmd
 }
 
