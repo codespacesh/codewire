@@ -74,7 +74,7 @@ func envSSHCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:               "ssh <id-or-name>",
 		Short:             "Open an interactive shell in a running environment",
-		Long:              "Start an interactive bash shell in a sandbox environment.",
+		Long:              "Start an interactive shell in a sandbox environment via SSH or terminal fallback.",
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: envCompletionFunc,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -88,26 +88,7 @@ func envSSHCmd() *cobra.Command {
 				return err
 			}
 
-			// Use exec with an interactive shell
-			// Note: for true SSH-like experience, we'd need WebSocket streaming.
-			// For now, run bash in a pseudo-interactive mode.
-			result, err := client.ExecInEnvironment(orgID, envID, &platform.ExecRequest{
-				Command:    []string{"bash", "-l"},
-				WorkingDir: "/workspace",
-				Timeout:    0, // no timeout for interactive
-			})
-			if err != nil {
-				return fmt.Errorf("ssh: %w", err)
-			}
-
-			if result.Stdout != "" {
-				fmt.Print(result.Stdout)
-			}
-			if result.Stderr != "" {
-				fmt.Fprint(os.Stderr, result.Stderr)
-			}
-			os.Exit(result.ExitCode)
-			return nil
+			return sshInteractive(client, orgID, envID)
 		},
 	}
 }

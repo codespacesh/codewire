@@ -76,6 +76,7 @@ func main() {
 		grouped(tmplParentCmd(), "environment"),
 		grouped(launchCmd(), "environment"),
 		grouped(openCmd(), "environment"),
+		grouped(sshCmd(), "environment"),
 		grouped(workspacesListCmd(), "environment"),
 		grouped(workspaceStartCmd(), "environment"),
 		grouped(workspaceStopCmd(), "environment"),

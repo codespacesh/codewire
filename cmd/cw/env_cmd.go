@@ -417,7 +417,7 @@ func envListCmd() *cobra.Command {
 			}
 
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "ID\tNAME\tSTATE\tTYPE\tCPU/MEM\tTTL\tCREATED")
+			fmt.Fprintln(w, "ID\tNAME\tSTATE\tTYPE\tCPU/MEM\tTTL\tSSH\tCREATED")
 			for _, e := range envs {
 				envName := "--"
 				if e.Name != nil {
@@ -439,8 +439,13 @@ func envListCmd() *cobra.Command {
 					}
 				}
 
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-					e.ID, envName, e.State, e.Type, cpuMem, ttlStr, timeAgo(e.CreatedAt))
+				sshHost := ""
+				if e.Type == "sandbox" && e.State == "running" {
+					sshHost = "cw-" + e.ID
+				}
+
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+					e.ID, envName, e.State, e.Type, cpuMem, ttlStr, sshHost, timeAgo(e.CreatedAt))
 			}
 			return w.Flush()
 		},

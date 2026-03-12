@@ -2,7 +2,9 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"sort"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -54,8 +56,8 @@ func platformSetupCmd() *cobra.Command {
 				fmt.Println()
 			}
 
-			// [1/5] Server URL
-			serverURL, err := promptDefault("[1/5] Server URL", defaultURL)
+			// [1/6] Server URL
+			serverURL, err := promptDefault("[1/6] Server URL", defaultURL)
 			if err != nil {
 				return err
 			}
@@ -69,8 +71,8 @@ func platformSetupCmd() *cobra.Command {
 			fmt.Printf("      Connected to %s\n", serverURL)
 			fmt.Println()
 
-			// [2/5] Login
-			fmt.Println("[2/5] Sign in")
+			// [2/6] Login
+			fmt.Println("[2/6] Sign in")
 			var displayName string
 			if usePassword {
 				name, err := loginWithPassword(client)
@@ -88,14 +90,14 @@ func platformSetupCmd() *cobra.Command {
 			fmt.Printf("      Logged in as %s\n", displayName)
 			fmt.Println()
 
-			// [3/5] Select or create organization
+			// [3/6] Select or create organization
 			selectedOrg, err := setupSelectOrg(client)
 			if err != nil {
 				return err
 			}
 			fmt.Println()
 
-			// [4/5] Select or create resource
+			// [4/6] Select or create resource
 			var selectedResourceID string
 			if selectedOrg.ID != "" {
 				selectedResourceID, err = setupSelectResource(client, &selectedOrg)
@@ -105,14 +107,68 @@ func platformSetupCmd() *cobra.Command {
 			}
 			fmt.Println()
 
-			// [5/5] Connect GitHub (optional)
-			fmt.Println("[5/5] Connect GitHub (optional)")
+			// [5/6] Connect GitHub (optional)
+			fmt.Println("[5/6] Connect GitHub (optional)")
 			fmt.Println("      Connecting GitHub enables launching private repositories.")
 			idx, ghErr := promptSelect("      Connect GitHub?", []string{"Yes", "Skip"})
 			if ghErr == nil && idx == 0 {
 				if err := setupGitHub(client); err != nil {
 					fmt.Printf("      Warning: GitHub setup failed: %v\n", err)
 					fmt.Println("      You can retry later with: cw github login")
+				}
+			}
+			fmt.Println()
+
+			// [6/6] SSH Setup
+			fmt.Println("[6/6] SSH Setup")
+			pubKey, sshKeyErr := ensureSSHKey()
+			if sshKeyErr != nil {
+				fmt.Printf("      Warning: SSH key setup failed: %v\n", sshKeyErr)
+			} else {
+				fmt.Println("      SSH key: ~/.ssh/id_ed25519")
+
+				// Upload to platform if not already registered
+				existingKeys, listErr := client.ListLoginKeys()
+				if listErr == nil {
+					found := false
+					// Compare key-type + key-data (ignore comment suffix)
+					pubFields := strings.Fields(strings.TrimSpace(pubKey))
+					pubKeyData := ""
+					if len(pubFields) >= 2 {
+						pubKeyData = pubFields[0] + " " + pubFields[1]
+					}
+					for _, k := range existingKeys {
+						kFields := strings.Fields(strings.TrimSpace(k.PublicKey))
+						kData := ""
+						if len(kFields) >= 2 {
+							kData = kFields[0] + " " + kFields[1]
+						}
+						if pubKeyData != "" && kData == pubKeyData {
+							found = true
+							break
+						}
+					}
+					if !found {
+						hostname, _ := os.Hostname()
+						keyName := hostname
+						if keyName == "" {
+							keyName = "default"
+						}
+						if _, addErr := client.AddLoginKey(keyName, pubKey); addErr != nil {
+							fmt.Printf("      Warning: failed to upload SSH key: %v\n", addErr)
+						} else {
+							fmt.Println("      Uploaded SSH key to platform")
+						}
+					} else {
+						fmt.Println("      SSH key already registered")
+					}
+				}
+
+				// Write SSH config
+				if writeErr := writeSSHConfig(); writeErr != nil {
+					fmt.Printf("      Warning: SSH config update failed: %v\n", writeErr)
+				} else {
+					fmt.Println("      Updated ~/.ssh/config")
 				}
 			}
 			fmt.Println()
@@ -151,7 +207,7 @@ func setupSelectOrg(client *platform.Client) (platform.OrgWithRole, error) {
 	}
 
 	if len(orgs) == 1 {
-		fmt.Printf("[3/5] Organization: %s (%s)\n", orgs[0].Name, orgs[0].Role)
+		fmt.Printf("[3/6] Organization: %s (%s)\n", orgs[0].Name, orgs[0].Role)
 		return orgs[0], nil
 	}
 
@@ -159,7 +215,7 @@ func setupSelectOrg(client *platform.Client) (platform.OrgWithRole, error) {
 	for i, org := range orgs {
 		options[i] = fmt.Sprintf("%s (%s, %d resources)", org.Name, org.Role, len(org.Resources))
 	}
-	idx, err := promptSelect("[3/5] Select organization:", options)
+	idx, err := promptSelect("[3/6] Select organization:", options)
 	if err != nil {
 		return platform.OrgWithRole{}, err
 	}
@@ -169,7 +225,7 @@ func setupSelectOrg(client *platform.Client) (platform.OrgWithRole, error) {
 
 // setupCreateOrg prompts the user to create a new organization.
 func setupCreateOrg(client *platform.Client) (platform.OrgWithRole, error) {
-	fmt.Println("[3/5] Organization")
+	fmt.Println("[3/6] Organization")
 	ok, err := promptConfirm("      No organizations found. Create one? [Y/n]")
 	if err != nil {
 		return platform.OrgWithRole{}, err
@@ -223,7 +279,7 @@ func setupSelectResource(client *platform.Client, org *platform.OrgWithRole) (st
 
 	resources := org.Resources
 	if len(resources) == 1 {
-		fmt.Printf("[4/5] Resource: %s (%s, %s)\n", resources[0].Name, resources[0].Type, resources[0].Status)
+		fmt.Printf("[4/6] Resource: %s (%s, %s)\n", resources[0].Name, resources[0].Type, resources[0].Status)
 		return resources[0].ID, nil
 	}
 
@@ -231,7 +287,7 @@ func setupSelectResource(client *platform.Client, org *platform.OrgWithRole) (st
 	for i, r := range resources {
 		options[i] = fmt.Sprintf("%-20s %-12s %-10s %s", r.Name, r.Type, r.Status, r.HealthStatus)
 	}
-	idx, err := promptSelect("[4/5] Select resource:", options)
+	idx, err := promptSelect("[4/6] Select resource:", options)
 	if err != nil {
 		return "", err
 	}
@@ -241,7 +297,7 @@ func setupSelectResource(client *platform.Client, org *platform.OrgWithRole) (st
 
 // setupCreateResource prompts the user to create a new resource with billing.
 func setupCreateResource(client *platform.Client, org *platform.OrgWithRole) (string, error) {
-	fmt.Println("[4/5] Resource")
+	fmt.Println("[4/6] Resource")
 	ok, err := promptConfirm(fmt.Sprintf("      No resources in %q. Create a Coder instance? [Y/n]", org.Name))
 	if err != nil {
 		return "", err
