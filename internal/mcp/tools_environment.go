@@ -209,7 +209,8 @@ func toolListEnvironments(args map[string]interface{}) (string, error) {
 	envType, _ := args["type"].(string)
 	state, _ := args["state"].(string)
 
-	envs, err := client.ListEnvironments(orgID, envType, state)
+	includeDestroyed, _ := args["include_destroyed"].(bool)
+	envs, err := client.ListEnvironments(orgID, envType, state, includeDestroyed)
 	if err != nil {
 		return "", fmt.Errorf("list environments: %w", err)
 	}

@@ -14,7 +14,7 @@ func (c *Client) CreateEnvironment(orgID string, req *CreateEnvironmentRequest) 
 	return &env, nil
 }
 
-func (c *Client) ListEnvironments(orgID string, envType, state string) ([]Environment, error) {
+func (c *Client) ListEnvironments(orgID string, envType, state string, includeDestroyed bool) ([]Environment, error) {
 	path := fmt.Sprintf("/api/v1/organizations/%s/environments", orgID)
 	sep := "?"
 	if envType != "" {
@@ -23,6 +23,10 @@ func (c *Client) ListEnvironments(orgID string, envType, state string) ([]Enviro
 	}
 	if state != "" {
 		path += sep + "state=" + state
+		sep = "&"
+	}
+	if includeDestroyed {
+		path += sep + "include_destroyed=true"
 	}
 	var envs []Environment
 	if err := c.do("GET", path, nil, &envs); err != nil {

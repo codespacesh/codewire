@@ -282,6 +282,7 @@ func envListCmd() *cobra.Command {
 	var (
 		envType string
 		state   string
+		all     bool
 	)
 
 	cmd := &cobra.Command{
@@ -294,7 +295,7 @@ func envListCmd() *cobra.Command {
 				return err
 			}
 
-			envs, err := client.ListEnvironments(orgID, envType, state)
+			envs, err := client.ListEnvironments(orgID, envType, state, all)
 			if err != nil {
 				return fmt.Errorf("list environments: %w", err)
 			}
@@ -336,6 +337,7 @@ func envListCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&envType, "type", "", "Filter by type (coder, sandbox)")
 	cmd.Flags().StringVar(&state, "state", "", "Filter by state")
+	cmd.Flags().BoolVarP(&all, "all", "a", false, "Include destroyed environments")
 	return cmd
 }
 
