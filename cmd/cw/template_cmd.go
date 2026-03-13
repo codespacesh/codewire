@@ -104,9 +104,9 @@ Examples:
 				return fmt.Errorf("--image is required")
 			}
 
-			// Image shorthand: if no slash, resolve to workspace image.
+			// Image shorthand: expand bare names (e.g. "full" → ghcr.io/codewiresh/full:latest).
 			if image != "" && !containsSlash(image) {
-				image = "ghcr.io/codewiresh/workspace-" + image + ":latest"
+				image = expandImageRef(image)
 			}
 
 			orgID, client, err := getDefaultOrg()

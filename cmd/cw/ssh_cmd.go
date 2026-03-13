@@ -22,7 +22,7 @@ import (
 	"tailscale.com/tailcfg"
 
 	"github.com/codewiresh/codewire/internal/platform"
-	"github.com/codewiresh/codewire/internal/tailnet"
+	"github.com/codewiresh/tailnet"
 	"github.com/codewiresh/codewire/internal/terminal"
 )
 
@@ -332,7 +332,7 @@ func sshOverWireGuard(client *platform.Client, orgID, envID string) error {
 	defer wgConn.Close()
 
 	sshConfig := &ssh.ClientConfig{
-		User:            "coder",
+		User:            "codewire",
 		Auth:            []ssh.AuthMethod{ssh.Password("")},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
@@ -423,7 +423,7 @@ func sshOverWebSocket(client *platform.Client, orgID, envID string) error {
 	wsConn := &wsNetConn{conn: conn, ctx: ctx}
 
 	sshConfig := &ssh.ClientConfig{
-		User:            "coder",
+		User:            "codewire",
 		Auth:            []ssh.AuthMethod{ssh.Password("")},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}

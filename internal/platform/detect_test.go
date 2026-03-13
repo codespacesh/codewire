@@ -11,7 +11,7 @@ import (
 
 func TestDetectRepo(t *testing.T) {
 	expected := DetectionResult{
-		TemplateImage:  "ghcr.io/codewiresh/workspace-node:latest",
+		TemplateImage:  "ghcr.io/codewiresh/full:latest",
 		InstallCommand: "npm install",
 		StartupScript:  "npm run build",
 		Language:       "typescript",

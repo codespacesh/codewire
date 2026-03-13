@@ -18,7 +18,7 @@ Host cw-*
     ProxyCommand cw ssh --stdio %%n
     StrictHostKeyChecking no
     UserKnownHostsFile /dev/null
-    User coder
+    User codewire
 %s`, sshConfigMarkerStart, sshConfigMarkerEnd)
 }
 

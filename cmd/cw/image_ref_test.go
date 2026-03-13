@@ -13,10 +13,10 @@ func TestExpandImageRef(t *testing.T) {
 		{"ghcr.io/foo/bar:v1", "ghcr.io/foo/bar:v1"},
 		{"registry.example.com/img", "registry.example.com/img"},
 
-		// Codewire workspace shorthand.
-		{"workspace-full", "ghcr.io/codewiresh/workspace-full:latest"},
-		{"workspace-full:v2", "ghcr.io/codewiresh/workspace-full:v2"},
-		{"workspace-minimal:latest", "ghcr.io/codewiresh/workspace-minimal:latest"},
+		// Codewire image shorthand.
+		{"full", "ghcr.io/codewiresh/full:latest"},
+		{"full:v2", "ghcr.io/codewiresh/full:v2"},
+		{"base", "ghcr.io/codewiresh/base:latest"},
 
 		// Bare name → Docker Hub official.
 		{"alpine", "docker.io/library/alpine:latest"},

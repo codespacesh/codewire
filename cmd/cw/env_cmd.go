@@ -493,7 +493,7 @@ Examples:
 	cmd.Flags().IntVar(&disk, "disk", 0, "Disk in GB")
 	cmd.Flags().StringArrayVar(&repoFlags, "repo", nil, "Git repo URL (repeatable, url@branch syntax)")
 	cmd.Flags().StringVar(&branch, "branch", "", "Branch to checkout")
-	cmd.Flags().StringVar(&image, "image", "", "Container image (shorthand: go → workspace-go)")
+	cmd.Flags().StringVar(&image, "image", "", "Container image (shorthand: full → ghcr.io/codewiresh/full)")
 	cmd.Flags().StringVar(&install, "install", "", "Install command")
 	cmd.Flags().StringVar(&startup, "startup", "", "Startup script")
 	cmd.Flags().StringVar(&agent, "agent", "", "AI agent (claude-code)")
@@ -963,9 +963,14 @@ func renderEnvLogEventHistorical(ev platform.EnvironmentLog, phases map[string]t
 	}
 }
 
+// codewireSlugs are image names that resolve to ghcr.io/codewiresh/<slug>.
+var codewireSlugs = map[string]bool{
+	"base": true, "full": true,
+}
+
 // expandImageRef applies Docker-like image name expansion:
 //   - Has registry domain (first segment contains "." or ":") → as-is
-//   - Starts with "workspace-" → ghcr.io/codewiresh/workspace-*
+//   - Known codewire slug (base, full, etc.) → ghcr.io/codewiresh/<slug>
 //   - No "/" → docker.io/library/<image> (official image)
 //   - One "/" → docker.io/<image> (user image)
 func expandImageRef(image string) string {
@@ -980,8 +985,7 @@ func expandImageRef(image string) string {
 		}
 	}
 
-	if strings.HasPrefix(name, "workspace-") {
-		// Codewire workspace shorthand.
+	if codewireSlugs[name] {
 		ref := "ghcr.io/codewiresh/" + name
 		if hasTag {
 			return ref + ":" + tag
