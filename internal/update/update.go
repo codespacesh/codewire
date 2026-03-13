@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/mattn/go-isatty"
 )
 
 const (
@@ -133,7 +135,11 @@ func BackgroundCheck(currentVersion string) func() {
 		select {
 		case r := <-ch:
 			if r.newer {
-				fmt.Fprintf(os.Stderr, "\nA new version of cw is available: %s → %s\nRun `cw update` to upgrade.\n", currentVersion, r.latest)
+				msg := fmt.Sprintf("A new version of cw is available: %s → %s", currentVersion, r.latest)
+				if os.Getenv("NO_COLOR") == "" && (isatty.IsTerminal(os.Stderr.Fd()) || isatty.IsCygwinTerminal(os.Stderr.Fd())) {
+					msg = "\033[33m" + msg + "\033[0m"
+				}
+				fmt.Fprintf(os.Stderr, "\n%s\nRun `cw update` to upgrade.\n", msg)
 			}
 		default:
 		}

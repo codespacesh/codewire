@@ -445,7 +445,7 @@ func workspaceStartCmd() *cobra.Command {
 			if err := client.StartWorkspace(resID, wsName); err != nil {
 				return fmt.Errorf("start workspace: %w", err)
 			}
-			fmt.Println("Workspace starting.")
+			successMsg("Workspace starting.")
 			return nil
 		},
 	}
@@ -481,7 +481,7 @@ func workspaceStopCmd() *cobra.Command {
 			if err := client.StopWorkspace(resID, wsName); err != nil {
 				return fmt.Errorf("stop workspace: %w", err)
 			}
-			fmt.Println("Workspace stopping.")
+			successMsg("Workspace stopping.")
 			return nil
 		},
 	}
@@ -522,7 +522,7 @@ func workspacesListCmd() *cobra.Command {
 			}
 
 			for _, ws := range resp.Workspaces {
-				fmt.Printf("  %-20s %-10s %s\n", ws.Name, ws.Status, ws.TemplateDisplayName)
+				fmt.Printf("  %-20s %-10s %s\n", ws.Name, stateColor(ws.Status), ws.TemplateDisplayName)
 			}
 			return nil
 		},

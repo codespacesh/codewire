@@ -127,13 +127,13 @@ func renderStaticTimeline(events []platform.ProvisionEvent) {
 		var icon, timing string
 		switch pi.status {
 		case "completed":
-			icon = "  \033[32m✓\033[0m"
+			icon = "  " + green("✓")
 			timing = fmt.Sprintf("%s", pi.elapsed.Truncate(time.Second))
 		case "failed":
-			icon = "  \033[31m✗\033[0m"
+			icon = "  " + red("✗")
 			timing = fmt.Sprintf("FAILED (%s)", pi.elapsed.Truncate(time.Second))
 		default:
-			icon = "  \033[33m◌\033[0m"
+			icon = "  " + yellow("◌")
 			timing = "(in progress)"
 		}
 		fmt.Printf("%s %-30s %s\n", icon, pi.message, timing)

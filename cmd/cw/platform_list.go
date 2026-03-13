@@ -82,7 +82,7 @@ func platformListCmd() *cobra.Command {
 						healthTag = "unknown"
 					}
 
-					fmt.Printf("# %s / %s (%s)\n", org.Slug, res.Name, healthTag)
+					fmt.Printf("%s %s / %s (%s)\n", bold("#"), bold(org.Slug), bold(res.Name), stateColor(healthTag))
 
 					// Get workspaces for this resource
 					workspaces, err := pc.ListWorkspaces(res.ID)
@@ -105,7 +105,7 @@ func platformListCmd() *cobra.Command {
 						} else {
 							sessionInfo = "0 sessions"
 						}
-						fmt.Printf("  %s %-19s %-10s %s\n", marker, ws.Name, ws.Status, sessionInfo)
+						fmt.Printf("  %s %-19s %-10s %s\n", marker, ws.Name, stateColor(ws.Status), sessionInfo)
 					}
 					fmt.Println()
 				}

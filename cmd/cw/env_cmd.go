@@ -350,13 +350,13 @@ Examples:
 			if env.Name != nil {
 				envName = *env.Name
 			}
-			fmt.Printf("Environment created: %s\n", envName)
-			fmt.Printf("  ID:    %s\n", env.ID)
-			fmt.Printf("  State: %s\n", env.State)
-			fmt.Printf("  Type:  %s\n", env.Type)
-			fmt.Printf("  CPU:   %dm\n", env.CPUMillicores)
-			fmt.Printf("  Mem:   %dMB\n", env.MemoryMB)
-			fmt.Printf("  Disk:  %dGB\n", env.DiskGB)
+			successMsg("Environment created: %s", envName)
+			fmt.Fprintf(os.Stderr, "  ID:    %s\n", env.ID)
+			fmt.Fprintf(os.Stderr, "  State: %s\n", env.State)
+			fmt.Fprintf(os.Stderr, "  Type:  %s\n", env.Type)
+			fmt.Fprintf(os.Stderr, "  CPU:   %dm\n", env.CPUMillicores)
+			fmt.Fprintf(os.Stderr, "  Mem:   %dMB\n", env.MemoryMB)
+			fmt.Fprintf(os.Stderr, "  Disk:  %dGB\n", env.DiskGB)
 
 			if follow {
 				fmt.Println()
@@ -417,11 +417,11 @@ func envListCmd() *cobra.Command {
 			}
 
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "ID\tNAME\tSTATE\tTYPE\tCPU/MEM\tTTL\tSSH\tCREATED")
+			tableHeader(w, "ID", "NAME", "STATE", "TYPE", "CPU/MEM", "TTL", "SSH", "CREATED")
 			for _, e := range envs {
 				envName := "--"
 				if e.Name != nil {
-					envName = *e.Name
+					envName = bold(*e.Name)
 				}
 
 				cpuMem := fmt.Sprintf("%dm/%dMB", e.CPUMillicores, e.MemoryMB)
@@ -445,7 +445,7 @@ func envListCmd() *cobra.Command {
 				}
 
 				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-					e.ID, envName, e.State, e.Type, cpuMem, ttlStr, sshHost, timeAgo(e.CreatedAt))
+					dim(e.ID), envName, stateColor(e.State), e.Type, cpuMem, ttlStr, sshHost, timeAgo(e.CreatedAt))
 			}
 			return w.Flush()
 		},
@@ -484,12 +484,12 @@ func envInfoCmd() *cobra.Command {
 				envName = *env.Name
 			}
 
-			fmt.Printf("ID:            %s\n", env.ID)
-			fmt.Printf("Name:          %s\n", envName)
-			fmt.Printf("Type:          %s\n", env.Type)
-			fmt.Printf("State:         %s\n", env.State)
-			fmt.Printf("DesiredState:  %s\n", env.DesiredState)
-			fmt.Printf("TemplateID:    %s\n", env.TemplateID)
+			fmt.Printf("%-14s %s\n", bold("ID:"), dim(env.ID))
+			fmt.Printf("%-14s %s\n", bold("Name:"), envName)
+			fmt.Printf("%-14s %s\n", bold("Type:"), env.Type)
+			fmt.Printf("%-14s %s\n", bold("State:"), stateColor(env.State))
+			fmt.Printf("%-14s %s\n", bold("DesiredState:"), stateColor(env.DesiredState))
+			fmt.Printf("%-14s %s\n", bold("TemplateID:"), dim(env.TemplateID))
 			fmt.Printf("CPU:           %dm\n", env.CPUMillicores)
 			fmt.Printf("Memory:        %dMB\n", env.MemoryMB)
 			fmt.Printf("Disk:          %dGB\n", env.DiskGB)
@@ -538,7 +538,7 @@ func envStopCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("stop environment: %w", err)
 			}
-			fmt.Printf("Environment %s: %s\n", args[0], resp.Status)
+			successMsg("Environment %s: %s.", args[0], resp.Status)
 			return nil
 		},
 	}
@@ -565,7 +565,7 @@ func envStartCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("start environment: %w", err)
 			}
-			fmt.Printf("Environment %s: %s\n", args[0], resp.Status)
+			successMsg("Environment %s: %s.", args[0], resp.Status)
 			return nil
 		},
 	}
@@ -592,7 +592,7 @@ func envRmCmd() *cobra.Command {
 			if err := client.DeleteEnvironment(orgID, envID); err != nil {
 				return fmt.Errorf("delete environment: %w", err)
 			}
-			fmt.Printf("Environment %s deleted.\n", args[0])
+			successMsg("Environment %s deleted.", args[0])
 			return nil
 		},
 	}
@@ -641,13 +641,13 @@ func envPruneCmd() *cobra.Command {
 			}
 
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintf(w, "ID\tNAME\tSTATE\tAGE\n")
+			tableHeader(w, "ID", "NAME", "STATE", "AGE")
 			for _, e := range targets {
 				name := "--"
 				if e.Name != nil {
 					name = *e.Name
 				}
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", e.ID, name, e.State, timeAgo(e.CreatedAt))
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", dim(e.ID), name, stateColor(e.State), timeAgo(e.CreatedAt))
 			}
 			w.Flush()
 			fmt.Println()
@@ -678,11 +678,11 @@ func envPruneCmd() *cobra.Command {
 				if e.Name != nil {
 					label = fmt.Sprintf("%s (%s)", e.ID, *e.Name)
 				}
-				fmt.Printf("Deleted %s\n", label)
+				successMsg("Deleted %s.", label)
 				deleted++
 			}
 
-			fmt.Printf("Pruned %d environments.\n", deleted)
+			successMsg("Pruned %d environments.", deleted)
 			return nil
 		},
 	}
@@ -725,13 +725,13 @@ func envNukeCmd() *cobra.Command {
 			fmt.Printf("This will DELETE ALL %d environments in org %q.\n\n", len(envs), orgLabel)
 
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "ID\tNAME\tSTATE")
+			tableHeader(w, "ID", "NAME", "STATE")
 			for _, e := range envs {
 				name := "--"
 				if e.Name != nil {
 					name = *e.Name
 				}
-				fmt.Fprintf(w, "%s\t%s\t%s\n", e.ID, name, e.State)
+				fmt.Fprintf(w, "%s\t%s\t%s\n", dim(e.ID), name, stateColor(e.State))
 			}
 			w.Flush()
 			fmt.Println()
@@ -758,11 +758,11 @@ func envNukeCmd() *cobra.Command {
 				if e.Name != nil {
 					label = fmt.Sprintf("%s (%s)", e.ID, *e.Name)
 				}
-				fmt.Printf("Deleted %s\n", label)
+				successMsg("Deleted %s.", label)
 				deleted++
 			}
 
-			fmt.Printf("Nuked %d environments.\n", deleted)
+			successMsg("Nuked %d environments.", deleted)
 			return nil
 		},
 	}
@@ -827,7 +827,7 @@ func envLogsCmd() *cobra.Command {
 func renderEnvLogEventHistorical(ev platform.EnvironmentLog, phases map[string]time.Time) {
 	switch ev.Status {
 	case "started":
-		fmt.Fprintf(os.Stderr, "  \033[33m◌\033[0m %s...\n", ev.Message)
+		fmt.Fprintf(os.Stderr, "  %s %s...\n", yellowErr("◌"), ev.Message)
 	case "completed":
 		elapsed := ""
 		if start, ok := phases[ev.Phase]; ok {
@@ -836,11 +836,11 @@ func renderEnvLogEventHistorical(ev platform.EnvironmentLog, phases map[string]t
 				elapsed = fmt.Sprintf("  %s", end.Sub(start).Truncate(time.Second))
 			}
 		}
-		fmt.Fprintf(os.Stderr, "  \033[32m✓\033[0m %s%s\n", ev.Message, elapsed)
+		fmt.Fprintf(os.Stderr, "  %s %s%s\n", greenErr("✓"), ev.Message, elapsed)
 	case "warning":
-		fmt.Fprintf(os.Stderr, "  \033[33m!\033[0m %s\n", ev.Message)
+		fmt.Fprintf(os.Stderr, "  %s %s\n", yellowErr("!"), ev.Message)
 	case "failed":
-		fmt.Fprintf(os.Stderr, "  \033[31m✗\033[0m %s\n", ev.Message)
+		fmt.Fprintf(os.Stderr, "  %s %s\n", redErr("✗"), ev.Message)
 	default:
 		fmt.Fprintf(os.Stderr, "  · %s\n", ev.Message)
 	}

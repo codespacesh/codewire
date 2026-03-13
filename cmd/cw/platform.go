@@ -63,7 +63,7 @@ func loginCmd() *cobra.Command {
 				return fmt.Errorf("save config: %w", err)
 			}
 
-			fmt.Printf("Logged in as %s\n", displayName)
+			successMsg("Logged in as %s.", displayName)
 			return nil
 		},
 	}
@@ -188,12 +188,12 @@ func logoutCmd() *cobra.Command {
 			if err != nil {
 				// Not logged in, just clean up config
 				_ = platform.DeleteConfig()
-				fmt.Println("Logged out.")
+				successMsg("Logged out.")
 				return nil
 			}
 			_ = client.Logout()
 			_ = platform.DeleteConfig()
-			fmt.Println("Logged out.")
+			successMsg("Logged out.")
 			return nil
 		},
 	}
@@ -226,13 +226,13 @@ func whoamiCmd() *cobra.Command {
 			}
 
 			cfg, _ := platform.LoadConfig()
-			fmt.Printf("User:   %s (%s)\n", resp.User.Name, resp.User.Email)
-			fmt.Printf("Server: %s\n", client.ServerURL)
+			fmt.Printf("%-10s %s (%s)\n", bold("User:"), resp.User.Name, resp.User.Email)
+			fmt.Printf("%-10s %s\n", bold("Server:"), client.ServerURL)
 			if cfg != nil && cfg.DefaultOrg != "" {
-				fmt.Printf("Org:    %s\n", cfg.DefaultOrg)
+				fmt.Printf("%-10s %s\n", bold("Org:"), cfg.DefaultOrg)
 			}
 			if cfg != nil && cfg.DefaultResource != "" {
-				fmt.Printf("Resource: %s\n", cfg.DefaultResource)
+				fmt.Printf("%-10s %s\n", bold("Resource:"), cfg.DefaultResource)
 			}
 			return nil
 		},
@@ -281,7 +281,7 @@ func orgsListCmd() *cobra.Command {
 
 			cfg, _ := platform.LoadConfig()
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "NAME\tSLUG\tROLE\tRESOURCES")
+			tableHeader(w, "NAME", "SLUG", "ROLE", "RESOURCES")
 			for _, org := range orgs {
 				marker := ""
 				if cfg != nil && cfg.DefaultOrg == org.ID {
@@ -336,13 +336,13 @@ func resourcesListCmd() *cobra.Command {
 
 			cfg, _ := platform.LoadConfig()
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "NAME\tSLUG\tTYPE\tSTATUS\tHEALTH")
+			tableHeader(w, "NAME", "SLUG", "TYPE", "STATUS", "HEALTH")
 			for _, r := range resources {
 				marker := ""
 				if cfg != nil && cfg.DefaultResource == r.ID {
 					marker = " *"
 				}
-				fmt.Fprintf(w, "%s%s\t%s\t%s\t%s\t%s\n", r.Name, marker, r.Slug, r.Type, r.Status, r.HealthStatus)
+				fmt.Fprintf(w, "%s%s\t%s\t%s\t%s\t%s\n", r.Name, marker, r.Slug, r.Type, stateColor(r.Status), stateColor(r.HealthStatus))
 			}
 			return w.Flush()
 		},
@@ -376,13 +376,13 @@ func resourcesGetCmd() *cobra.Command {
 				return enc.Encode(resource)
 			}
 
-			fmt.Printf("Name:     %s\n", resource.Name)
-			fmt.Printf("Slug:     %s\n", resource.Slug)
-			fmt.Printf("Type:     %s\n", resource.Type)
-			fmt.Printf("Status:   %s\n", resource.Status)
-			fmt.Printf("Health:   %s\n", resource.HealthStatus)
-			fmt.Printf("Plan:     %s\n", resource.BillingPlan)
-			fmt.Printf("Created:  %s\n", resource.CreatedAt)
+			fmt.Printf("%-10s %s\n", bold("Name:"), resource.Name)
+			fmt.Printf("%-10s %s\n", bold("Slug:"), resource.Slug)
+			fmt.Printf("%-10s %s\n", bold("Type:"), resource.Type)
+			fmt.Printf("%-10s %s\n", bold("Status:"), stateColor(resource.Status))
+			fmt.Printf("%-10s %s\n", bold("Health:"), stateColor(resource.HealthStatus))
+			fmt.Printf("%-10s %s\n", bold("Plan:"), resource.BillingPlan)
+			fmt.Printf("%-10s %s\n", bold("Created:"), resource.CreatedAt)
 			return nil
 		},
 	}

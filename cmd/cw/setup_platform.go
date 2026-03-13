@@ -184,7 +184,7 @@ func platformSetupCmd() *cobra.Command {
 				return fmt.Errorf("save config: %w", err)
 			}
 
-			fmt.Println("Setup complete!")
+			successMsg("Setup complete!")
 			fmt.Println("  cw launch github.com/your/repo    # Create a workspace")
 			fmt.Println("  cw workspaces                      # List workspaces")
 			return nil

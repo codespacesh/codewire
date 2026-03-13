@@ -114,13 +114,13 @@ func (t *provisionTimeline) render() {
 		var icon, timing string
 		switch p.status {
 		case "completed":
-			icon = "  \033[32m✓\033[0m"
+			icon = "  " + greenErr("✓")
 			timing = fmt.Sprintf("%s", p.elapsed.Truncate(time.Second))
 		case "failed":
-			icon = "  \033[31m✗\033[0m"
+			icon = "  " + redErr("✗")
 			timing = fmt.Sprintf("FAILED (%s)", p.elapsed.Truncate(time.Second))
 		case "started":
-			icon = "  \033[33m◌\033[0m"
+			icon = "  " + yellowErr("◌")
 			timing = fmt.Sprintf("%s...", time.Since(p.started).Truncate(time.Second))
 		}
 		lines = append(lines, fmt.Sprintf("%s %-30s %s", icon, p.message, timing))

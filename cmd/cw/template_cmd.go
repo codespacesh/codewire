@@ -48,7 +48,7 @@ func templateListCmd() *cobra.Command {
 			}
 
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "NAME\tLANGUAGE\tIMAGE\tOFFICIAL\tCPU/MEM/DISK")
+			tableHeader(w, "NAME", "LANGUAGE", "IMAGE", "OFFICIAL", "CPU/MEM/DISK")
 			for _, t := range templates {
 				slug := "--"
 				if t.Slug != nil {
@@ -151,7 +151,7 @@ Examples:
 				return fmt.Errorf("create template: %w", err)
 			}
 
-			fmt.Printf("Template created: %s\n", tmpl.Name)
+			successMsg("Template created: %s.", tmpl.Name)
 			fmt.Printf("  ID:    %s\n", tmpl.ID)
 			fmt.Printf("  Type:  %s\n", tmpl.Type)
 			return nil
@@ -208,13 +208,13 @@ func templateInfoCmd() *cobra.Command {
 				lang = *tmpl.Language
 			}
 
-			fmt.Printf("ID:       %s\n", tmpl.ID)
-			fmt.Printf("Name:     %s\n", tmpl.Name)
-			fmt.Printf("Slug:     %s\n", slug)
-			fmt.Printf("Type:     %s\n", tmpl.Type)
-			fmt.Printf("Language: %s\n", lang)
-			fmt.Printf("Official: %v\n", tmpl.Official)
-			fmt.Printf("Build:    %s\n", tmpl.BuildStatus)
+			fmt.Printf("%-10s %s\n", bold("ID:"), dim(tmpl.ID))
+			fmt.Printf("%-10s %s\n", bold("Name:"), tmpl.Name)
+			fmt.Printf("%-10s %s\n", bold("Slug:"), slug)
+			fmt.Printf("%-10s %s\n", bold("Type:"), tmpl.Type)
+			fmt.Printf("%-10s %s\n", bold("Language:"), lang)
+			fmt.Printf("%-10s %v\n", bold("Official:"), tmpl.Official)
+			fmt.Printf("%-10s %s\n", bold("Build:"), tmpl.BuildStatus)
 			fmt.Printf("CPU:      %dm\n", tmpl.DefaultCPUMillicores)
 			fmt.Printf("Memory:   %dMB\n", tmpl.DefaultMemoryMB)
 			fmt.Printf("Disk:     %dGB\n", tmpl.DefaultDiskGB)
@@ -238,7 +238,7 @@ func templateRmCmd() *cobra.Command {
 			if err := client.DeleteEnvTemplate(orgID, args[0]); err != nil {
 				return fmt.Errorf("delete template: %w", err)
 			}
-			fmt.Printf("Template %s deleted.\n", args[0])
+			successMsg("Template %s deleted.", args[0])
 			return nil
 		},
 	}

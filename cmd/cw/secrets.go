@@ -46,7 +46,7 @@ func secretsCreateCmd() *cobra.Command {
 				return fmt.Errorf("create secret project: %w", err)
 			}
 
-			fmt.Printf("Secret project %q created. (id: %s)\n", project.Name, project.ID)
+			successMsg("Secret project %q created. (id: %s)", project.Name, project.ID)
 			return nil
 		},
 	}
@@ -87,7 +87,7 @@ func secretsListCmd() *cobra.Command {
 				}
 
 				w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-				fmt.Fprintln(w, "NAME\tSECRETS\tCREATED")
+				tableHeader(w, "NAME", "SECRETS", "CREATED")
 				for _, p := range projects {
 					fmt.Fprintf(w, "%s\t%d\t%s\n", p.Name, p.SecretCount, p.CreatedAt)
 				}
@@ -118,7 +118,7 @@ func secretsListCmd() *cobra.Command {
 			}
 
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "KEY\tCREATED\tUPDATED")
+			tableHeader(w, "KEY", "CREATED", "UPDATED")
 			for _, s := range secrets {
 				fmt.Fprintf(w, "%s\t%s\t%s\n", s.Key, s.CreatedAt, s.UpdatedAt)
 			}
@@ -163,7 +163,7 @@ func secretsSetCmd() *cobra.Command {
 				return fmt.Errorf("set secret: %w", err)
 			}
 
-			fmt.Printf("Secret %s set in project %q.\n", key, projectName)
+			successMsg("Secret %s set in project %q.", key, projectName)
 			return nil
 		},
 	}
@@ -197,7 +197,7 @@ func secretsDeleteCmd() *cobra.Command {
 				if err := client.DeleteProjectSecret(oid, project.ID, key); err != nil {
 					return fmt.Errorf("delete secret: %w", err)
 				}
-				fmt.Printf("Secret %s deleted from project %q.\n", key, projectName)
+				successMsg("Secret %s deleted from project %q.", key, projectName)
 				return nil
 			}
 
@@ -219,7 +219,7 @@ func secretsDeleteCmd() *cobra.Command {
 			if err := client.DeleteSecretProject(oid, project.ID); err != nil {
 				return fmt.Errorf("delete secret project: %w", err)
 			}
-			fmt.Printf("Secret project %q deleted.\n", projectName)
+			successMsg("Secret project %q deleted.", projectName)
 			return nil
 		},
 	}
@@ -279,7 +279,7 @@ func secretsUserListCmd() *cobra.Command {
 			}
 
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "KEY\tCREATED\tUPDATED")
+			tableHeader(w, "KEY", "CREATED", "UPDATED")
 			for _, s := range secrets {
 				fmt.Fprintf(w, "%s\t%s\t%s\n", s.Key, s.CreatedAt, s.UpdatedAt)
 			}
@@ -316,7 +316,7 @@ func secretsUserSetCmd() *cobra.Command {
 				return fmt.Errorf("set user secret: %w", err)
 			}
 
-			fmt.Printf("Secret %s set.\n", key)
+			successMsg("Secret %s set.", key)
 			return nil
 		},
 	}
@@ -341,7 +341,7 @@ func secretsUserDeleteCmd() *cobra.Command {
 				return fmt.Errorf("delete user secret: %w", err)
 			}
 
-			fmt.Printf("Secret %s deleted.\n", key)
+			successMsg("Secret %s deleted.", key)
 			return nil
 		},
 	}
@@ -393,7 +393,7 @@ func secretsOrgListCmd() *cobra.Command {
 			}
 
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "KEY\tCREATED\tUPDATED")
+			tableHeader(w, "KEY", "CREATED", "UPDATED")
 			for _, s := range secrets {
 				fmt.Fprintf(w, "%s\t%s\t%s\n", s.Key, s.CreatedAt, s.UpdatedAt)
 			}
@@ -430,7 +430,7 @@ func secretsOrgSetCmd() *cobra.Command {
 				return fmt.Errorf("set org secret: %w", err)
 			}
 
-			fmt.Printf("Secret %s set.\n", key)
+			successMsg("Secret %s set.", key)
 			return nil
 		},
 	}
@@ -455,7 +455,7 @@ func secretsOrgDeleteCmd() *cobra.Command {
 				return fmt.Errorf("delete org secret: %w", err)
 			}
 
-			fmt.Printf("Secret %s deleted.\n", key)
+			successMsg("Secret %s deleted.", key)
 			return nil
 		},
 	}

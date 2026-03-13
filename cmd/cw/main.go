@@ -36,7 +36,8 @@ var (
 func main() {
 	rootCmd := &cobra.Command{
 		Use:     "cw [workspace]",
-		Short:   "Persistent process server + agent-first dev environments",
+		Short:   "Codewire CLI",
+		Long:    "  ▸ codewire\n\n  Persistent process server and agent-first dev environments.",
 		Version: version,
 		Args:    cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {

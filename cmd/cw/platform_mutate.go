@@ -34,7 +34,7 @@ func orgsCreateCmd() *cobra.Command {
 				return fmt.Errorf("create org: %w", err)
 			}
 
-			fmt.Printf("Created organization %q (slug: %s)\n", org.Name, org.Slug)
+			successMsg("Created organization %q (slug: %s).", org.Name, org.Slug)
 			return nil
 		},
 	}
@@ -87,7 +87,7 @@ func orgsDeleteCmd() *cobra.Command {
 				return fmt.Errorf("delete org: %w", err)
 			}
 
-			fmt.Println("Organization deleted.")
+			successMsg("Organization deleted.")
 			return nil
 		},
 	}
@@ -124,7 +124,7 @@ func orgsInviteCmd() *cobra.Command {
 				return fmt.Errorf("invite: %w", err)
 			}
 
-			fmt.Printf("Invited %s as %s\n", inv.Email, inv.Role)
+			successMsg("Invited %s as %s.", inv.Email, inv.Role)
 			return nil
 		},
 	}
@@ -172,7 +172,7 @@ func resourcesCreateCmd() *cobra.Command {
 				return fmt.Errorf("create resource: %w", err)
 			}
 
-			fmt.Printf("Created resource %q (slug: %s, status: %s)\n", result.Name, result.Slug, result.Status)
+			successMsg("Created resource %q (slug: %s, status: %s).", result.Name, result.Slug, result.Status)
 
 			if result.RequiresCheckout || result.CheckoutURL != "" {
 				if err := handleCheckoutAndWait(pc, result); err != nil {
@@ -227,7 +227,7 @@ func resourcesDeleteCmd() *cobra.Command {
 				return fmt.Errorf("delete resource: %w", err)
 			}
 
-			fmt.Println("Resource deleted.")
+			successMsg("Resource deleted.")
 			return nil
 		},
 	}
