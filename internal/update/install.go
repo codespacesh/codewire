@@ -95,7 +95,7 @@ func AssetName(version string) string {
 	if suffix == "" {
 		return ""
 	}
-	return fmt.Sprintf("cw-%s-%s", strings.TrimPrefix(version, "v"), suffix)
+	return fmt.Sprintf("cw-%s-%s", version, suffix)
 }
 
 func releaseURL(version, filename string) string {

@@ -138,11 +138,8 @@ func TestAssetName(t *testing.T) {
 	if name[:3] != "cw-" {
 		t.Errorf("AssetName should start with 'cw-', got %q", name)
 	}
-	if containsStr(name, "v0.2.49") {
-		t.Errorf("AssetName should strip 'v' prefix, got %q", name)
-	}
-	if !containsStr(name, "0.2.49") {
-		t.Errorf("AssetName should contain version, got %q", name)
+	if !containsStr(name, "v0.2.49") {
+		t.Errorf("AssetName should keep 'v' prefix, got %q", name)
 	}
 }
 
